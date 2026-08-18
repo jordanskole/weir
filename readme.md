@@ -12,6 +12,8 @@ Tests live in the node definition, in the same syntax as composition:
 Person { age: 41 } | birthday | expect Person { age: 42 }
 ```
 
+<img src="docs/diagrams/example-flow.svg" alt="Flowchart of weir's smallest example program: an origin produces a Person edge with age 41, the birthday node increments it to age 42, and the expect node branches into Pass or Fail depending on whether the result matches." width="820">
+
 Since nodes are pure and edges are fully specified, an edge definition is also a generator specification — so properties (`∀ p . birthday(p).age == p.age + 1`) cost about as much as examples and constrain considerably more. This matters because the implementation inside a node is expected to be written by an agent. The types bound what it can do, the properties pin down what it must do, and the topology stays the human's.
 
 ## Status
