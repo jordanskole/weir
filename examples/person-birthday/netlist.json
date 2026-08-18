@@ -1,5 +1,9 @@
 {
   "edges": {
+    "Unit": {
+      "fields": {},
+      "schemaHash": "c73deff6"
+    },
     "Person": {
       "fields": {
         "age": { "type": "uint8" }
@@ -18,7 +22,7 @@
 
   "nodes": {
     "origin_Person_literal": {
-      "input": null,
+      "input": "Unit",
       "output": "Person",
       "closure": { "literal": { "age": 41 } }
     },

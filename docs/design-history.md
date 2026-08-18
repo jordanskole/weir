@@ -169,3 +169,11 @@ The resolution was not to treat the weir as DX-only (a nice-to-have for the huma
 Precedent: a query planner picks a different plan every execution, cost-based, and nobody worries — relational algebra guarantees the *result* is correct regardless of which plan the optimizer picks. The target for agent-routed weir topologies is the same property: any route the agent takes is correct by construction, because an incorrect route is structurally impossible to construct, not just discouraged.
 
 This means the decisions made early for reasons that read as pure DX — nominal refinement on branching nodes, total contracts, no row polymorphism — turn out to matter more, not less, once the topology is chosen by a model at runtime instead of declared by a human ahead of time.
+
+## Relation/Cardinality: ontology, not a wiring bypass
+
+Raised while reading `types.ts` during node-declarations work: `FieldDef.relation` (`{edge, field, cardinality}`, ported wholesale from bankql — see "Prior art" above) looked at first glance like it might let one edge join to another directly, bypassing nodes — which would break "wiring is always declared explicitly, node by node" (see "Nominal edges" above).
+
+It doesn't. `relation`/`Cardinality` (`1:1`, `1:many`, `many:1`, `many:many`) is ontology metadata — a domain fact, the same role a foreign key plays in a relational schema — not a routing mechanism. No edge instance ever reaches another edge's data without a node in between; a `Relation` only tells whoever (or whatever agent) is authoring a node's body what shape of lookup it's implementing. A node enriching `Order` with its `Customer` implements the `many:1` side and should declare `single Customer` output; a node fetching a customer's orders implements the `1:many` side and should declare `many Order`. `many:many` almost always wants a junction edge rather than collapsing into one node.
+
+So `Relation.cardinality` and `OutputSpec`'s `single`/`oneOf`/`allOf`/`many` (see "Fan-out is three different things" above) are the same vocabulary at two different layers: `Relation` is a fact about the domain; `OutputSpec` is what a specific node declares it produces when it chooses to enact that fact. Nothing currently checks the two agree — that's a legitimate future validation, not yet built.

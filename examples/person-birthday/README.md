@@ -21,11 +21,11 @@ more than one example run is probably right.
 **2. The origin's literal value is a node, not free-floating data.** `Person { age: 41 }` at the
 start of the composition isn't part of any node's declared contract — it's baked into a concrete
 `origin_Person_literal` node via the same monomorphization elaboration already does for generics
-(`docs/design-history.md`, "Generics: elaboration monomorphizes"). Its `input` is `null`, marking it
-as an origin (`docs/design.md` §5: "an origin is an ordinary node whose input is the unit edge — the
-only special edge"). **Open question:** should `input: null` here actually be `input: "Unit"`, a
-real declared edge, so origins aren't a special case in the schema? Right now this file treats
-`null` as that unit edge without naming it.
+(`docs/design-history.md`, "Generics: elaboration monomorphizes"). Its `input` is `"Unit"`
+(`docs/design.md` §5: "an origin is an ordinary node whose input is the unit edge — the only
+special edge"). **Resolved** (step 2, node declarations): `Unit` is a real declared edge with no
+fields, not `null` standing in for it — origins aren't a schema-level special case, every node's
+input is a named edge. See `spikes/ts-prototype/src/types.ts`'s `Unit` export.
 
 **3. `expect Person { age: 42 }` is a node closing over a literal, the same way.** `expect` isn't
 generic machinery here — `expect_Person_age_42` is a concrete node, `Person -> one of {Pass, Fail}`,
