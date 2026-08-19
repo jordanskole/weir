@@ -14,6 +14,6 @@ Things raised in the design conversation that were not resolved — as opposed t
 
 - **Serialization format for the netlist/log.** JSON was used for illustration throughout, but never chosen deliberately. Matters more than it looks: whatever format is picked has to carry schema hashes, envelope fields, and (per design-history.md) a strict boundary where no type variable ever appears in an emitted netlist.
 
-- **Which host language elaborates.** TypeScript, OCaml, a DSL, and Rust macros were all named as candidates early on (23:38) with no follow-up decision. The getting-started plan assumes *something* exists to write the elaborator in, but doesn't commit.
+- **Which host language elaborates.** TypeScript, OCaml, a DSL, and Rust macros were all named as candidates early on (23:38) with no follow-up decision. Current lean is OCaml, not settled. A TS spike exists ([`spikes/ts-prototype/`](../spikes/ts-prototype/)) to validate the edge/hash design cheaply — it's a prototype for the *ideas*, not a claim on the eventual language, and the identity-function inference trick it relies on (`defineField`/`defineEdge`) is TS-specific and won't carry over to OCaml as-is.
 
 - **Where do client/server and PII-obfuscation-at-the-client map onto nodes and edges?** Raised directly as unresolved — existing prior art (an earlier project's design that labels fields as PII and obfuscates client-side) doesn't have an obvious node/edge mapping yet. Possibly resolves as an "upstream" node, but that was a guess, not a decision.

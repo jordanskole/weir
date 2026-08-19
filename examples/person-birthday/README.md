@@ -2,7 +2,9 @@
 
 The hand-authored netlist [getting-started.md](../../docs/getting-started.md) asked for, for the
 smallest program in the design docs. `schemaHash` values in `netlist.json` are real —
-computed by `hashEdge()` (`src/hash.ts`) against the edge definitions below, not placeholders.
+computed by `hashEdge()` (`spikes/ts-prototype/src/hash.ts`) against the edge definitions below,
+not placeholders — that TS module is a spike for validating the hashing design, not a claim about
+the eventual host language (see `spikes/ts-prototype/README.md`).
 
 This is a first draft, not a ratified format. Per the getting-started plan, writing it down was
 supposed to force implicit decisions into the open — here's what got decided, and where I picked
