@@ -1,0 +1,90 @@
+{
+  "edges": {
+    "Person": {
+      "fields": {
+        "age": { "type": "uint8" }
+      },
+      "schemaHash": "4b7c35de"
+    },
+    "Pass": {
+      "fields": {},
+      "schemaHash": "c5d6ca8d"
+    },
+    "Fail": {
+      "fields": {},
+      "schemaHash": "10f3815f"
+    }
+  },
+
+  "nodes": {
+    "origin_Person_literal": {
+      "input": null,
+      "output": "Person",
+      "closure": { "literal": { "age": 41 } }
+    },
+    "birthday": {
+      "input": "Person",
+      "output": "Person"
+    },
+    "expect_Person_age_42": {
+      "input": "Person",
+      "output": { "oneOf": ["Pass", "Fail"] },
+      "closure": { "expected": { "age": 42 } }
+    }
+  },
+
+  "topology": {
+    "origin": "origin#1",
+    "instances": {
+      "origin#1": { "node": "origin_Person_literal" },
+      "birthday#1": { "node": "birthday" },
+      "expect#1": { "node": "expect_Person_age_42" }
+    },
+    "wires": [
+      { "from": "origin#1", "to": "birthday#1" },
+      { "from": "birthday#1", "to": "expect#1" }
+    ]
+  },
+
+  "trace": {
+    "correlationId": "run-1",
+    "instances": [
+      {
+        "instance": "origin#1",
+        "edge": "Person",
+        "payload": { "age": 41 },
+        "envelope": {
+          "id": "env-1",
+          "correlationId": "run-1",
+          "causationId": null,
+          "step": 0,
+          "schemaHash": "4b7c35de"
+        }
+      },
+      {
+        "instance": "birthday#1",
+        "edge": "Person",
+        "payload": { "age": 42 },
+        "envelope": {
+          "id": "env-2",
+          "correlationId": "run-1",
+          "causationId": "env-1",
+          "step": 1,
+          "schemaHash": "4b7c35de"
+        }
+      },
+      {
+        "instance": "expect#1",
+        "edge": "Pass",
+        "payload": {},
+        "envelope": {
+          "id": "env-3",
+          "correlationId": "run-1",
+          "causationId": "env-2",
+          "step": 2,
+          "schemaHash": "c5d6ca8d"
+        }
+      }
+    ]
+  }
+}
