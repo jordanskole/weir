@@ -65,9 +65,20 @@ Node outputs come in three distinct modes, which must not be conflated:
 
 Copy is a **wiring** fact (one edge to N consumers), not a node output mode.
 
-**Failure is an edge.** Every node's real output signature includes `Failed`. Retry is
-a node consuming `Failed`; dead-letter is a node with no output. Unhandled failure is a
-type error, not a runtime surprise.
+**Failure is an edge.** Every node's real output signature includes `Failed<In>`,
+parameterized by the failing node's own input: `{ input: PayloadOf<In>, reason? }` — it
+carries the original payload so a retry node has something to re-emit, not just a
+notification that something went wrong. Retry is a node consuming `Failed<In>`;
+dead-letter is a node with no output. Unhandled failure is a type error, not a runtime
+surprise — that check requires `Failed` to be a real, wired branch, not a nullable field
+an envelope might happen to carry; nothing forces a nullable field to be handled.
+
+Authors don't hand-write the catch. The runtime wraps every `Fn` invocation by default —
+an uncaught exception becomes `Failed<In>` automatically, `reason` populated from
+whatever was thrown. An author who wants a specific `reason` or a distinguishable
+failure mode can construct and return `Failed<In>` explicitly instead; nothing obligates
+it. Same shape as `env` already being opt-in on `Fn` — implicit by default, more control
+available if you reach for it.
 
 ---
 
@@ -129,6 +140,18 @@ Properties matter more than examples: a single example underdetermines the funct
 the implementing agent can see the test. Edge definitions double as generator specs
 (`age: uint8` supplies the domain, `enumValues` the cases), so property tests are close
 to free here.
+
+**Generation, not mocking.** A property test runs the real `Fn` against a generated
+input — there is nothing to fake, because nodes have no impure dependencies to isolate
+from (§5, effects are data). An example is a real invocation with a chosen input, not a
+substitute for one; mocking exists to manage impurity this design doesn't have. Per-field
+generators come straight from `FieldDef` the same way every other derived artifact does
+— `type` bounds the domain, `enumValues` enumerates it — composed into a whole-edge
+generator. Examples and generated cases aren't redundant: examples are hand-picked to be
+legible, what a reviewer reads to see intent; generated cases are unbiased breadth a
+human wouldn't think to write by hand. Acceptance (§10) requires both — an implementation
+that passes generated cases inconsistently against an *unchanged* contract is exposing
+underdetermined examples, not implementation flakiness, and the fix is to the contract.
 
 **Risk ordering, highest first: ontology, topology, examples, implementation.** Ontology
 has no mechanical check — nothing can tell you the edge set carves the domain correctly
@@ -216,3 +239,38 @@ necessary ones.
 Because edge instances are typed and causally logged, recurring dynamic paths can be
 mined from history and promoted into fixed subgraphs — probabilistic where the shape
 isn't known yet, deterministic once it is.
+
+---
+
+## 10. Authoring format
+
+Edges, nodes, and topologies are authored as real files — `.edge`, `.node`, `.topology`
+— real YAML, no bespoke grammar. Schema-driven editor support (validation, completion,
+hover docs) is generated mechanically from the same types that already validate
+everything else; deferred, not designed away.
+
+`.edge` and `.topology` are pure data — every field maps directly onto existing types,
+nothing missing. `.node` is not: `Fn` is host code, which a data format can't and
+shouldn't hold (§5, "implementations are build output"). A `.node` file declares the
+contract only — name, input, output, examples, closure — never the body.
+
+**The seam.** Contract and implementation are two artifacts, connected by convention and
+kept in sync by tooling, not memory — the elaborator (§4) scaffolds and wires the
+pairing the same way it already resolves closures and monomorphizes generics.
+
+**Versioning.** Each node gets a directory, not a file, for implementations —
+`Birthday/<contract-hash>.ts` — one *accepted* implementation per contract state,
+written once it passes both its examples and generated property cases (§6), never
+overwritten. Draft attempts an agent iterates on before acceptance aren't versions and
+don't live here; only what passes gets written. A new file is generated when the node's
+schema hash (§5) no longer matches the one an accepted implementation exists for, the
+same staleness check already used for edges, applied one layer down. If regenerating
+against an *unchanged* contract ever produces a different accept/reject outcome, that's
+underdetermination in the examples (§6), not a versioning case — fix the contract, don't
+paper over it with more storage. Nothing is destructively regenerated; every accepted
+implementation a node ever had stays reachable.
+
+**Replay.** An invocation records which implementation version it actually ran under,
+immutable once written, alongside `causation_id` and `schema_hash` in the envelope.
+Redeploying a node's implementation never touches invocations already in flight — they
+stay pinned to the version they started under; only new invocations pick up the new one.
