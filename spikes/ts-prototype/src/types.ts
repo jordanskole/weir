@@ -86,6 +86,15 @@ export type Payload<F extends Record<string, FieldDef>> = {
 export type PayloadOf<E extends EdgeDef> = Payload<E["fields"]>;
 
 /**
+ * The principal an invocation runs as — the "on behalf of" (docs/design-history.md,
+ * "Identity is the actor, edges are the resource"). Every invocation has one, even a
+ * system/scheduler-triggered one; there is no identity-less execution. Placeholder
+ * shape until the actor model is designed — `Unit`'s idiom, not `{}` (which types
+ * as "any non-nullish value", not "empty object").
+ */
+export type Identity = Record<string, never>;
+
+/**
  * Per-invocation metadata wrapping every edge instance (docs/design.md §1).
  * A node's Fn does not see this by default; a second `env` parameter is
  * what opts a node into being context-dependent (routers, dedupers).
@@ -96,7 +105,7 @@ export interface Envelope {
   causationId: string | null;
   timestamp: string;
   step: number;
-  identity?: string;
+  identity: Identity;
   schemaHash: string;
 }
 
@@ -168,5 +177,8 @@ export interface NodeDef<In extends EdgeDef = EdgeDef, O extends OutputSpec = Ou
    * expect's expected value (docs/design-history.md, "Generics: elaboration
    * monomorphizes"; examples/person-birthday/README.md decision 4).
    */
-  closure?: Record<string, unknown>;
+  closure?: ExpectClosure<In> | LiteralClosure<O>;
 }
+
+type ExpectClosure<In extends EdgeDef> = { expected: PayloadOf<In> };
+type LiteralClosure<O extends OutputSpec> = { literal: OutputResult<O> };
