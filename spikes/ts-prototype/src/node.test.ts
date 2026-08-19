@@ -17,6 +17,7 @@ describe("defineNode", () => {
       input: Person,
       output: single(Person),
       fn: (person: { age: number }) => person,
+      closure: { literal: { age: 42 } }
     };
     expect(defineNode(node)).toBe(node);
   });
@@ -58,7 +59,7 @@ describe("defineNode", () => {
       input: Unit,
       output: single(Person),
       closure: { literal: { age: 41 } },
-      fn: () => ({ age: 41 }),
+      fn: () => ({ age: 41 }),      
     });
 
     expect(originPersonLiteral.fn({})).toEqual({ age: 41 });
@@ -76,7 +77,7 @@ describe("defineNode", () => {
       fn: () => [
         { edge: "InvoiceRequested", payload: {} },
         { edge: "InventoryReserved", payload: {} },
-      ],
+      ] as const,
     });
 
     expect(placeOrder.fn({})).toEqual([
