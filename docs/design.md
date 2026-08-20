@@ -256,7 +256,25 @@ contract only — name, input, output, examples, closure — never the body.
 
 **The seam.** Contract and implementation are two artifacts, connected by convention and
 kept in sync by tooling, not memory — the elaborator (§4) scaffolds and wires the
-pairing the same way it already resolves closures and monomorphizes generics.
+pairing the same way it already resolves closures and monomorphizes generics. The
+separation is structural, not just two extensions in one folder: declarations
+(`.edge`/`.node`/`.topology`) and implementations live in genuinely different trees, a
+real package boundary — a production fintech platform's `packages/schemas` (declarative)
+vs. `apps/durable-functions` (runtime) is the precedent, not just an analogy. A `.node`
+file's schema carries no field for `fn` at all — the contract doesn't reference its
+implementation, doesn't know whether one exists yet. The elaborator resolves
+`{node-name}/{contract-hash}.ts` in the implementation tree by name alone, the same way
+that platform's `actionRegistry` never stores a handler's file path — mapping by
+convention, enforced by codegen, not by a stored reference. An explicit path field would
+also have to survive being resolved across that package boundary, which a bare name
+doesn't need to.
+
+For an application built with weir (not this repo, which has no such application yet):
+suggested top-level names are `declarations/` and `implementations/`, echoing vocabulary
+already in use above (§4's "declarations live in source"; "the implementation becomes
+disposable," design-history.md). Organization *within* `declarations/` isn't prescribed
+— the elaborator globs by extension, not by folder convention, so grouping by domain,
+by feature, or flat is an authoring choice, not a framework rule.
 
 **Versioning.** Each node gets a directory, not a file, for implementations —
 `Birthday/<contract-hash>.ts` — one *accepted* implementation per contract state,
