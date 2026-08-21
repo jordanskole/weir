@@ -1,0 +1,9 @@
+name: birthday
+description: Increments a person's age by one year
+input: Person
+output: Person
+examples:
+  - given:
+      age: 41
+    expect:
+      age: 42

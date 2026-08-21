@@ -1,0 +1,10 @@
+name: expect_Person_age_42
+description: Checks whether a person just turned 42
+input: Person
+output:
+  oneOf:
+    - Pass
+    - Fail
+closure:
+  expected:
+    age: 42
