@@ -1,4 +1,3 @@
-# yaml-language-server: $schema=./field.schema.json
 name: email
 type: utf8
 label: Email

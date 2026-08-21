@@ -4,5 +4,10 @@
     "*.edge": "yaml",
     "*.node": "yaml",
     "*.topology": "yaml"
+  },
+  "yaml.schemas": {
+    "./schemas/field.schema.json": "**/*.field",
+    "./schemas/edge.schema.json": "**/*.edge",
+    "./schemas/node.schema.json": "**/*.node"
   }
 }

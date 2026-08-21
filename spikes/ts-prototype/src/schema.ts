@@ -168,3 +168,78 @@ export function edgeSchema(): object {
     additionalProperties: false,
   };
 }
+
+const edgeName = { type: "string", minLength: 1 };
+const edgeNameList = { type: "array", items: edgeName, minItems: 1 };
+
+/**
+ * Generates a JSON Schema for a `.node` file — the contract only, per §10:
+ * no `fn`, name/input/output/examples/closure. `input`/`output` reference
+ * edges by bare name, resolved elsewhere (by the elaborator, not this
+ * schema). `given`/`expect`/`expected`/`literal` payloads are deliberately
+ * unconstrained here — matching them against the shape the referenced edge
+ * actually declares needs cross-file information a static schema doesn't
+ * have; that's the elaborator's/generator's job (§6), not this one's.
+ */
+export function nodeSchema(): object {
+  return {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "Weir node",
+    type: "object",
+    required: ["name", "input", "output"],
+    properties: {
+      name: { type: "string" },
+      description: { type: "string" },
+      input: edgeName,
+      output: {
+        oneOf: [
+          edgeName,
+          {
+            type: "object",
+            properties: { oneOf: edgeNameList },
+            required: ["oneOf"],
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            properties: { allOf: edgeNameList },
+            required: ["allOf"],
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            properties: { many: edgeName },
+            required: ["many"],
+            additionalProperties: false,
+          },
+        ],
+      },
+      examples: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["given", "expect"],
+          properties: { given: {}, expect: {} },
+          additionalProperties: false,
+        },
+      },
+      closure: {
+        oneOf: [
+          {
+            type: "object",
+            properties: { expected: {} },
+            required: ["expected"],
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            properties: { literal: {} },
+            required: ["literal"],
+            additionalProperties: false,
+          },
+        ],
+      },
+    },
+    additionalProperties: false,
+  };
+}

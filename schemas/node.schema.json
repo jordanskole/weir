@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Weir node",
+  "type": "object",
+  "required": [
+    "name",
+    "input",
+    "output"
+  ],
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "input": {
+      "type": "string",
+      "minLength": 1
+    },
+    "output": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "properties": {
+            "oneOf": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "oneOf"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "allOf": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "allOf"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "many": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "many"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "examples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "given",
+          "expect"
+        ],
+        "properties": {
+          "given": {},
+          "expect": {}
+        },
+        "additionalProperties": false
+      }
+    },
+    "closure": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "expected": {}
+          },
+          "required": [
+            "expected"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "literal": {}
+          },
+          "required": [
+            "literal"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

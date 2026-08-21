@@ -1,16 +1,17 @@
 /**
  * Regenerates the JSON Schema files editor tooling (VS Code's
- * redhat.vscode-yaml / yaml-language-server) validates `.field`/`.edge`
- * files against. Mechanical output of schema.ts — never hand-edit the
- * generated files, re-run this instead: `npm run generate:schemas`.
+ * redhat.vscode-yaml / yaml-language-server) validates `.field`/`.edge`/
+ * `.node` files against. Mechanical output of schema.ts — never hand-edit
+ * the generated files, re-run this instead: `npm run generate:schemas`.
  */
 
 import { writeFile } from "node:fs/promises";
-import { edgeSchema, fieldSchema } from "../src/schema.js";
+import { edgeSchema, fieldSchema, nodeSchema } from "../src/schema.js";
 
 const targets: [string, object][] = [
-  ["../../../examples/person-birthday/src/fields/field.schema.json", fieldSchema()],
-  ["../../../examples/person-birthday/src/edges/edge.schema.json", edgeSchema()],
+  ["../../../schemas/field.schema.json", fieldSchema()],
+  ["../../../schemas/edge.schema.json", edgeSchema()],
+  ["../../../schemas/node.schema.json", nodeSchema()],
 ];
 
 for (const [target, schema] of targets) {

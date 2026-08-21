@@ -1,6 +1,6 @@
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
-import { edgeSchema, fieldSchema } from "./schema.js";
+import { edgeSchema, fieldSchema, nodeSchema } from "./schema.js";
 
 const ajv = new Ajv2020({ strict: false });
 
@@ -170,6 +170,142 @@ describe("edgeSchema", () => {
           validations: { pattern: "^[0-9]+$" },
         },
       },
+    });
+    expect(valid).toBe(false);
+  });
+});
+
+describe("nodeSchema", () => {
+  it("accepts a minimal node with single-edge sugar for output", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      name: "birthday",
+      description: "d",
+      input: "Person",
+      output: "Person",
+    });
+    expect(validate.errors).toBeNull();
+    expect(valid).toBe(true);
+  });
+
+  it("rejects a node missing required top-level properties", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({ name: "birthday" });
+    expect(valid).toBe(false);
+  });
+
+  it("rejects a node carrying an fn key — contract only, no implementation", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      name: "birthday",
+      description: "d",
+      input: "Person",
+      output: "Person",
+      fn: "() => {}",
+    });
+    expect(valid).toBe(false);
+  });
+
+  it("accepts a oneOf output", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      name: "expect_Person_age_42",
+      description: "d",
+      input: "Person",
+      output: { oneOf: ["Pass", "Fail"] },
+    });
+    expect(valid).toBe(true);
+  });
+
+  it("accepts an allOf output", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      name: "place_order",
+      description: "d",
+      input: "OrderPlaced",
+      output: { allOf: ["InvoiceRequested", "InventoryReserved"] },
+    });
+    expect(valid).toBe(true);
+  });
+
+  it("accepts a many output", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      name: "siblings",
+      description: "d",
+      input: "Person",
+      output: { many: "Person" },
+    });
+    expect(valid).toBe(true);
+  });
+
+  it("rejects an output with more than one shape key at once", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      name: "bad",
+      description: "d",
+      input: "Person",
+      output: { oneOf: ["Pass"], allOf: ["Fail"] },
+    });
+    expect(valid).toBe(false);
+  });
+
+  it("accepts examples as a list of given/expect", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      name: "birthday",
+      description: "d",
+      input: "Person",
+      output: "Person",
+      examples: [{ given: { age: 41 }, expect: { age: 42 } }],
+    });
+    expect(valid).toBe(true);
+  });
+
+  it("accepts a closure with expected", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      name: "expect_Person_age_42",
+      description: "d",
+      input: "Person",
+      output: { oneOf: ["Pass", "Fail"] },
+      closure: { expected: { age: 42 } },
+    });
+    expect(valid).toBe(true);
+  });
+
+  it("accepts a closure with literal", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      name: "origin_Person_literal",
+      description: "d",
+      input: "Unit",
+      output: "Person",
+      closure: { literal: { age: 41 } },
+    });
+    expect(valid).toBe(true);
+  });
+
+  it("rejects a closure with both expected and literal", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      name: "bad",
+      description: "d",
+      input: "Person",
+      output: "Person",
+      closure: { expected: { age: 41 }, literal: { age: 41 } },
+    });
+    expect(valid).toBe(false);
+  });
+
+  it("rejects a closure with neither expected nor literal", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      name: "bad",
+      description: "d",
+      input: "Person",
+      output: "Person",
+      closure: {},
     });
     expect(valid).toBe(false);
   });
