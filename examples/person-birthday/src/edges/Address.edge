@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=./edge.schema.json
+name: Address
+description: A mailing address
+fields:
+  street:
+    type: utf8
+    label: Street
+    description: Street address
+    validations:
+      minLength: 1
+      maxLength: 200

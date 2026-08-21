@@ -40,25 +40,56 @@ export interface Relation {
 /** Rich metadata for a single field on an edge. */
 export interface FieldDef<T extends ScalarType = ScalarType> {
   type: T;
-  label?: string;
-  description?: string;
+  label: string;
+  description: string;
   measure?: Measure;
   format?: Format;
   unit?: string;
   enumValues?: string[];
   relation?: Relation;
+  validations?: Validation<T>;
   /** Original field name in an upstream source, where this edge is derived from one. */
   sourceKey?: string;
 }
 
+type NumberValidation = { 
+  min?: number;
+  max?: number;
+}
+  
+type StringValidation = {
+  pattern?: string;
+  minLength?: number;
+  maxLength?: number;
+}
+
+type Validation<T extends ScalarType> = T extends "uint8" | "uint16" | "uint32" | "int8" | "int16" | "int32" | "f32" | "f64"
+? NumberValidation
+: T extends "utf8"
+  ? StringValidation
+  : never;
+
+
+
 /** An edge definition: name, optional index field, and field map. */
-export interface EdgeDef<F extends Record<string, FieldDef> = Record<string, FieldDef>> {
+export interface EdgeDef<F extends Record<string, FieldDef | AnyEdgeDef> = Record<string, FieldDef>> {
   name: string;
-  description?: string;
+  description: string;
   /** Field that uniquely identifies an instance, where one exists. */
   index?: string;
   fields: F;
 }
+
+/**
+ * An EdgeDef whose fields may include compound (nested-edge) fields, not just
+ * scalars, at any nesting depth — self-referential on purpose, so a compound
+ * field's own fields can themselves contain compound fields. A bare `EdgeDef`
+ * (no type argument) resolves to `EdgeDef`'s narrow default
+ * (`Record<string, FieldDef>`), not its wider constraint — so anywhere a
+ * generic bound needs to admit a compound edge, it must say so with this
+ * alias rather than writing `EdgeDef` bare.
+ */
+export type AnyEdgeDef = EdgeDef<Record<string, FieldDef | AnyEdgeDef>>;
 
 /**
  * The unit edge — the only special edge (docs/design.md §5). An origin
@@ -67,6 +98,7 @@ export interface EdgeDef<F extends Record<string, FieldDef> = Record<string, Fie
  */
 export const Unit: EdgeDef<Record<string, never>> = {
   name: "Unit",
+  description: "The unit edge — an origin node's input, carrying no data.",
   fields: {},
 };
 
@@ -77,13 +109,21 @@ export type ScalarTsType<T extends ScalarType> = T extends "utf8"
     ? boolean
     : number;
 
-/** The runtime payload shape produced by a field map. */
-export type Payload<F extends Record<string, FieldDef>> = {
-  [K in keyof F]: F[K] extends FieldDef<infer T> ? ScalarTsType<T> : never;
+/**
+ * The runtime payload shape produced by a field map. A field is either a
+ * scalar (FieldDef) or a compound, nested edge (EdgeDef) — the recursive
+ * case computes that nested edge's own payload shape the same way.
+ */
+export type Payload<F extends Record<string, FieldDef | AnyEdgeDef>> = {
+  [K in keyof F]: F[K] extends FieldDef<infer T>
+    ? ScalarTsType<T>
+    : F[K] extends AnyEdgeDef
+      ? PayloadOf<F[K]>
+      : never;
 };
 
 /** The runtime payload shape of an edge definition. */
-export type PayloadOf<E extends EdgeDef> = Payload<E["fields"]>;
+export type PayloadOf<E extends AnyEdgeDef> = Payload<E["fields"]>;
 
 /**
  * The principal an invocation runs as — the "on behalf of" (docs/design-history.md,
@@ -116,25 +156,25 @@ export interface Envelope {
  * docs/design-history.md, "Fan-out is three different things").
  */
 export type OutputSpec =
-  | { kind: "single"; edge: EdgeDef }
-  | { kind: "oneOf"; edges: EdgeDef[] }
-  | { kind: "allOf"; edges: EdgeDef[] }
-  | { kind: "many"; edge: EdgeDef };
+  | { kind: "single"; edge: AnyEdgeDef }
+  | { kind: "oneOf"; edges: AnyEdgeDef[] }
+  | { kind: "allOf"; edges: AnyEdgeDef[] }
+  | { kind: "many"; edge: AnyEdgeDef };
 
 /** One branch of a oneOf/allOf result: which edge fired, and its payload. */
-type Tagged<E extends EdgeDef> = { edge: E["name"]; payload: PayloadOf<E> };
+type Tagged<E extends AnyEdgeDef> = { edge: E["name"]; payload: PayloadOf<E> };
 
 /** The value a node's Fn must return, given its declared OutputSpec. */
 export type OutputResult<O extends OutputSpec> = O extends {
   kind: "single";
-  edge: infer E extends EdgeDef;
+  edge: infer E extends AnyEdgeDef;
 }
   ? PayloadOf<E>
-  : O extends { kind: "oneOf"; edges: infer Es extends EdgeDef[] }
-    ? { [I in keyof Es]: Es[I] extends EdgeDef ? Tagged<Es[I]> : never }[number]
-    : O extends { kind: "allOf"; edges: infer Es extends EdgeDef[] }
-      ? { [I in keyof Es]: Es[I] extends EdgeDef ? Tagged<Es[I]> : never }
-      : O extends { kind: "many"; edge: infer E extends EdgeDef }
+  : O extends { kind: "oneOf"; edges: infer Es extends AnyEdgeDef[] }
+    ? { [I in keyof Es]: Es[I] extends AnyEdgeDef ? Tagged<Es[I]> : never }[number]
+    : O extends { kind: "allOf"; edges: infer Es extends AnyEdgeDef[] }
+      ? { [I in keyof Es]: Es[I] extends AnyEdgeDef ? Tagged<Es[I]> : never }
+      : O extends { kind: "many"; edge: infer E extends AnyEdgeDef }
         ? PayloadOf<E>[]
         : never;
 
@@ -144,7 +184,7 @@ export type OutputResult<O extends OutputSpec> = O extends {
  * a string reference — see spikes/ts-prototype/README.md for why a spike
  * represents "Fn reference" as a real typed function.
  */
-export type Fn<In extends EdgeDef, O extends OutputSpec> = (
+export type Fn<In extends AnyEdgeDef, O extends OutputSpec> = (
   payload: PayloadOf<In>,
   env?: Envelope,
 ) => OutputResult<O> | Promise<OutputResult<O>>;
@@ -154,7 +194,7 @@ export type Fn<In extends EdgeDef, O extends OutputSpec> = (
  * (docs/design.md §6). Composition-syntax parsing doesn't exist yet
  * (getting-started.md step 3); this is the typed equivalent.
  */
-export interface Example<In extends EdgeDef, O extends OutputSpec> {
+export interface Example<In extends AnyEdgeDef, O extends OutputSpec> {
   given: PayloadOf<In>;
   expect: OutputResult<O>;
 }
@@ -165,7 +205,7 @@ export interface Example<In extends EdgeDef, O extends OutputSpec> {
  * body is a subgraph, which has no representation yet (topology/elaborator
  * are steps 3-4).
  */
-export interface NodeDef<In extends EdgeDef = EdgeDef, O extends OutputSpec = OutputSpec> {
+export interface NodeDef<In extends AnyEdgeDef = AnyEdgeDef, O extends OutputSpec = OutputSpec> {
   name: string;
   description?: string;
   input: In;
@@ -180,5 +220,5 @@ export interface NodeDef<In extends EdgeDef = EdgeDef, O extends OutputSpec = Ou
   closure?: ExpectClosure<In> | LiteralClosure<O>;
 }
 
-type ExpectClosure<In extends EdgeDef> = { expected: PayloadOf<In> };
+type ExpectClosure<In extends AnyEdgeDef> = { expected: PayloadOf<In> };
 type LiteralClosure<O extends OutputSpec> = { literal: OutputResult<O> };

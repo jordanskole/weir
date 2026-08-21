@@ -3,8 +3,13 @@
  *
  * Produces a deterministic SHA-256 fingerprint of an EdgeDef's structural
  * shape. Only structural fields are included — changes to description, unit,
- * or sourceKey do not affect the hash. Every edge instance in the log carries
- * the schema hash of the definition it was written under (docs/design.md §5);
+ * or sourceKey do not affect the hash. `validations` (min/max/minLength/
+ * maxLength/pattern) is structural: it changes what values are valid, same
+ * as enumValues. A compound (nested-edge) field fingerprints as that edge's own
+ * fingerprint, recursively — a change anywhere in a nested edge's shape changes
+ * the parent's hash too, same as a change to a scalar field would. Every edge
+ * instance in the log carries the schema hash of the definition it was written
+ * under (docs/design.md §5);
  * replay compares recorded hash to current definition and either migrates
  * through a declared rule or refuses.
  *
@@ -15,15 +20,25 @@
  * (>=20) and modern browsers.
  */
 
-import type { EdgeDef, FieldDef } from "./types.js";
+import type { AnyEdgeDef, FieldDef } from "./types.js";
 
-interface FieldFingerprint {
+interface ScalarFieldFingerprint {
   type: string;
   measure?: string;
   format?: string;
   enumValues?: string[];
   relation?: { edge: string; field: string; cardinality: string };
+  validations?: {
+    min?: number;
+    max?: number;
+    minLength?: number;
+    maxLength?: number;
+    pattern?: string;
+  };
 }
+
+/** A compound (nested-edge) field fingerprints as its own edge's fingerprint, recursively. */
+type FieldFingerprint = ScalarFieldFingerprint | { edge: EdgeFingerprint };
 
 interface EdgeFingerprint {
   name: string;
@@ -31,12 +46,19 @@ interface EdgeFingerprint {
   fields: Record<string, FieldFingerprint>;
 }
 
-function fingerprint(edge: EdgeDef): EdgeFingerprint {
+function fingerprint(edge: AnyEdgeDef): EdgeFingerprint {
   const fields: Record<string, FieldFingerprint> = {};
 
   for (const key of Object.keys(edge.fields).sort()) {
-    const f = edge.fields[key] as FieldDef;
-    const entry: FieldFingerprint = { type: f.type };
+    const value = edge.fields[key] as FieldDef | AnyEdgeDef;
+
+    if ("fields" in value) {
+      fields[key] = { edge: fingerprint(value) };
+      continue;
+    }
+
+    const f = value;
+    const entry: ScalarFieldFingerprint = { type: f.type };
     if (f.measure !== undefined) entry.measure = f.measure;
     if (f.format !== undefined) entry.format = f.format;
     if (f.enumValues !== undefined) entry.enumValues = [...f.enumValues].sort();
@@ -46,6 +68,18 @@ function fingerprint(edge: EdgeDef): EdgeFingerprint {
         field: f.relation.field,
         cardinality: f.relation.cardinality,
       };
+    }
+    const v = f.validations as
+      | { min?: number; max?: number; minLength?: number; maxLength?: number; pattern?: string }
+      | undefined;
+    if (v !== undefined) {
+      const validations: ScalarFieldFingerprint["validations"] = {};
+      if (v.min !== undefined) validations.min = v.min;
+      if (v.max !== undefined) validations.max = v.max;
+      if (v.minLength !== undefined) validations.minLength = v.minLength;
+      if (v.maxLength !== undefined) validations.maxLength = v.maxLength;
+      if (v.pattern !== undefined) validations.pattern = v.pattern;
+      if (Object.keys(validations).length > 0) entry.validations = validations;
     }
     fields[key] = entry;
   }
@@ -70,7 +104,7 @@ function toHex(buffer: ArrayBuffer): string {
     .join("");
 }
 
-export async function hashEdge(edge: EdgeDef): Promise<SchemaHash> {
+export async function hashEdge(edge: AnyEdgeDef): Promise<SchemaHash> {
   const json = JSON.stringify(fingerprint(edge));
   const bytes = new TextEncoder().encode(json);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -78,7 +112,7 @@ export async function hashEdge(edge: EdgeDef): Promise<SchemaHash> {
   return { hash, short: hash.slice(0, 8) };
 }
 
-export async function hashEdges(edges: EdgeDef[]): Promise<Record<string, SchemaHash>> {
+export async function hashEdges(edges: AnyEdgeDef[]): Promise<Record<string, SchemaHash>> {
   const entries = await Promise.all(
     edges.map(async (e) => [e.name, await hashEdge(e)] as const),
   );
@@ -90,7 +124,7 @@ export async function hashEdges(edges: EdgeDef[]): Promise<Record<string, Schema
  * Throws if the hash has changed — useful in tests or replay to catch
  * accidental schema drift.
  */
-export async function assertEdgeHash(edge: EdgeDef, expectedShort: string): Promise<void> {
+export async function assertEdgeHash(edge: AnyEdgeDef, expectedShort: string): Promise<void> {
   const { short, hash } = await hashEdge(edge);
   if (short !== expectedShort) {
     throw new Error(

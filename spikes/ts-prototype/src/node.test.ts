@@ -4,11 +4,29 @@ import { Unit } from "./types.js";
 
 const Person = defineEdge({
   name: "Person",
-  fields: { age: defineField({ type: "uint8" }) },
+  description: "A person",
+  fields: { age: defineField({ type: "uint8", label: "Age", description: "The person's age" }) },
 });
 
-const Pass = defineEdge({ name: "Pass", fields: {} });
-const Fail = defineEdge({ name: "Fail", fields: {} });
+const Pass = defineEdge({ name: "Pass", description: "A passing test result", fields: {} });
+const Fail = defineEdge({ name: "Fail", description: "A failing test result", fields: {} });
+
+const Address = defineEdge({
+  name: "Address",
+  description: "A mailing address",
+  fields: {
+    street: defineField({ type: "utf8", label: "Street", description: "Street address" }),
+  },
+});
+
+const PersonWithAddress = defineEdge({
+  name: "PersonWithAddress",
+  description: "A person with a nested address edge",
+  fields: {
+    name: defineField({ type: "utf8", label: "Name", description: "The person's name" }),
+    address: Address,
+  },
+});
 
 describe("defineNode", () => {
   it("returns the input reference unchanged", () => {
@@ -66,9 +84,17 @@ describe("defineNode", () => {
   });
 
   it("types an allOf node — every branch fires (docs/design-history.md, place_order example)", () => {
-    const OrderPlaced = defineEdge({ name: "OrderPlaced", fields: {} });
-    const InvoiceRequested = defineEdge({ name: "InvoiceRequested", fields: {} });
-    const InventoryReserved = defineEdge({ name: "InventoryReserved", fields: {} });
+    const OrderPlaced = defineEdge({ name: "OrderPlaced", description: "An order was placed", fields: {} });
+    const InvoiceRequested = defineEdge({
+      name: "InvoiceRequested",
+      description: "An invoice was requested",
+      fields: {},
+    });
+    const InventoryReserved = defineEdge({
+      name: "InventoryReserved",
+      description: "Inventory was reserved",
+      fields: {},
+    });
 
     const placeOrder = defineNode({
       name: "place_order",
@@ -95,5 +121,22 @@ describe("defineNode", () => {
     });
 
     expect(siblings.fn({ age: 10 })).toEqual([{ age: 8 }, { age: 12 }]);
+  });
+
+  it("types a node whose input edge has a nested compound (edge-valued) field", () => {
+    const greet = defineNode({
+      name: "greet",
+      input: PersonWithAddress,
+      output: single(PersonWithAddress),
+      fn: (person) => ({
+        ...person,
+        name: `${person.name} of ${person.address.street}`,
+      }),
+    });
+
+    expect(greet.fn({ name: "Ada", address: { street: "1 Infinite Loop" } })).toEqual({
+      name: "Ada of 1 Infinite Loop",
+      address: { street: "1 Infinite Loop" },
+    });
   });
 });

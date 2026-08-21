@@ -9,13 +9,20 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "generate:schemas": "tsx scripts/generate-schemas.ts"
   },
   "devDependencies": {
+    "@types/node": "^26.2.0",
+    "ajv": "^8.20.0",
+    "tsx": "^4.23.12",
     "typescript": "^5.7.2",
     "vitest": "^2.1.0"
   },
   "engines": {
     "node": ">=24"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
   }
 }

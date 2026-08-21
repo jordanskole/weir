@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=./edge.schema.json
+name: PersonWithAddress
+description: A person with a reused email field and a nested address edge
+fields:
+  name:
+    type: utf8
+    label: Name
+    description: The person's full name
+    validations:
+      minLength: 1
+      maxLength: 200
+  email: email
+  address: Address
