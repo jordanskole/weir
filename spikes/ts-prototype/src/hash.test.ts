@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { assertEdgeHash, hashEdge, hashEdges } from "./hash.js";
-import type { EdgeDef } from "./types.js";
+import type { AnyEdgeDef, EdgeDef } from "./types.js";
 
 const base: EdgeDef = {
   name: "example",
+  description: "A test edge",
   fields: {
-    id: { type: "uint32" },
+    id: { type: "uint32", label: "ID", description: "The record id" },
     amount: {
       type: "f32",
+      label: "Amount",
+      description: "The transaction amount",
       measure: "quantitative",
       format: "count",
       enumValues: ["a", "b"],
@@ -30,6 +33,7 @@ describe("hashEdge", () => {
   it("is independent of field insertion order", async () => {
     const reordered: EdgeDef = {
       name: base.name,
+      description: base.description,
       fields: {
         amount: base.fields.amount!,
         id: base.fields.id!,
@@ -64,7 +68,7 @@ describe("hashEdge", () => {
   it("changes when a field's type changes", async () => {
     const mutated: EdgeDef = {
       ...base,
-      fields: { ...base.fields, id: { type: "utf8" } },
+      fields: { ...base.fields, id: { type: "utf8", label: "ID", description: "The record id" } },
     };
     expect((await hashEdge(mutated)).hash).not.toBe((await hashEdge(base)).hash);
   });
@@ -136,7 +140,7 @@ describe("hashEdge", () => {
         id: {
           ...base.fields.id!,
           unit: "rows",
-          label: "ID",
+          label: "Identifier",
           sourceKey: "ID",
         },
       },
@@ -144,10 +148,68 @@ describe("hashEdge", () => {
     expect((await hashEdge(mutated)).hash).toBe((await hashEdge(base)).hash);
   });
 
+  it("changes when a field's min/max changes", async () => {
+    const mutated: EdgeDef = {
+      ...base,
+      fields: { ...base.fields, id: { ...base.fields.id!, validations: { min: 0, max: 10 } } },
+    };
+    expect((await hashEdge(mutated)).hash).not.toBe((await hashEdge(base)).hash);
+  });
+
+  it("changes when a field's minLength/maxLength/pattern changes", async () => {
+    const withStringConstraints: EdgeDef = {
+      name: "example2",
+      description: "A test edge",
+      fields: {
+        name: {
+          type: "utf8",
+          label: "Name",
+          description: "A name",
+          validations: { minLength: 1, maxLength: 20, pattern: "^[a-z]+$" },
+        },
+      },
+    };
+    const withoutStringConstraints: EdgeDef = {
+      name: "example2",
+      description: "A test edge",
+      fields: { name: { type: "utf8", label: "Name", description: "A name" } },
+    };
+    expect((await hashEdge(withStringConstraints)).hash).not.toBe(
+      (await hashEdge(withoutStringConstraints)).hash,
+    );
+  });
+
+  it("changes when a compound (nested-edge) field's own shape changes", async () => {
+    const withUtf8Street: AnyEdgeDef = {
+      name: "PersonWithAddress",
+      description: "A test edge",
+      fields: {
+        address: {
+          name: "Address",
+          description: "A mailing address",
+          fields: { street: { type: "utf8", label: "Street", description: "d" } },
+        },
+      },
+    };
+    const withUint8Street: AnyEdgeDef = {
+      name: "PersonWithAddress",
+      description: "A test edge",
+      fields: {
+        address: {
+          name: "Address",
+          description: "A mailing address",
+          fields: { street: { type: "uint8", label: "Street", description: "d" } },
+        },
+      },
+    };
+    expect((await hashEdge(withUtf8Street)).hash).not.toBe((await hashEdge(withUint8Street)).hash);
+  });
+
   it("produces distinct hashes for a field without optional fingerprint keys vs with them", async () => {
     const bare: EdgeDef = {
       name: base.name,
-      fields: { id: { type: "uint32" } },
+      description: "A test edge",
+      fields: { id: { type: "uint32", label: "ID", description: "The record id" } },
     };
     expect((await hashEdge(bare)).hash).not.toBe((await hashEdge(base)).hash);
   });
@@ -157,7 +219,8 @@ describe("hashEdges", () => {
   it("returns a record keyed by edge name", async () => {
     const other: EdgeDef = {
       name: "other",
-      fields: { id: { type: "uint32" } },
+      description: "A test edge",
+      fields: { id: { type: "uint32", label: "ID", description: "The record id" } },
     };
     const result = await hashEdges([base, other]);
     expect(Object.keys(result)).toEqual(["example", "other"]);

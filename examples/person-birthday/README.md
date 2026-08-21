@@ -70,3 +70,27 @@ Fan-out (`one of`/`all of`/`many`), a composite node, a failure that actually te
 dead-letter node, and a second edge instance of the same type at the same step (the thing that
 forced positional identity in the first place, but this example only ever has one instance in
 flight). Worth a second example once the netlist format settles.
+
+## The `.field`/`.edge` authoring format (`src/fields/`, `src/edges/`)
+
+Added once §10's "real YAML, no bespoke grammar" authoring format had something to hang it on —
+`email.field`, `Person.edge`, `Address.edge`, `PersonWithAddress.edge`. These aren't illustrative
+prose like `netlist.json` above — `spikes/ts-prototype/src/elaborate.ts`'s `elaborate()` actually
+loads and validates this directory as part of the spike's test suite, so these files staying valid
+is enforced, not just hoped for.
+
+**10. A file's declared `name:` must match its filename.** `email.field` must declare `name:
+email`; a mismatch is a load error, not a silent orphan — the filename is the only handle another
+file has to reference it by.
+
+**11. Cross-file references are a bare name string, resolved by extension.** `email: email` and
+`address: Address` (in `PersonWithAddress.edge`) are both just the referenced thing's name; whether
+`email` resolves against a `.field` or an `.edge` file is disambiguated by whichever extension
+exists — the same "elaborator globs by extension, not folder convention" principle §10 already
+established for `.node`.
+
+**12. A field reference and a compound-edge reference use identical syntax on purpose.** Nothing in
+`PersonWithAddress.edge` marks `address: Address` as different from `email: email` — the elaborator
+resolves both the same way, and the difference (scalar field vs. nested edge) only shows up in what
+comes back. See `docs/design-history.md`, "Compound fields embed literally — Mongo-like, not
+SQL-like," for why that's the right shape rather than a foreign-key-style reference.

@@ -118,7 +118,8 @@ so lossy nodes cost nothing.
 
 Every edge instance carries the **schema hash** of the definition it was written under.
 The hash covers structural fields only (name, index, type, measure, format, enumValues,
-relation) and excludes cosmetic ones (description, unit, sourceKey). Replay on mismatch
+relation, min, max, minLength, maxLength, pattern) and excludes cosmetic ones
+(description, unit, sourceKey). Replay on mismatch
 either migrates through a declared rule or refuses. If a cosmetic change invalidates
 history, the fingerprint is wrong — fix the fingerprint.
 
@@ -139,7 +140,10 @@ promoted to test cases directly.
 Properties matter more than examples: a single example underdetermines the function and
 the implementing agent can see the test. Edge definitions double as generator specs
 (`age: uint8` supplies the domain, `enumValues` the cases), so property tests are close
-to free here.
+to free here. `min`/`max` (numeric) and `minLength`/`maxLength`/`pattern` (string) narrow
+that domain further where declared; a field without them still generates from its scalar
+type's full representable range, so tightening a bound is opt-in, not a new requirement
+on existing edges.
 
 **Generation, not mocking.** A property test runs the real `Fn` against a generated
 input — there is nothing to fake, because nodes have no impure dependencies to isolate

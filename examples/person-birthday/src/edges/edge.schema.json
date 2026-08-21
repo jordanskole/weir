@@ -1,0 +1,380 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Weir edge",
+  "type": "object",
+  "required": [
+    "name",
+    "description",
+    "fields"
+  ],
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "index": {
+      "type": "string"
+    },
+    "fields": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "object",
+            "required": [
+              "type",
+              "label",
+              "description"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "utf8",
+                  "bool",
+                  "uint8",
+                  "uint16",
+                  "uint32",
+                  "int8",
+                  "int16",
+                  "int32",
+                  "f32",
+                  "f64"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "measure": {
+                "enum": [
+                  "nominal",
+                  "ordinal",
+                  "quantitative",
+                  "temporal"
+                ]
+              },
+              "format": {
+                "enum": [
+                  "id",
+                  "enum",
+                  "text",
+                  "date",
+                  "datetime",
+                  "count",
+                  "percentage"
+                ]
+              },
+              "unit": {
+                "type": "string"
+              },
+              "enumValues": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sourceKey": {
+                "type": "string"
+              },
+              "relation": {
+                "type": "object",
+                "required": [
+                  "edge",
+                  "field",
+                  "cardinality"
+                ],
+                "properties": {
+                  "edge": {
+                    "type": "string"
+                  },
+                  "field": {
+                    "type": "string"
+                  },
+                  "cardinality": {
+                    "enum": [
+                      "1:1",
+                      "1:many",
+                      "many:1",
+                      "many:many"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "validations": {
+                "type": "object"
+              }
+            },
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "uint8"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "validations": {
+                      "type": "object",
+                      "properties": {
+                        "min": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255
+                        },
+                        "max": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "uint16"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "validations": {
+                      "type": "object",
+                      "properties": {
+                        "min": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 65535
+                        },
+                        "max": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 65535
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "uint32"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "validations": {
+                      "type": "object",
+                      "properties": {
+                        "min": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 4294967295
+                        },
+                        "max": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 4294967295
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "int8"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "validations": {
+                      "type": "object",
+                      "properties": {
+                        "min": {
+                          "type": "integer",
+                          "minimum": -128,
+                          "maximum": 127
+                        },
+                        "max": {
+                          "type": "integer",
+                          "minimum": -128,
+                          "maximum": 127
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "int16"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "validations": {
+                      "type": "object",
+                      "properties": {
+                        "min": {
+                          "type": "integer",
+                          "minimum": -32768,
+                          "maximum": 32767
+                        },
+                        "max": {
+                          "type": "integer",
+                          "minimum": -32768,
+                          "maximum": 32767
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "int32"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "validations": {
+                      "type": "object",
+                      "properties": {
+                        "min": {
+                          "type": "integer",
+                          "minimum": -2147483648,
+                          "maximum": 2147483647
+                        },
+                        "max": {
+                          "type": "integer",
+                          "minimum": -2147483648,
+                          "maximum": 2147483647
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "enum": [
+                        "f32",
+                        "f64"
+                      ]
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "validations": {
+                      "type": "object",
+                      "properties": {
+                        "min": {
+                          "type": "number"
+                        },
+                        "max": {
+                          "type": "number"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "utf8"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "validations": {
+                      "type": "object",
+                      "properties": {
+                        "pattern": {
+                          "type": "string"
+                        },
+                        "minLength": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "maxLength": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "else": {
+                  "not": {
+                    "required": [
+                      "enumValues"
+                    ]
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "bool"
+                    }
+                  }
+                },
+                "then": {
+                  "not": {
+                    "required": [
+                      "validations"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "additionalProperties": false
+}

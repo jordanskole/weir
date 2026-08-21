@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=./edge.schema.json
+name: Person
+description: A person, aging one birthday at a time
+fields:
+  age:
+    type: uint8
+    label: Age
+    description: The person's age in years
+    validations:
+      min: 0
+      max: 150

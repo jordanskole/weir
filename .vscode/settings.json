@@ -1,0 +1,8 @@
+{
+  "files.associations": {
+    "*.field": "yaml",
+    "*.edge": "yaml",
+    "*.node": "yaml",
+    "*.topology": "yaml"
+  }
+}
