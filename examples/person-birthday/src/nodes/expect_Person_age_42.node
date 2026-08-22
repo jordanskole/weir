@@ -1,10 +1,21 @@
-name: expect_Person_age_42
 description: Checks whether a person just turned 42
 input: Person
 output:
   oneOf:
     - Pass
     - Fail
+examples:
+  - given:
+      Person:
+        age: 42
+    expect:
+      Pass: {}
+  - given:
+      Person:
+        age: 41
+    expect:
+      Fail: {}
 closure:
   expected:
-    age: 42
+    Person:
+      age: 42

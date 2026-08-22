@@ -79,9 +79,12 @@ prose like `netlist.json` above — `spikes/ts-prototype/src/elaborate.ts`'s `el
 loads and validates this directory as part of the spike's test suite, so these files staying valid
 is enforced, not just hoped for.
 
-**10. A file's declared `name:` must match its filename.** `email.field` must declare `name:
-email`; a mismatch is a load error, not a silent orphan — the filename is the only handle another
-file has to reference it by.
+**10. Neither file kind declares a `name:` at all — the filename is the only name.** `email.field`
+has no `name` key; `elaborate()` derives it from the filename. First shipped as a required-and-
+must-match `name:` field, walked back after hand-authoring surfaced exactly the failure mode that
+invites — a copy-pasted or hand-typed `name:` drifting from the filename it's supposed to match. If
+a thing shouldn't happen, don't validate it after the fact; remove the second place it could be
+written down. Only one is left, so drifting out of sync with itself isn't a representable state.
 
 **11. Cross-file references are a bare name string, resolved by extension.** `email: email` and
 `address: Address` (in `PersonWithAddress.edge`) are both just the referenced thing's name; whether

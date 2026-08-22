@@ -26,7 +26,11 @@ const SCALAR_TYPES: ScalarType[] = [
   "int32",
   "f32",
   "f64",
+  "datetime",
 ];
+
+/** String-shaped types — pattern/minLength/maxLength validations, no min/max. */
+const STRING_TYPES: ScalarType[] = ["utf8", "datetime"];
 
 const INTEGER_TYPES = Object.keys(INTEGER_RANGES) as ScalarType[];
 const FLOAT_TYPES: ScalarType[] = ["f32", "f64"];
@@ -41,10 +45,9 @@ function numberValidationSchema(bound: Record<string, unknown>): object {
 }
 
 /**
- * The part of a field's shape that's identical whether it's a standalone
- * `.field` file (which also self-declares `name`) or an inline field value
- * inside an `.edge` file's `fields` map (which doesn't — the map key already
- * is the name, so `name` is deliberately absent, not just optional, here).
+ * The type-appropriate `validations` shape and the rest of a field's
+ * properties — shared by `fieldShape()` (a standalone `.field` file or an
+ * inline field value; the two are identical, see `fieldShape()`).
  */
 function fieldPropertiesSchema(): { properties: Record<string, object>; allOf: object[] } {
   const allOf: object[] = [];
@@ -70,7 +73,7 @@ function fieldPropertiesSchema(): { properties: Record<string, object>; allOf: o
   });
 
   allOf.push({
-    if: { properties: { type: { const: "utf8" } } },
+    if: { properties: { type: { enum: STRING_TYPES } } },
     then: {
       properties: {
         validations: {
@@ -92,6 +95,14 @@ function fieldPropertiesSchema(): { properties: Record<string, object>; allOf: o
   allOf.push({
     if: { properties: { type: { const: "bool" } } },
     then: { not: { required: ["validations"] } },
+  });
+
+  // nullable is required for every type except bool, where a nullable boolean
+  // would be a tri-state in disguise — disallowed outright, not just optional.
+  allOf.push({
+    if: { properties: { type: { const: "bool" } } },
+    then: { not: { required: ["nullable"] } },
+    else: { required: ["nullable"] },
   });
 
   const properties: Record<string, object> = {
@@ -116,27 +127,24 @@ function fieldPropertiesSchema(): { properties: Record<string, object>; allOf: o
       additionalProperties: false,
     },
     validations: { type: "object" },
+    nullable: { type: "boolean" },
   };
 
   return { properties, allOf };
 }
 
-/** Generates a JSON Schema for a standalone `.field` file. */
-export function fieldSchema(): object {
-  const { properties, allOf } = fieldPropertiesSchema();
-  return {
-    $schema: "https://json-schema.org/draft/2020-12/schema",
-    title: "Weir field",
-    type: "object",
-    required: ["name", "type", "label", "description"],
-    properties: { name: { type: "string" }, ...properties },
-    additionalProperties: false,
-    allOf,
-  };
-}
-
-/** An inline field value inside an `.edge` file's `fields` map — same shape, no `name`. */
-function inlineFieldSchema(): object {
+/**
+ * The bare shape of a field — a standalone `.field` file's content, and,
+ * structurally identical, an inline field value inside an `.edge` file's
+ * `fields` map. Neither declares `name`: a standalone file's name is its
+ * filename, an inline field's name is its key in the parent `fields` map —
+ * the same information source in both cases, so there's no second place for
+ * it to live and no way for it to drift out of sync with the thing it names.
+ * No `$schema`/`title` here — those belong only at a schema document's root,
+ * never on a subschema nested inside another (as this shape is, from
+ * `edgeSchema()`).
+ */
+function fieldShape(): object {
   const { properties, allOf } = fieldPropertiesSchema();
   return {
     type: "object",
@@ -147,21 +155,39 @@ function inlineFieldSchema(): object {
   };
 }
 
+/** Generates a JSON Schema for a standalone `.field` file. */
+export function fieldSchema(): object {
+  return {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "Weir field",
+    ...fieldShape(),
+  };
+}
+
 /** Generates a JSON Schema for a `.edge` file. */
 export function edgeSchema(): object {
   return {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     title: "Weir edge",
     type: "object",
-    required: ["name", "description", "fields"],
+    required: ["label", "description", "fields"],
     properties: {
-      name: { type: "string" },
+      label: { type: "string" },
       description: { type: "string" },
       index: { type: "string" },
       fields: {
         type: "object",
         additionalProperties: {
-          oneOf: [{ type: "string", minLength: 1 }, inlineFieldSchema()],
+          oneOf: [
+            { type: "string", minLength: 1 },
+            fieldShape(),
+            {
+              type: "object",
+              required: ["many"],
+              properties: { many: { type: "string", minLength: 1 } },
+              additionalProperties: false,
+            },
+          ],
         },
       },
     },
@@ -173,22 +199,74 @@ const edgeName = { type: "string", minLength: 1 };
 const edgeNameList = { type: "array", items: edgeName, minItems: 1 };
 
 /**
+ * A "tagged" payload: exactly one key (the edge's name — a field's key in an
+ * `.edge` map or, here, the sole property of an example), whose value must
+ * match `valueSchema`. The tag's *name* is never checked against a real
+ * declared edge — that needs cross-file information (or, for `oneOf`/`allOf`/
+ * `many`, the sibling `output`'s own declared names) that standard JSON
+ * Schema can't reach without `$data`, confirmed unreliable rather than
+ * assumed (ajv's `$data` silently accepted an invalid tag in testing). Real
+ * name-matching stays the elaborator's job once `.node` loading exists.
+ */
+function tagged(valueSchema: object): object {
+  return { type: "object", minProperties: 1, additionalProperties: valueSchema };
+}
+
+/** Like `tagged`, but exactly one tag — for shapes where more than one never makes sense. */
+function taggedOne(valueSchema: object): object {
+  return { ...tagged(valueSchema), maxProperties: 1 };
+}
+
+/**
  * Generates a JSON Schema for a `.node` file — the contract only, per §10:
  * no `fn`, name/input/output/examples/closure. `input`/`output` reference
  * edges by bare name, resolved elsewhere (by the elaborator, not this
- * schema). `given`/`expect`/`expected`/`literal` payloads are deliberately
- * unconstrained here — matching them against the shape the referenced edge
- * actually declares needs cross-file information a static schema doesn't
- * have; that's the elaborator's/generator's job (§6), not this one's.
+ * schema). `examples` is required and non-empty — per §6, examples are the
+ * only thing that gives a same-shape-in-same-shape-out node (a "straight
+ * pipe": one edge in, one out — see docs/design-history.md) any actual
+ * content beyond its type signature; a node with none is indistinguishable
+ * from a no-op.
  */
 export function nodeSchema(): object {
+  const objectPayload = { type: "object" };
+  const outputShapeConditionals = [
+    // single (bare-string output) or oneOf: exactly one tag, payload is an object.
+    {
+      if: { properties: { output: { type: "string" } } },
+      then: { properties: { examples: { items: { properties: { expect: taggedOne(objectPayload) } } } } },
+    },
+    {
+      if: { properties: { output: { type: "object", required: ["oneOf"] } } },
+      then: { properties: { examples: { items: { properties: { expect: taggedOne(objectPayload) } } } } },
+    },
+    // allOf: one or more tags fire together, each an object — can't check the
+    // tag count matches output.allOf's length without $data (see `tagged`).
+    {
+      if: { properties: { output: { type: "object", required: ["allOf"] } } },
+      then: { properties: { examples: { items: { properties: { expect: tagged(objectPayload) } } } } },
+    },
+    // many: exactly one tag, whose value is an array of payload objects.
+    {
+      if: { properties: { output: { type: "object", required: ["many"] } } },
+      then: {
+        properties: {
+          examples: {
+            items: {
+              properties: { expect: taggedOne({ type: "array", items: objectPayload }) },
+            },
+          },
+        },
+      },
+    },
+  ];
+
   return {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     title: "Weir node",
     type: "object",
-    required: ["name", "input", "output"],
+    required: ["input", "output", "examples"],
     properties: {
-      name: { type: "string" },
+      label: { type: "string" },
       description: { type: "string" },
       input: edgeName,
       output: {
@@ -216,10 +294,14 @@ export function nodeSchema(): object {
       },
       examples: {
         type: "array",
+        minItems: 1,
         items: {
           type: "object",
           required: ["given", "expect"],
-          properties: { given: {}, expect: {} },
+          // given is always single-tagged: a node's input is always exactly
+          // one edge (§10's "Left open" version-pin note aside — no
+          // multi-input/join yet).
+          properties: { given: taggedOne(objectPayload), expect: {} },
           additionalProperties: false,
         },
       },
@@ -227,13 +309,13 @@ export function nodeSchema(): object {
         oneOf: [
           {
             type: "object",
-            properties: { expected: {} },
+            properties: { expected: taggedOne(objectPayload) },
             required: ["expected"],
             additionalProperties: false,
           },
           {
             type: "object",
-            properties: { literal: {} },
+            properties: { literal: tagged({}) },
             required: ["literal"],
             additionalProperties: false,
           },
@@ -241,5 +323,6 @@ export function nodeSchema(): object {
       },
     },
     additionalProperties: false,
+    allOf: outputShapeConditionals,
   };
 }

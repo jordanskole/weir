@@ -8,7 +8,8 @@
  * decision needs to survive into the next node's type.
  */
 
-/** Scalar field types. */
+/** Scalar field types. `datetime` is an ISO-8601 string, not a numeric epoch — see
+ * docs/design-history.md, "A real datetime scalar type" for why. */
 export type ScalarType =
   | "utf8"
   | "bool"
@@ -19,7 +20,8 @@ export type ScalarType =
   | "int16"
   | "int32"
   | "f32"
-  | "f64";
+  | "f64"
+  | "datetime";
 
 /** Statistical measure classification for a field. */
 export type Measure = "nominal" | "ordinal" | "quantitative" | "temporal";
@@ -37,8 +39,7 @@ export interface Relation {
   cardinality: Cardinality;
 }
 
-/** Rich metadata for a single field on an edge. */
-export interface FieldDef<T extends ScalarType = ScalarType> {
+interface FieldDefBase<T extends ScalarType> {
   type: T;
   label: string;
   description: string;
@@ -51,6 +52,23 @@ export interface FieldDef<T extends ScalarType = ScalarType> {
   /** Original field name in an upstream source, where this edge is derived from one. */
   sourceKey?: string;
 }
+
+/**
+ * Rich metadata for a single field on an edge. `nullable` is required for
+ * every type except `bool`, where it's disallowed entirely — a nullable
+ * boolean is a tri-state in disguise (set-true / set-false / unset-or-null,
+ * three states pretending to be two), the kind of ambiguity a real type
+ * should resolve, not carry forward. `N` (default wide — `boolean`, not
+ * `false` — so a bare `FieldDef` reference stays compatible with a nullable
+ * field; only `defineField`'s own default narrows to non-nullable) controls
+ * whether the field's payload type is `T | null`. Explicit `T | null`, not an
+ * optional/absent key — same call already made for `Envelope.causationId`
+ * (docs/design-history.md): a nullable field forces a caller to handle the
+ * null, an absent key doesn't force anything.
+ */
+export type FieldDef<T extends ScalarType = ScalarType, N extends boolean = boolean> = T extends "bool"
+  ? FieldDefBase<T>
+  : FieldDefBase<T> & { nullable: N };
 
 type NumberValidation = { 
   min?: number;
@@ -65,15 +83,25 @@ type StringValidation = {
 
 type Validation<T extends ScalarType> = T extends "uint8" | "uint16" | "uint32" | "int8" | "int16" | "int32" | "f32" | "f64"
 ? NumberValidation
-: T extends "utf8"
+: T extends "utf8" | "datetime"
   ? StringValidation
   : never;
 
 
 
-/** An edge definition: name, optional index field, and field map. */
-export interface EdgeDef<F extends Record<string, FieldDef | AnyEdgeDef> = Record<string, FieldDef>> {
+/**
+ * An edge definition: name, human-readable label, description, optional
+ * index field, and field map. `name` is identity — derived from the
+ * filename for a standalone `.edge` file, never authored free text. `label`
+ * is the human-readable counterpart, same role as `FieldDef.label` — no
+ * expectation it matches `name`, the way a field's `label` was never
+ * expected to match its map key.
+ */
+export interface EdgeDef<
+  F extends Record<string, FieldDef | AnyEdgeDef | ManyEdgeDef> = Record<string, FieldDef>,
+> {
   name: string;
+  label: string;
   description: string;
   /** Field that uniquely identifies an instance, where one exists. */
   index?: string;
@@ -81,15 +109,26 @@ export interface EdgeDef<F extends Record<string, FieldDef | AnyEdgeDef> = Recor
 }
 
 /**
- * An EdgeDef whose fields may include compound (nested-edge) fields, not just
- * scalars, at any nesting depth — self-referential on purpose, so a compound
- * field's own fields can themselves contain compound fields. A bare `EdgeDef`
- * (no type argument) resolves to `EdgeDef`'s narrow default
- * (`Record<string, FieldDef>`), not its wider constraint — so anywhere a
- * generic bound needs to admit a compound edge, it must say so with this
- * alias rather than writing `EdgeDef` bare.
+ * A field holding many instances of a compound edge — `design.md` §3's
+ * `many` cardinality (already used by `.node`'s `output:`), applied one
+ * layer down to a field's value instead of a node's result. The key
+ * (`many`) is the discriminant, same "key is the discriminant" idiom
+ * `.node`'s `oneOf`/`allOf`/`many` output shapes already use.
  */
-export type AnyEdgeDef = EdgeDef<Record<string, FieldDef | AnyEdgeDef>>;
+export interface ManyEdgeDef<E extends AnyEdgeDef = AnyEdgeDef> {
+  many: E;
+}
+
+/**
+ * An EdgeDef whose fields may include compound (nested-edge) or many-of-edge
+ * fields, not just scalars, at any nesting depth — self-referential on
+ * purpose, so a compound field's own fields can themselves contain compound
+ * or many fields. A bare `EdgeDef` (no type argument) resolves to `EdgeDef`'s
+ * narrow default (`Record<string, FieldDef>`), not its wider constraint — so
+ * anywhere a generic bound needs to admit a compound or many field, it must
+ * say so with this alias rather than writing `EdgeDef` bare.
+ */
+export type AnyEdgeDef = EdgeDef<Record<string, FieldDef | AnyEdgeDef | ManyEdgeDef>>;
 
 /**
  * The unit edge — the only special edge (docs/design.md §5). An origin
@@ -98,28 +137,34 @@ export type AnyEdgeDef = EdgeDef<Record<string, FieldDef | AnyEdgeDef>>;
  */
 export const Unit: EdgeDef<Record<string, never>> = {
   name: "Unit",
+  label: "Unit",
   description: "The unit edge — an origin node's input, carrying no data.",
   fields: {},
 };
 
 /** Maps a scalar edge type to the TypeScript type its instances carry. */
-export type ScalarTsType<T extends ScalarType> = T extends "utf8"
+export type ScalarTsType<T extends ScalarType> = T extends "utf8" | "datetime"
   ? string
   : T extends "bool"
     ? boolean
     : number;
 
 /**
- * The runtime payload shape produced by a field map. A field is either a
- * scalar (FieldDef) or a compound, nested edge (EdgeDef) — the recursive
- * case computes that nested edge's own payload shape the same way.
+ * The runtime payload shape produced by a field map. A field is a scalar
+ * (FieldDef), a compound nested edge (EdgeDef, recursing into that edge's
+ * own payload shape), or many instances of a compound edge (ManyEdgeDef,
+ * an array of that edge's payload shape).
  */
-export type Payload<F extends Record<string, FieldDef | AnyEdgeDef>> = {
-  [K in keyof F]: F[K] extends FieldDef<infer T>
-    ? ScalarTsType<T>
-    : F[K] extends AnyEdgeDef
-      ? PayloadOf<F[K]>
-      : never;
+export type Payload<F extends Record<string, FieldDef | AnyEdgeDef | ManyEdgeDef>> = {
+  [K in keyof F]: F[K] extends FieldDef<infer T, infer N>
+    ? N extends true
+      ? ScalarTsType<T> | null
+      : ScalarTsType<T>
+    : F[K] extends ManyEdgeDef<infer E>
+      ? PayloadOf<E>[]
+      : F[K] extends AnyEdgeDef
+        ? PayloadOf<F[K]>
+        : never;
 };
 
 /** The runtime payload shape of an edge definition. */
@@ -207,6 +252,7 @@ export interface Example<In extends AnyEdgeDef, O extends OutputSpec> {
  */
 export interface NodeDef<In extends AnyEdgeDef = AnyEdgeDef, O extends OutputSpec = OutputSpec> {
   name: string;
+  label?: string;
   description?: string;
   input: In;
   output: O;

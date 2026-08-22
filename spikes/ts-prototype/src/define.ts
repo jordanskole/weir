@@ -8,7 +8,15 @@
  * step 2).
  */
 
-import type { AnyEdgeDef, EdgeDef, FieldDef, NodeDef, OutputSpec, ScalarType } from "./types.js";
+import type {
+  AnyEdgeDef,
+  EdgeDef,
+  FieldDef,
+  ManyEdgeDef,
+  NodeDef,
+  OutputSpec,
+  ScalarType,
+} from "./types.js";
 
 /** uint8/16/32 are the unsigned integer types — min may not go negative. */
 export const UNSIGNED_TYPES: ScalarType[] = ["uint8", "uint16", "uint32"];
@@ -107,7 +115,7 @@ function validateStringConstraints(field: FieldDef): void {
 }
 
 function validateField(field: FieldDef): void {
-  const isString = field.type === "utf8";
+  const isString = field.type === "utf8" || field.type === "datetime";
   const isNumeric = !isString && field.type !== "bool";
   const v = field.validations as (NumberValidationShape & StringValidationShape) | undefined;
 
@@ -124,18 +132,35 @@ function validateField(field: FieldDef): void {
     throw new Error(`Field of type "${field.type}" cannot declare min/max; that's for numeric fields.`);
   }
 
+  const rawNullable = (field as { nullable?: unknown }).nullable;
+  if (field.type === "bool") {
+    if (rawNullable !== undefined) {
+      throw new Error(
+        `Field of type "bool" cannot declare nullable — a nullable boolean is a tri-state in disguise (true/false/null), not a real type.`,
+      );
+    }
+  } else if (typeof rawNullable !== "boolean") {
+    throw new Error(
+      `Field of type "${field.type}" must declare nullable (true or false) — it's required, not optional.`,
+    );
+  }
+
   if (isNumeric) validateNumericConstraints(field);
   if (isString) validateStringConstraints(field);
 }
 
 /** Define a single field with rich metadata. Returns the input unchanged. */
-export function defineField<T extends ScalarType>(field: FieldDef<T>): FieldDef<T> {
+export function defineField<T extends ScalarType, N extends boolean = false>(
+  field: FieldDef<T, N>,
+): FieldDef<T, N> {
   validateField(field);
   return field;
 }
 
 /** Define an edge with typed fields. Returns the input unchanged. */
-export function defineEdge<F extends Record<string, FieldDef | AnyEdgeDef>>(edge: EdgeDef<F>): EdgeDef<F> {
+export function defineEdge<F extends Record<string, FieldDef | AnyEdgeDef | ManyEdgeDef>>(
+  edge: EdgeDef<F>,
+): EdgeDef<F> {
   return edge;
 }
 

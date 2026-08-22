@@ -3,12 +3,12 @@
   "title": "Weir node",
   "type": "object",
   "required": [
-    "name",
     "input",
-    "output"
+    "output",
+    "examples"
   ],
   "properties": {
-    "name": {
+    "label": {
       "type": "string"
     },
     "description": {
@@ -75,6 +75,7 @@
     },
     "examples": {
       "type": "array",
+      "minItems": 1,
       "items": {
         "type": "object",
         "required": [
@@ -82,7 +83,14 @@
           "expect"
         ],
         "properties": {
-          "given": {},
+          "given": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "object"
+            },
+            "maxProperties": 1
+          },
           "expect": {}
         },
         "additionalProperties": false
@@ -93,7 +101,14 @@
         {
           "type": "object",
           "properties": {
-            "expected": {}
+            "expected": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "type": "object"
+              },
+              "maxProperties": 1
+            }
           },
           "required": [
             "expected"
@@ -103,7 +118,11 @@
         {
           "type": "object",
           "properties": {
-            "literal": {}
+            "literal": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {}
+            }
           },
           "required": [
             "literal"
@@ -113,5 +132,126 @@
       ]
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "output": {
+            "type": "string"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "examples": {
+            "items": {
+              "properties": {
+                "expect": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "additionalProperties": {
+                    "type": "object"
+                  },
+                  "maxProperties": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "output": {
+            "type": "object",
+            "required": [
+              "oneOf"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "examples": {
+            "items": {
+              "properties": {
+                "expect": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "additionalProperties": {
+                    "type": "object"
+                  },
+                  "maxProperties": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "output": {
+            "type": "object",
+            "required": [
+              "allOf"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "examples": {
+            "items": {
+              "properties": {
+                "expect": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "additionalProperties": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "output": {
+            "type": "object",
+            "required": [
+              "many"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "examples": {
+            "items": {
+              "properties": {
+                "expect": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "maxProperties": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

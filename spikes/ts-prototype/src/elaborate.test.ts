@@ -27,27 +27,28 @@ async function writeFixture(files: Record<string, string>): Promise<string> {
 }
 
 describe("parseFieldFile", () => {
-  it("parses a valid .field YAML string into its declared name and FieldDef", () => {
+  it("parses a valid .field YAML string into a FieldDef", () => {
     const yaml = `
-name: email
 type: utf8
 label: Email
 description: An email address
+nullable: false
 validations:
   pattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$'
 `;
-    const { name, field } = parseFieldFile(yaml);
-    expect(name).toBe("email");
+    const field = parseFieldFile(yaml);
     expect(field).toEqual({
       type: "utf8",
       label: "Email",
       description: "An email address",
+      nullable: false,
       validations: { pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$" },
     });
   });
 
-  it("rejects a .field file missing a name", () => {
+  it("rejects a .field file that declares a name — the filename is the name", () => {
     const yaml = `
+name: email
 type: utf8
 label: Email
 description: An email address
@@ -57,10 +58,10 @@ description: An email address
 
   it("runs the parsed field through defineField's validation", () => {
     const yaml = `
-name: age
 type: uint8
 label: Age
 description: A person's age
+nullable: false
 validations:
   min: -5
 `;
@@ -71,43 +72,57 @@ validations:
 describe("parseEdgeFile", () => {
   it("parses an .edge file with only inline scalar fields", () => {
     const yaml = `
-name: Address
+label: Mailing address
 description: A mailing address
 fields:
   street:
     type: utf8
     label: Street
     description: Street address
+    nullable: false
 `;
-    const { name, edge } = parseEdgeFile(yaml, () => {
+    const edge = parseEdgeFile(yaml, "Address", () => {
       throw new Error("resolver should not be called — no references in this file");
     });
-    expect(name).toBe("Address");
     expect(edge.name).toBe("Address");
+    expect(edge.label).toBe("Mailing address");
     expect(edge.fields.street).toEqual({
       type: "utf8",
       label: "Street",
       description: "Street address",
+      nullable: false,
     });
+  });
+
+  it("rejects an .edge file that declares a name — the filename is the name", () => {
+    const yaml = `
+name: Address
+description: A mailing address
+fields: {}
+`;
+    expect(() => parseEdgeFile(yaml, "Address", () => {
+      throw new Error("unreachable");
+    })).toThrow(/name/i);
   });
 
   it("resolves a bare-name field reference via the resolver", () => {
     const yaml = `
-name: Person
 description: A person
 fields:
   age:
     type: uint8
     label: Age
     description: The person's age
+    nullable: false
   email: email
 `;
     const emailField = {
       type: "utf8" as const,
       label: "Email",
       description: "An email address",
+      nullable: false as const,
     };
-    const { edge } = parseEdgeFile(yaml, (referencedName) => {
+    const edge = parseEdgeFile(yaml, "Person", (referencedName) => {
       expect(referencedName).toBe("email");
       return emailField;
     });
@@ -116,37 +131,93 @@ fields:
 
   it("resolves a bare-name compound (nested-edge) reference via the resolver", () => {
     const yaml = `
-name: PersonWithAddress
 description: A person with a nested address edge
 fields:
   name:
     type: utf8
     label: Name
     description: The person's name
+    nullable: false
   address: Address
 `;
     const addressEdge = {
       name: "Address",
+      label: "Address",
       description: "A mailing address",
       fields: {
-        street: { type: "utf8" as const, label: "Street", description: "Street address" },
+        street: {
+          type: "utf8" as const,
+          label: "Street",
+          description: "Street address",
+          nullable: false as const,
+        },
       },
     };
-    const { edge } = parseEdgeFile(yaml, (referencedName) => {
+    const edge = parseEdgeFile(yaml, "PersonWithAddress", (referencedName) => {
       expect(referencedName).toBe("Address");
       return addressEdge;
     });
     expect(edge.fields.address).toBe(addressEdge);
   });
 
-  it("rejects an .edge file missing a name", () => {
+  it("resolves a many-of-compound-edge field via the resolver", () => {
     const yaml = `
-description: no name here
-fields: {}
+description: A list of tasks
+fields:
+  title:
+    type: utf8
+    label: Title
+    description: The list's title
+    nullable: false
+  tasks:
+    many: Task
 `;
-    expect(() => parseEdgeFile(yaml, () => {
-      throw new Error("unreachable");
-    })).toThrow(/name/i);
+    const taskEdge = {
+      name: "Task",
+      label: "Task",
+      description: "A task",
+      fields: {
+        title: {
+          type: "utf8" as const,
+          label: "Title",
+          description: "The task's title",
+          nullable: false as const,
+        },
+      },
+    };
+    const edge = parseEdgeFile(yaml, "TaskList", (referencedName) => {
+      expect(referencedName).toBe("Task");
+      return taskEdge;
+    });
+    expect(edge.fields.tasks).toEqual({ many: taskEdge });
+  });
+
+  it("rejects a many: value that isn't a bare-name reference", () => {
+    const yaml = `
+description: A list of tasks
+fields:
+  tasks:
+    many:
+      type: utf8
+      label: bad
+      description: bad
+`;
+    expect(() =>
+      parseEdgeFile(yaml, "TaskList", () => {
+        throw new Error("unreachable");
+      }),
+    ).toThrow(/many/i);
+  });
+
+  it("rejects a many: reference that resolves to a field, not an edge", () => {
+    const yaml = `
+description: A list of tasks
+fields:
+  tasks:
+    many: title
+`;
+    const titleField = { type: "utf8" as const, label: "Title", description: "d", nullable: false as const };
+    expect(() => parseEdgeFile(yaml, "TaskList", () => titleField)).toThrow(/many/i);
   });
 });
 
@@ -154,30 +225,30 @@ describe("elaborate", () => {
   it("loads a directory of .field/.edge files, resolving references across both", async () => {
     const root = await writeFixture({
       "fields/email.field": `
-name: email
 type: utf8
 label: Email
 description: An email address
+nullable: false
 validations:
   pattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$'
 `,
       "edges/Address.edge": `
-name: Address
 description: A mailing address
 fields:
   street:
     type: utf8
     label: Street
     description: Street address
+    nullable: false
 `,
       "edges/PersonWithAddress.edge": `
-name: PersonWithAddress
 description: A person with a nested address edge and a reused email field
 fields:
   name:
     type: utf8
     label: Name
     description: The person's name
+    nullable: false
   email: email
   address: Address
 `,
@@ -191,23 +262,22 @@ fields:
     expect(result.edges.PersonWithAddress!.fields.address).toBe(result.edges.Address);
   });
 
-  it("rejects a .field file whose declared name doesn't match its filename", async () => {
+  it("rejects a .field file that declares a name", async () => {
     const root = await writeFixture({
       "fields/email.field": `
-name: not-email
+name: email
 type: utf8
 label: Email
 description: An email address
 `,
     });
 
-    await expect(elaborate(root)).rejects.toThrow(/email/);
+    await expect(elaborate(root)).rejects.toThrow(/name/i);
   });
 
   it("rejects a reference to a name no .field or .edge file declares", async () => {
     const root = await writeFixture({
       "edges/Person.edge": `
-name: Person
 description: A person
 fields:
   ghost: nonexistent
@@ -220,13 +290,11 @@ fields:
   it("rejects a circular compound-edge reference", async () => {
     const root = await writeFixture({
       "edges/A.edge": `
-name: A
 description: A
 fields:
   b: B
 `,
       "edges/B.edge": `
-name: B
 description: B
 fields:
   a: A

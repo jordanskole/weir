@@ -3,15 +3,11 @@
   "title": "Weir field",
   "type": "object",
   "required": [
-    "name",
     "type",
     "label",
     "description"
   ],
   "properties": {
-    "name": {
-      "type": "string"
-    },
     "type": {
       "enum": [
         "utf8",
@@ -23,7 +19,8 @@
         "int16",
         "int32",
         "f32",
-        "f64"
+        "f64",
+        "datetime"
       ]
     },
     "label": {
@@ -90,6 +87,9 @@
     },
     "validations": {
       "type": "object"
+    },
+    "nullable": {
+      "type": "boolean"
     }
   },
   "additionalProperties": false,
@@ -300,7 +300,10 @@
       "if": {
         "properties": {
           "type": {
-            "const": "utf8"
+            "enum": [
+              "utf8",
+              "datetime"
+            ]
           }
         }
       },
@@ -347,6 +350,27 @@
             "validations"
           ]
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "bool"
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "required": [
+            "nullable"
+          ]
+        }
+      },
+      "else": {
+        "required": [
+          "nullable"
+        ]
       }
     }
   ]

@@ -3,35 +3,27 @@
  * into validated `FieldDef`/`EdgeDef` objects (docs/design.md §10). `.node`
  * and topology loading are out of scope here — deliberately deferred, same
  * as the rest of the elaborator (§10, "deferred, not designed away").
+ *
+ * Neither file kind declares its own `name` — the filename *is* the name (a
+ * standalone `.field`/`.edge` file has no parent map to be a key in, the way
+ * an inline field does, so the filename is the only thing that could name
+ * it; making that the *only* source of truth means a mismatched name isn't
+ * a bug to catch, it's not a representable state at all).
  */
 
 import { glob, readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { parse } from "yaml";
 import { defineEdge, defineField } from "./define.js";
-import type { AnyEdgeDef, FieldDef } from "./types.js";
+import type { AnyEdgeDef, FieldDef, ManyEdgeDef } from "./types.js";
 
-export interface LoadedField {
-  name: string;
-  field: FieldDef;
-}
-
-/** Parse a `.field` file's YAML text into its declared name and a validated FieldDef. */
-export function parseFieldFile(yamlText: string): LoadedField {
+/** Parse a `.field` file's YAML text into a validated FieldDef. */
+export function parseFieldFile(yamlText: string): FieldDef {
   const raw = parse(yamlText) as Record<string, unknown>;
-  const { name, ...fieldData } = raw;
-
-  if (typeof name !== "string" || name.length === 0) {
-    throw new Error(`.field file is missing a "name".`);
+  if ("name" in raw) {
+    throw new Error(`.field files don't declare "name" — the filename is the name.`);
   }
-
-  const field = defineField(fieldData as unknown as FieldDef);
-  return { name, field };
-}
-
-export interface LoadedEdge {
-  name: string;
-  edge: AnyEdgeDef;
+  return defineField(raw as unknown as FieldDef);
 }
 
 /**
@@ -42,32 +34,45 @@ export interface LoadedEdge {
  */
 export type FieldResolver = (name: string) => FieldDef | AnyEdgeDef;
 
-/** Parse an `.edge` file's YAML text into its declared name and a validated EdgeDef. */
-export function parseEdgeFile(yamlText: string, resolveField: FieldResolver): LoadedEdge {
+/** Parse an `.edge` file's YAML text (and its filename-derived name) into a validated EdgeDef. */
+export function parseEdgeFile(yamlText: string, name: string, resolveField: FieldResolver): AnyEdgeDef {
   const raw = parse(yamlText) as Record<string, unknown>;
-  const { name, description, index, fields } = raw as {
-    name?: unknown;
+  if ("name" in raw) {
+    throw new Error(`.edge files don't declare "name" — the filename is the name.`);
+  }
+  const { label, description, index, fields } = raw as {
+    label?: unknown;
     description?: unknown;
     index?: unknown;
     fields?: Record<string, unknown>;
   };
 
-  if (typeof name !== "string" || name.length === 0) {
-    throw new Error(`.edge file is missing a "name".`);
-  }
-
-  const resolvedFields: Record<string, FieldDef | AnyEdgeDef> = {};
+  const resolvedFields: Record<string, FieldDef | AnyEdgeDef | ManyEdgeDef> = {};
   for (const [key, value] of Object.entries(fields ?? {})) {
-    resolvedFields[key] = typeof value === "string" ? resolveField(value) : (value as FieldDef);
+    if (typeof value === "string") {
+      resolvedFields[key] = resolveField(value);
+    } else if (value !== null && typeof value === "object" && "many" in value) {
+      const ref = (value as { many: unknown }).many;
+      if (typeof ref !== "string" || ref.length === 0) {
+        throw new Error(`"${key}.many" must be a bare edge-name reference, not an inline shape.`);
+      }
+      const resolved = resolveField(ref);
+      if (!("fields" in resolved)) {
+        throw new Error(`"${key}.many" references "${ref}", a field, not an edge — many is for edges only.`);
+      }
+      resolvedFields[key] = { many: resolved };
+    } else {
+      resolvedFields[key] = value as FieldDef;
+    }
   }
 
-  const edge = defineEdge({
+  return defineEdge({
     name,
+    label: label as string,
     description: description as string,
     ...(typeof index === "string" && { index }),
     fields: resolvedFields,
   });
-  return { name, edge };
 }
 
 export interface Elaborated {
@@ -78,34 +83,27 @@ export interface Elaborated {
 /**
  * Load every `.field`/`.edge` file under `root`, resolving bare-name
  * references (within a field's value, and across compound edges) against
- * each other. A `.field`/`.edge` file's declared `name` must match its own
- * filename — the file is the thing other files reference it by, so a
- * mismatch would silently orphan it.
+ * each other. Each file's name is its filename — no separate check needed
+ * to keep that in sync with anything, since there's nothing else to sync.
  */
 export async function elaborate(root: string): Promise<Elaborated> {
   const fields: Record<string, FieldDef> = {};
   for await (const file of glob("**/*.field", { cwd: root })) {
-    const text = await readFile(`${root}/${file}`, "utf8");
-    const { name, field } = parseFieldFile(text);
-    assertNameMatchesFilename(name, file, ".field");
+    const name = basename(file, ".field");
     if (name in fields) {
       throw new Error(`Duplicate field name "${name}" (also declared in "${file}").`);
     }
-    fields[name] = field;
+    const text = await readFile(`${root}/${file}`, "utf8");
+    fields[name] = parseFieldFile(text);
   }
 
   const rawEdgeTextByName = new Map<string, string>();
   for await (const file of glob("**/*.edge", { cwd: root })) {
-    const text = await readFile(`${root}/${file}`, "utf8");
-    const peeked = parse(text) as { name?: unknown };
-    if (typeof peeked.name !== "string" || peeked.name.length === 0) {
-      throw new Error(`"${file}" is missing a "name".`);
+    const name = basename(file, ".edge");
+    if (rawEdgeTextByName.has(name)) {
+      throw new Error(`Duplicate edge name "${name}" (already declared elsewhere).`);
     }
-    assertNameMatchesFilename(peeked.name, file, ".edge");
-    if (rawEdgeTextByName.has(peeked.name)) {
-      throw new Error(`Duplicate edge name "${peeked.name}" (already declared elsewhere).`);
-    }
-    rawEdgeTextByName.set(peeked.name, text);
+    rawEdgeTextByName.set(name, await readFile(`${root}/${file}`, "utf8"));
   }
 
   const edges: Record<string, AnyEdgeDef> = {};
@@ -124,7 +122,7 @@ export async function elaborate(root: string): Promise<Elaborated> {
     }
 
     inProgress.add(name);
-    const { edge } = parseEdgeFile(text, resolve);
+    const edge = parseEdgeFile(text, name, resolve);
     inProgress.delete(name);
     edges[name] = edge;
     return edge;
@@ -135,13 +133,4 @@ export async function elaborate(root: string): Promise<Elaborated> {
   }
 
   return { fields, edges };
-}
-
-function assertNameMatchesFilename(name: string, file: string, extension: string): void {
-  const expected = basename(file, extension);
-  if (name !== expected) {
-    throw new Error(
-      `"${file}" declares name "${name}", but its filename implies "${expected}" — they must match.`,
-    );
-  }
 }
