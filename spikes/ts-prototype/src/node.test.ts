@@ -106,7 +106,7 @@ describe("defineNode", () => {
   it("returns the input reference unchanged", () => {
     const node = {
       name: "noop",
-      input: Person,
+      input: single(Person),
       output: single(Person),
       fn: (person: { age: number }) => person,
       closure: { literal: { age: 42 } }
@@ -118,7 +118,7 @@ describe("defineNode", () => {
     // examples/person-birthday/netlist.json: Person { age: 41 } | birthday | expect Person { age: 42 }
     const birthday = defineNode({
       name: "birthday",
-      input: Person,
+      input: single(Person),
       output: single(Person),
       fn: (person) => ({ age: person.age + 1 }),
       examples: [{ given: { age: 41 }, expect: { age: 42 } }],
@@ -132,7 +132,7 @@ describe("defineNode", () => {
   it("types a oneOf node and matches the step-zero netlist's expect_Person_age_42", () => {
     const expectPersonAge42 = defineNode({
       name: "expect_Person_age_42",
-      input: Person,
+      input: single(Person),
       output: oneOf(Pass, Fail),
       closure: { expected: { age: 42 } },
       fn: (person) =>
@@ -148,7 +148,7 @@ describe("defineNode", () => {
     // resolved to input:Unit (docs/design.md §5: "the only special edge").
     const originPersonLiteral = defineNode({
       name: "origin_Person_literal",
-      input: Unit,
+      input: single(Unit),
       output: single(Person),
       closure: { literal: { age: 41 } },
       fn: () => ({ age: 41 }),      
@@ -179,7 +179,7 @@ describe("defineNode", () => {
 
     const placeOrder = defineNode({
       name: "place_order",
-      input: OrderPlaced,
+      input: single(OrderPlaced),
       output: allOf(InvoiceRequested, InventoryReserved),
       fn: () => [
         { edge: "InvoiceRequested", payload: {} },
@@ -196,7 +196,7 @@ describe("defineNode", () => {
   it("types a many node — N instances of one edge", () => {
     const siblings = defineNode({
       name: "siblings",
-      input: Person,
+      input: single(Person),
       output: many(Person),
       fn: (person) => [{ age: person.age - 2 }, { age: person.age + 2 }],
     });
@@ -207,7 +207,7 @@ describe("defineNode", () => {
   it("types a node whose input edge has a nested compound (edge-valued) field", () => {
     const greet = defineNode({
       name: "greet",
-      input: PersonWithAddress,
+      input: single(PersonWithAddress),
       output: single(PersonWithAddress),
       fn: (person) => ({
         ...person,
@@ -224,7 +224,7 @@ describe("defineNode", () => {
   it("types a node whose input edge has a many-of-compound-edge field", () => {
     const summarize = defineNode({
       name: "summarize",
-      input: TaskList,
+      input: single(TaskList),
       output: single(TaskList),
       fn: (list) => ({
         ...list,
@@ -243,7 +243,7 @@ describe("defineNode", () => {
   it("types a node whose input edge has a nullable field", () => {
     const describeDueDate = defineNode({
       name: "describe_due_date",
-      input: TaskWithDueDate,
+      input: single(TaskWithDueDate),
       output: single(TaskWithDueDate),
       fn: (task) => ({
         ...task,

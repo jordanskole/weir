@@ -12,6 +12,7 @@ import type {
   AnyEdgeDef,
   EdgeDef,
   FieldDef,
+  InputSpec,
   ManyEdgeDef,
   NodeDef,
   OutputSpec,
@@ -164,16 +165,27 @@ export function defineEdge<F extends Record<string, FieldDef | AnyEdgeDef | Many
   return edge;
 }
 
-/** Define a node: name, input edge, output shape, Fn, examples. Returns the input unchanged. */
-export function defineNode<In extends AnyEdgeDef, O extends OutputSpec>(
+/** Define a node: name, input shape, output shape, Fn, examples. Returns the input unchanged. */
+export function defineNode<In extends InputSpec, O extends OutputSpec>(
   node: NodeDef<In, O>,
 ): NodeDef<In, O> {
   return node;
 }
 
-/** Rhombus: one edge in, the same edge out (docs/design.md §2). */
+/** Rhombus: one edge in, the same edge out (docs/design.md §2). Also the single-edge InputSpec. */
 export function single<E extends AnyEdgeDef>(edge: E): { kind: "single"; edge: E } {
   return { kind: "single", edge };
+}
+
+/**
+ * A multi-input readiness condition (docs/design.md §5): fires once every
+ * listed edge type has appeared for the current correlation_id, not a
+ * synchronous join. Distinct from `allOf` — `allOf` is an output fan-out
+ * (several edges fire from one node), `every` is an input fan-in (several
+ * edges must already exist before one node can fire).
+ */
+export function every<Es extends AnyEdgeDef[]>(...edges: Es): { kind: "every"; edges: Es } {
+  return { kind: "every", edges };
 }
 
 /** Coproduct: exactly one of the listed edges fires, chosen by value. */
