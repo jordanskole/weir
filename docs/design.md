@@ -11,16 +11,21 @@ questions — see `design-history.md` and `open-questions.md` for those.
 Edges may be parameterized (`Animal<T extends {...}>`); parameters are instantiated
 into concrete edges at elaboration and never reach the runtime.
 
-**Node** — a pure function from one edge to another. No instance state, no `this`, no
-ambient access. A node whose body is host code is a **primitive**; a node whose body is
+**Node** — a pure function from its declared input (one edge, or several via `every:`,
+§5) to an edge. No instance state, no `this`, no ambient access. A node whose body is host code is a **primitive**; a node whose body is
 a subgraph is a **composite**. A composite with one input edge and one output edge is
 indistinguishable from a primitive at its boundary, so topologies nest without limit
 upward and bottom out at primitives.
 
 **Envelope** — per-invocation metadata wrapping every edge instance: id (UUIDv7/ULID),
-correlation_id, causation_id, timestamp, step index, identity, schema hash. The `Fn`
-does not see the envelope by default; nodes that need it (routers, dedupers) take it as
-an explicit second argument and are thereby marked context-dependent.
+correlation_id, causation_id, timestamp, step index, identity, schema hash. Deliberately
+does not carry a `state` or `history` field — an accumulated per-thread state map was
+considered and rejected in favor of resolving it on demand, at each node's boundary,
+from the per-edge-type logs themselves (§5); baking it into the envelope's own persisted
+shape would have made it exactly the ambient, ungated blob multi-input resolution is
+designed to avoid. The `Fn` does not see the envelope by default; nodes that need it
+(routers, dedupers) take it as an explicit second argument and are thereby marked
+context-dependent.
 
 ---
 
@@ -100,9 +105,37 @@ source; instances live in the netlist.
 
 ## 5. Execution model
 
+**The membrane.** Every node invocation passes through it, never bypassed. It is not a
+primitive an author declares (§1's Edge/Node/Envelope) — it's framework-owned execution
+machinery, generated purely from a node's own contract (`input`, `scope`), never
+hand-written and never exposed to a `.node` author to modify. Concretely:
+`membrane(nodeDef)` produces `(edges, identity) => Promise<Envelope>` — it resolves the
+edges `nodeDef.input` declares (reading each named edge type's latest instance for the
+current `correlation_id`), asserts them, checks `identity` against `nodeDef.scope`, and
+only then calls `Fn`. A membrane failure (a failed assert, an unsatisfied scope)
+produces its own tagged edge (§3, "failure is an edge"), never an uncaught exception
+escaping the boundary.
+
 Nothing polls. **Origin nodes** (cron, HTTP request, queue consumer, file watcher) are
 the only place nondeterminism enters; everything downstream is deterministic. An origin
-is an ordinary node whose input is the unit edge — the only special edge.
+node is not a distinct kind of node — every invocation is `membrane(fn(edges))`
+regardless — it's distinguished only by where its `edges` come from: an internal node's
+edges are resolved by the membrane from prior nodes' logs; an origin node's edges are
+handed in directly by whatever triggered the graph (the HTTP handler, the cron tick, the
+queue message), asserted the same way. A graph with several origin-shaped inputs doesn't
+trigger them independently at different times — there is exactly one call to the graph's
+outer membrane per external event, and every origin-shaped edge it declares needing
+resolves from that single payload at once.
+
+**Multi-input nodes** declare `input: { every: [A, B] }` rather than a bare edge name.
+This is a readiness condition, not a wire: the membrane resolves it by checking whether
+an `A`-shaped and a `B`-shaped edge both exist yet in the current `correlation_id`'s
+logs, and calls `Fn` once both are present, however many other invocations separate
+their arrival. No synchronous join, no accumulator — presence in the log is itself the
+signal, the same way awaiting several promises doesn't care what order they resolve in.
+A node that itself required `A` to produce `B` (`A -> B -> C` alongside `A -> C`
+directly) doesn't need `C` to redeclare that dependency: reading `B`'s log entry already
+implies `A` was available when `B` ran.
 
 **Effects are data.** A node emits a description (`{fetch, url}`, `{sleep, duration}`);
 the runtime performs it and delivers the result as another edge. Replay feeds back the
@@ -195,6 +228,33 @@ Two independent gates:
   envelope identity. The node declares *which permission is required* and delegates the
   decision to a PDP. No conditionals in the declaration, ever — that is a second policy
   engine.
+
+**Concretely, identity is a JWT, and `Identity` is the one true system edge.** The
+graph's outer membrane verifies the token once, on the way in, and populates `Identity`
+(`sub`, `iss`, granted scopes) directly — no node produces it, because verifying the
+token *is* the trust boundary. Everything richer built on top of it — a user profile, an
+account lookup — is not framework magic; it's an ordinary node like any other
+(`LookupUserProfile: Identity -> UserProfile`), just one the framework ships a sensible
+default implementation for (`Std.*`, batteries-included, replaceable the same way any
+`.node` contract's implementation is replaceable — §10 already has the mechanism: a
+different accepted implementation for the same contract hash). Keeping the framework-only
+set to just `Identity` (plus `Std.Now`, §5) means almost everything reachable from
+identity is reviewable, versioned, and swappable like the rest of the graph, not runtime
+internals.
+
+A node reads `Identity` the same way it reads any other edge — declared, not ambient. A
+`.node` file's `scope` field names exactly which field(s) it needs (`read:Identity:sub`),
+and the membrane resolves each declared entry to precisely that field before calling
+`Fn` — never the whole object. Whether `scope`'s `verb:edge:field` shape is really the
+same mechanism as `every:` applied to ordinary edges too, or a separate declaration that
+happens to look similar, isn't settled (open-questions.md). This doesn't reintroduce
+ambient state (§5): nothing ever writes to `Identity` once the outer membrane populates
+it, and a node's ability to *proceed* still depends on a gate it explicitly declared,
+checked by that node's own membrane call before `Fn` runs. A scope mismatch is a failure edge (§3),
+same as any other membrane rejection. The set of valid scopes is itself generated by
+scanning every `.node`'s declared `scope` (§10's schema-generation discipline, applied
+one layer up) — no separately hand-maintained grant registry to drift out of sync with
+what nodes actually enforce.
 
 Prefer **scoping over checking**: filter data to the identity once at entry, so
 downstream nodes never see what they aren't entitled to. This works because everything
