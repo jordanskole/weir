@@ -195,6 +195,34 @@ export interface Envelope {
 }
 
 /**
+ * A node's input shape (docs/design.md §5) — a single edge, or several via
+ * `every`. `every` is a readiness condition the membrane resolves against a
+ * `correlation_id`'s per-edge-type logs, never a synchronous join or an
+ * accumulator (docs/design-history.md, "The membrane"). Mirrors OutputSpec's
+ * "kind is the discriminant" idiom on purpose — `single` here is the same
+ * shape `single()` already produces for OutputSpec, so the same helper
+ * serves both.
+ */
+export type InputSpec =
+  | { kind: "single"; edge: AnyEdgeDef }
+  | { kind: "every"; edges: AnyEdgeDef[] };
+
+/**
+ * The payload shape Fn receives for a given InputSpec: the edge's own
+ * payload for `single`, a bag keyed by edge name for `every` — matching the
+ * `given`/`expect` name-as-key tagging convention already decided for
+ * `.node` examples (docs/design-history.md).
+ */
+export type InputPayload<I extends InputSpec> = I extends {
+  kind: "single";
+  edge: infer E extends AnyEdgeDef;
+}
+  ? PayloadOf<E>
+  : I extends { kind: "every"; edges: infer Es extends AnyEdgeDef[] }
+    ? { [K in Es[number]["name"]]: PayloadOf<Extract<Es[number], { name: K }>> }
+    : never;
+
+/**
  * A node's output shape (docs/design.md §3) — the three fan-out modes plus
  * the plain single-edge case, kept as distinct kinds so they can't be
  * conflated the way Node-RED's "multiple outputs" was (see
@@ -229,8 +257,8 @@ export type OutputResult<O extends OutputSpec> = O extends {
  * a string reference — see spikes/ts-prototype/README.md for why a spike
  * represents "Fn reference" as a real typed function.
  */
-export type Fn<In extends AnyEdgeDef, O extends OutputSpec> = (
-  payload: PayloadOf<In>,
+export type Fn<In extends InputSpec, O extends OutputSpec> = (
+  payload: InputPayload<In>,
   env?: Envelope,
 ) => OutputResult<O> | Promise<OutputResult<O>>;
 
@@ -239,18 +267,18 @@ export type Fn<In extends AnyEdgeDef, O extends OutputSpec> = (
  * (docs/design.md §6). Composition-syntax parsing doesn't exist yet
  * (getting-started.md step 3); this is the typed equivalent.
  */
-export interface Example<In extends AnyEdgeDef, O extends OutputSpec> {
-  given: PayloadOf<In>;
+export interface Example<In extends InputSpec, O extends OutputSpec> {
+  given: InputPayload<In>;
   expect: OutputResult<O>;
 }
 
 /**
- * A node declaration: name, input edge, output shape, Fn, and examples
+ * A node declaration: name, input shape, output shape, Fn, and examples
  * (docs/getting-started.md step 2). Primitives only — a composite node's
  * body is a subgraph, which has no representation yet (topology/elaborator
  * are steps 3-4).
  */
-export interface NodeDef<In extends AnyEdgeDef = AnyEdgeDef, O extends OutputSpec = OutputSpec> {
+export interface NodeDef<In extends InputSpec = InputSpec, O extends OutputSpec = OutputSpec> {
   name: string;
   label?: string;
   description?: string;
@@ -266,5 +294,5 @@ export interface NodeDef<In extends AnyEdgeDef = AnyEdgeDef, O extends OutputSpe
   closure?: ExpectClosure<In> | LiteralClosure<O>;
 }
 
-type ExpectClosure<In extends AnyEdgeDef> = { expected: PayloadOf<In> };
+type ExpectClosure<In extends InputSpec> = { expected: InputPayload<In> };
 type LiteralClosure<O extends OutputSpec> = { literal: OutputResult<O> };
