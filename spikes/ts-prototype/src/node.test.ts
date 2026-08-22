@@ -4,27 +4,101 @@ import { Unit } from "./types.js";
 
 const Person = defineEdge({
   name: "Person",
+  label: "Person",
   description: "A person",
-  fields: { age: defineField({ type: "uint8", label: "Age", description: "The person's age" }) },
+  fields: {
+    age: defineField({ type: "uint8", label: "Age", description: "The person's age", nullable: false }),
+  },
 });
 
-const Pass = defineEdge({ name: "Pass", description: "A passing test result", fields: {} });
-const Fail = defineEdge({ name: "Fail", description: "A failing test result", fields: {} });
+const Pass = defineEdge({
+  name: "Pass",
+  label: "Pass",
+  description: "A passing test result",
+  fields: {},
+});
+const Fail = defineEdge({
+  name: "Fail",
+  label: "Fail",
+  description: "A failing test result",
+  fields: {},
+});
 
 const Address = defineEdge({
   name: "Address",
+  label: "Address",
   description: "A mailing address",
   fields: {
-    street: defineField({ type: "utf8", label: "Street", description: "Street address" }),
+    street: defineField({
+      type: "utf8",
+      label: "Street",
+      description: "Street address",
+      nullable: false,
+    }),
   },
 });
 
 const PersonWithAddress = defineEdge({
   name: "PersonWithAddress",
+  label: "Person with address",
   description: "A person with a nested address edge",
   fields: {
-    name: defineField({ type: "utf8", label: "Name", description: "The person's name" }),
+    name: defineField({
+      type: "utf8",
+      label: "Name",
+      description: "The person's name",
+      nullable: false,
+    }),
     address: Address,
+  },
+});
+
+const Task = defineEdge({
+  name: "Task",
+  label: "Task",
+  description: "A task",
+  fields: {
+    title: defineField({
+      type: "utf8",
+      label: "Title",
+      description: "The task's title",
+      nullable: false,
+    }),
+  },
+});
+
+const TaskWithDueDate = defineEdge({
+  name: "TaskWithDueDate",
+  label: "Task with due date",
+  description: "A task that may or may not have a due date",
+  fields: {
+    title: defineField({
+      type: "utf8",
+      label: "Title",
+      description: "The task's title",
+      nullable: false,
+    }),
+    due_at: defineField({
+      type: "datetime",
+      label: "Due At",
+      description: "When the task is due, if it has one",
+      nullable: true,
+    }),
+  },
+});
+
+const TaskList = defineEdge({
+  name: "TaskList",
+  label: "Task list",
+  description: "A list of tasks",
+  fields: {
+    title: defineField({
+      type: "utf8",
+      label: "Title",
+      description: "The list's title",
+      nullable: false,
+    }),
+    tasks: { many: Task },
   },
 });
 
@@ -84,14 +158,21 @@ describe("defineNode", () => {
   });
 
   it("types an allOf node — every branch fires (docs/design-history.md, place_order example)", () => {
-    const OrderPlaced = defineEdge({ name: "OrderPlaced", description: "An order was placed", fields: {} });
+    const OrderPlaced = defineEdge({
+      name: "OrderPlaced",
+      label: "Order placed",
+      description: "An order was placed",
+      fields: {},
+    });
     const InvoiceRequested = defineEdge({
       name: "InvoiceRequested",
+      label: "Invoice requested",
       description: "An invoice was requested",
       fields: {},
     });
     const InventoryReserved = defineEdge({
       name: "InventoryReserved",
+      label: "Inventory reserved",
       description: "Inventory was reserved",
       fields: {},
     });
@@ -137,6 +218,49 @@ describe("defineNode", () => {
     expect(greet.fn({ name: "Ada", address: { street: "1 Infinite Loop" } })).toEqual({
       name: "Ada of 1 Infinite Loop",
       address: { street: "1 Infinite Loop" },
+    });
+  });
+
+  it("types a node whose input edge has a many-of-compound-edge field", () => {
+    const summarize = defineNode({
+      name: "summarize",
+      input: TaskList,
+      output: single(TaskList),
+      fn: (list) => ({
+        ...list,
+        title: `${list.title} (${list.tasks.length} tasks)`,
+      }),
+    });
+
+    expect(
+      summarize.fn({ title: "Groceries", tasks: [{ title: "Milk" }, { title: "Eggs" }] }),
+    ).toEqual({
+      title: "Groceries (2 tasks)",
+      tasks: [{ title: "Milk" }, { title: "Eggs" }],
+    });
+  });
+
+  it("types a node whose input edge has a nullable field", () => {
+    const describeDueDate = defineNode({
+      name: "describe_due_date",
+      input: TaskWithDueDate,
+      output: single(TaskWithDueDate),
+      fn: (task) => ({
+        ...task,
+        title:
+          task.due_at === null ? `${task.title} (no due date)` : `${task.title} (due ${task.due_at})`,
+      }),
+    });
+
+    expect(describeDueDate.fn({ title: "Ship it", due_at: null })).toEqual({
+      title: "Ship it (no due date)",
+      due_at: null,
+    });
+    expect(
+      describeDueDate.fn({ title: "Ship it", due_at: "2026-09-01T00:00:00Z" }),
+    ).toEqual({
+      title: "Ship it (due 2026-09-01T00:00:00Z)",
+      due_at: "2026-09-01T00:00:00Z",
     });
   });
 });

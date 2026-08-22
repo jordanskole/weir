@@ -7,9 +7,10 @@
  * maxLength/pattern) is structural: it changes what values are valid, same
  * as enumValues. A compound (nested-edge) field fingerprints as that edge's own
  * fingerprint, recursively — a change anywhere in a nested edge's shape changes
- * the parent's hash too, same as a change to a scalar field would. Every edge
- * instance in the log carries the schema hash of the definition it was written
- * under (docs/design.md §5);
+ * the parent's hash too, same as a change to a scalar field would. A many-of-
+ * compound field (`{ many: E }`) fingerprints the same way, tagged separately.
+ * Every edge instance in the log carries the schema hash of the definition it
+ * was written under (docs/design.md §5);
  * replay compares recorded hash to current definition and either migrates
  * through a declared rule or refuses.
  *
@@ -20,7 +21,7 @@
  * (>=20) and modern browsers.
  */
 
-import type { AnyEdgeDef, FieldDef } from "./types.js";
+import type { AnyEdgeDef, FieldDef, ManyEdgeDef } from "./types.js";
 
 interface ScalarFieldFingerprint {
   type: string;
@@ -35,10 +36,15 @@ interface ScalarFieldFingerprint {
     maxLength?: number;
     pattern?: string;
   };
+  nullable?: true;
 }
 
-/** A compound (nested-edge) field fingerprints as its own edge's fingerprint, recursively. */
-type FieldFingerprint = ScalarFieldFingerprint | { edge: EdgeFingerprint };
+/**
+ * A compound (nested-edge) field fingerprints as its own edge's fingerprint,
+ * recursively; a many-of-compound field fingerprints the same way, tagged
+ * separately so "one Task" and "many Task" never collide.
+ */
+type FieldFingerprint = ScalarFieldFingerprint | { edge: EdgeFingerprint } | { many: EdgeFingerprint };
 
 interface EdgeFingerprint {
   name: string;
@@ -50,7 +56,12 @@ function fingerprint(edge: AnyEdgeDef): EdgeFingerprint {
   const fields: Record<string, FieldFingerprint> = {};
 
   for (const key of Object.keys(edge.fields).sort()) {
-    const value = edge.fields[key] as FieldDef | AnyEdgeDef;
+    const value = edge.fields[key] as FieldDef | AnyEdgeDef | ManyEdgeDef;
+
+    if ("many" in value) {
+      fields[key] = { many: fingerprint(value.many) };
+      continue;
+    }
 
     if ("fields" in value) {
       fields[key] = { edge: fingerprint(value) };
@@ -81,6 +92,7 @@ function fingerprint(edge: AnyEdgeDef): EdgeFingerprint {
       if (v.pattern !== undefined) validations.pattern = v.pattern;
       if (Object.keys(validations).length > 0) entry.validations = validations;
     }
+    if ("nullable" in f && f.nullable === true) entry.nullable = true;
     fields[key] = entry;
   }
 

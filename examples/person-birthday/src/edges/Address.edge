@@ -1,10 +1,11 @@
-name: Address
+label: Address
 description: A mailing address
 fields:
   street:
     type: utf8
     label: Street
     description: Street address
+    nullable: false
     validations:
       minLength: 1
       maxLength: 200

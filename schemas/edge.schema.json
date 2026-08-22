@@ -3,12 +3,12 @@
   "title": "Weir edge",
   "type": "object",
   "required": [
-    "name",
+    "label",
     "description",
     "fields"
   ],
   "properties": {
-    "name": {
+    "label": {
       "type": "string"
     },
     "description": {
@@ -44,7 +44,8 @@
                   "int16",
                   "int32",
                   "f32",
-                  "f64"
+                  "f64",
+                  "datetime"
                 ]
               },
               "label": {
@@ -111,6 +112,9 @@
               },
               "validations": {
                 "type": "object"
+              },
+              "nullable": {
+                "type": "boolean"
               }
             },
             "additionalProperties": false,
@@ -321,7 +325,10 @@
                 "if": {
                   "properties": {
                     "type": {
-                      "const": "utf8"
+                      "enum": [
+                        "utf8",
+                        "datetime"
+                      ]
                     }
                   }
                 },
@@ -369,8 +376,42 @@
                     ]
                   }
                 }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "type": {
+                      "const": "bool"
+                    }
+                  }
+                },
+                "then": {
+                  "not": {
+                    "required": [
+                      "nullable"
+                    ]
+                  }
+                },
+                "else": {
+                  "required": [
+                    "nullable"
+                  ]
+                }
               }
             ]
+          },
+          {
+            "type": "object",
+            "required": [
+              "many"
+            ],
+            "properties": {
+              "many": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
           }
         ]
       }

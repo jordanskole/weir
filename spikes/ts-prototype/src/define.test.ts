@@ -3,7 +3,7 @@ import { defineEdge, defineField } from "./define.js";
 import type { EdgeDef, FieldDef } from "./types.js";
 
 /** Every FieldDef requires label/description; this test file doesn't exercise that, so share it. */
-const meta = { label: "Test", description: "A test field" };
+const meta = { label: "Test", description: "A test field", nullable: false };
 
 describe("defineField", () => {
   it("returns the input reference unchanged", () => {
@@ -35,7 +35,8 @@ describe("defineField", () => {
     expect(() =>
       defineField({
         type: "bool",
-        ...meta,
+        label: "Test",
+        description: "A test field",
         validations: { min: 0 },
       } as unknown as FieldDef<"bool">),
     ).toThrow(/min/i);
@@ -152,12 +153,58 @@ describe("defineField", () => {
       defineField({ type: "utf8", ...meta, enumValues: ["a", "b"] } as FieldDef<"utf8">),
     ).not.toThrow();
   });
+
+  it("allows a datetime field with pattern/minLength/maxLength", () => {
+    expect(() =>
+      defineField({
+        type: "datetime",
+        ...meta,
+        validations: { pattern: "^\\d{4}-\\d{2}-\\d{2}T" },
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects min/max on a datetime field", () => {
+    expect(() =>
+      defineField({ type: "datetime", ...meta, validations: { min: 0 } } as unknown as FieldDef<"datetime">),
+    ).toThrow(/min/i);
+  });
+
+  it("rejects a non-bool field missing nullable", () => {
+    expect(() =>
+      defineField({ type: "uint8", label: "Test", description: "d" } as unknown as FieldDef<"uint8">),
+    ).toThrow(/nullable/i);
+  });
+
+  it("rejects a bool field that declares nullable", () => {
+    expect(() =>
+      defineField({
+        type: "bool",
+        label: "Test",
+        description: "d",
+        nullable: false,
+      } as unknown as FieldDef<"bool">),
+    ).toThrow(/nullable/i);
+  });
+
+  it("allows a bool field with no nullable key", () => {
+    expect(() =>
+      defineField({ type: "bool", label: "Test", description: "d" }),
+    ).not.toThrow();
+  });
+
+  it("allows a nullable non-bool field", () => {
+    expect(() =>
+      defineField({ type: "uint8", label: "Test", description: "d", nullable: true }),
+    ).not.toThrow();
+  });
 });
 
 describe("defineEdge", () => {
   it("returns the input reference unchanged", () => {
     const edge: EdgeDef = {
       name: "Person",
+      label: "Person",
       description: "A test edge",
       fields: { age: { type: "uint8", ...meta } },
     };

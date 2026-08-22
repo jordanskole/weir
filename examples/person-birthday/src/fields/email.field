@@ -1,6 +1,6 @@
-name: email
 type: utf8
 label: Email
 description: An email address
+nullable: false
 validations:
   pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"

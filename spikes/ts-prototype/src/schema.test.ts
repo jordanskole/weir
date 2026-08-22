@@ -12,14 +12,25 @@ describe("fieldSchema", () => {
   it("accepts a valid utf8 field with a pattern validation", () => {
     const validate = validatorFor(fieldSchema());
     const valid = validate({
-      name: "email",
       type: "utf8",
       label: "Email",
       description: "An email address",
+      nullable: false,
       validations: { pattern: "^[a-z]+$" },
     });
     expect(validate.errors).toBeNull();
     expect(valid).toBe(true);
+  });
+
+  it("rejects a field carrying a name — the filename (or map key) is the name", () => {
+    const validate = validatorFor(fieldSchema());
+    const valid = validate({
+      name: "email",
+      type: "utf8",
+      label: "Email",
+      description: "d",
+    });
+    expect(valid).toBe(false);
   });
 
   it("rejects a field missing required properties", () => {
@@ -31,7 +42,6 @@ describe("fieldSchema", () => {
   it("rejects an unknown scalar type", () => {
     const validate = validatorFor(fieldSchema());
     const valid = validate({
-      name: "x",
       type: "int64",
       label: "X",
       description: "d",
@@ -42,7 +52,6 @@ describe("fieldSchema", () => {
   it("rejects minLength/maxLength on a numeric field", () => {
     const validate = validatorFor(fieldSchema());
     const valid = validate({
-      name: "age",
       type: "uint8",
       label: "Age",
       description: "d",
@@ -54,7 +63,6 @@ describe("fieldSchema", () => {
   it("rejects pattern on a bool field", () => {
     const validate = validatorFor(fieldSchema());
     const valid = validate({
-      name: "active",
       type: "bool",
       label: "Active",
       description: "d",
@@ -66,7 +74,6 @@ describe("fieldSchema", () => {
   it("rejects a uint8 min above its representable range", () => {
     const validate = validatorFor(fieldSchema());
     const valid = validate({
-      name: "age",
       type: "uint8",
       label: "Age",
       description: "d",
@@ -78,7 +85,6 @@ describe("fieldSchema", () => {
   it("rejects a negative min on an unsigned type", () => {
     const validate = validatorFor(fieldSchema());
     const valid = validate({
-      name: "age",
       type: "uint8",
       label: "Age",
       description: "d",
@@ -90,34 +96,126 @@ describe("fieldSchema", () => {
   it("accepts a non-integer min/max on a float type", () => {
     const validate = validatorFor(fieldSchema());
     const valid = validate({
-      name: "amount",
       type: "f32",
       label: "Amount",
       description: "d",
+      nullable: false,
       validations: { min: 1.5, max: 99.99 },
     });
+    expect(valid).toBe(true);
+  });
+
+  it("accepts a datetime field with a pattern validation", () => {
+    const validate = validatorFor(fieldSchema());
+    const valid = validate({
+      type: "datetime",
+      label: "Created At",
+      description: "d",
+      nullable: false,
+      validations: { pattern: "^\\d{4}-\\d{2}-\\d{2}T" },
+    });
+    expect(valid).toBe(true);
+  });
+
+  it("rejects min/max on a datetime field", () => {
+    const validate = validatorFor(fieldSchema());
+    const valid = validate({
+      type: "datetime",
+      label: "Created At",
+      description: "d",
+      validations: { min: 0 },
+    });
+    expect(valid).toBe(false);
+  });
+
+  it("accepts nullable: true on any scalar type", () => {
+    const validate = validatorFor(fieldSchema());
+    const valid = validate({
+      type: "datetime",
+      label: "Due At",
+      description: "d",
+      nullable: true,
+    });
+    expect(validate.errors).toBeNull();
+    expect(valid).toBe(true);
+  });
+
+  it("rejects a non-boolean nullable", () => {
+    const validate = validatorFor(fieldSchema());
+    const valid = validate({
+      type: "utf8",
+      label: "X",
+      description: "d",
+      nullable: "true",
+    });
+    expect(valid).toBe(false);
+  });
+
+  it("rejects a non-bool field missing nullable", () => {
+    const validate = validatorFor(fieldSchema());
+    const valid = validate({ type: "utf8", label: "X", description: "d" });
+    expect(valid).toBe(false);
+  });
+
+  it("rejects a bool field that declares nullable", () => {
+    const validate = validatorFor(fieldSchema());
+    const valid = validate({
+      type: "bool",
+      label: "X",
+      description: "d",
+      nullable: false,
+    });
+    expect(valid).toBe(false);
+  });
+
+  it("accepts a bool field with no nullable key", () => {
+    const validate = validatorFor(fieldSchema());
+    const valid = validate({ type: "bool", label: "X", description: "d" });
+    expect(validate.errors).toBeNull();
     expect(valid).toBe(true);
   });
 });
 
 describe("edgeSchema", () => {
-  it("accepts a valid edge with an inline scalar field", () => {
+  it("accepts a valid edge with a label and an inline scalar field", () => {
     const validate = validatorFor(edgeSchema());
     const valid = validate({
-      name: "Address",
+      label: "Address",
       description: "A mailing address",
       fields: {
-        street: { type: "utf8", label: "Street", description: "Street address" },
+        street: {
+          type: "utf8",
+          label: "Street",
+          description: "Street address",
+          nullable: false,
+        },
       },
     });
     expect(validate.errors).toBeNull();
     expect(valid).toBe(true);
   });
 
+  it("rejects an edge missing a label", () => {
+    const validate = validatorFor(edgeSchema());
+    const valid = validate({ description: "d", fields: {} });
+    expect(valid).toBe(false);
+  });
+
+  it("rejects an edge carrying a name — the filename is the name", () => {
+    const validate = validatorFor(edgeSchema());
+    const valid = validate({
+      name: "Address",
+      label: "Address",
+      description: "d",
+      fields: {},
+    });
+    expect(valid).toBe(false);
+  });
+
   it("accepts a bare-string field value (a reference to a .field/.edge file)", () => {
     const validate = validatorFor(edgeSchema());
     const valid = validate({
-      name: "PersonWithAddress",
+      label: "Person with address",
       description: "d",
       fields: {
         email: "email",
@@ -125,6 +223,27 @@ describe("edgeSchema", () => {
       },
     });
     expect(valid).toBe(true);
+  });
+
+  it("accepts a many: field value referencing an edge by bare name", () => {
+    const validate = validatorFor(edgeSchema());
+    const valid = validate({
+      label: "Task list",
+      description: "d",
+      fields: { tasks: { many: "Task" } },
+    });
+    expect(validate.errors).toBeNull();
+    expect(valid).toBe(true);
+  });
+
+  it("rejects a many: field value that isn't a bare name", () => {
+    const validate = validatorFor(edgeSchema());
+    const valid = validate({
+      label: "Task list",
+      description: "d",
+      fields: { tasks: { many: { type: "utf8", label: "bad", description: "bad" } } },
+    });
+    expect(valid).toBe(false);
   });
 
   it("rejects an edge missing required top-level properties", () => {
@@ -136,7 +255,7 @@ describe("edgeSchema", () => {
   it("rejects an inline field with an unknown scalar type", () => {
     const validate = validatorFor(edgeSchema());
     const valid = validate({
-      name: "Address",
+      label: "Address",
       description: "d",
       fields: {
         street: { type: "int64", label: "Street", description: "d" },
@@ -148,7 +267,7 @@ describe("edgeSchema", () => {
   it("rejects an inline field carrying a redundant name — the map key is the name", () => {
     const validate = validatorFor(edgeSchema());
     const valid = validate({
-      name: "Address",
+      label: "Address",
       description: "d",
       fields: {
         street: { name: "street", type: "utf8", label: "Street", description: "d" },
@@ -160,7 +279,7 @@ describe("edgeSchema", () => {
   it("rejects the same type-appropriateness violations fieldSchema does, inline", () => {
     const validate = validatorFor(edgeSchema());
     const valid = validate({
-      name: "Person",
+      label: "Person",
       description: "d",
       fields: {
         age: {
@@ -176,112 +295,186 @@ describe("edgeSchema", () => {
 });
 
 describe("nodeSchema", () => {
-  it("accepts a minimal node with single-edge sugar for output", () => {
+  it("accepts a minimal node with single-edge sugar for output and a tagged example", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      description: "d",
+      input: "Person",
+      output: "Person",
+      examples: [{ given: { Person: { age: 41 } }, expect: { Person: { age: 42 } } }],
+    });
+    expect(validate.errors).toBeNull();
+    expect(valid).toBe(true);
+  });
+
+  it("accepts an optional label", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      label: "Birthday",
+      description: "d",
+      input: "Person",
+      output: "Person",
+      examples: [{ given: { Person: { age: 41 } }, expect: { Person: { age: 42 } } }],
+    });
+    expect(valid).toBe(true);
+  });
+
+  it("rejects a node carrying a name — the filename is the name", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({
       name: "birthday",
       description: "d",
       input: "Person",
       output: "Person",
+      examples: [{ given: { Person: { age: 41 } }, expect: { Person: { age: 42 } } }],
     });
-    expect(validate.errors).toBeNull();
-    expect(valid).toBe(true);
+    expect(valid).toBe(false);
   });
 
   it("rejects a node missing required top-level properties", () => {
     const validate = validatorFor(nodeSchema());
-    const valid = validate({ name: "birthday" });
+    const valid = validate({ description: "d" });
+    expect(valid).toBe(false);
+  });
+
+  it("rejects a node missing examples", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({ description: "d", input: "Person", output: "Person" });
+    expect(valid).toBe(false);
+  });
+
+  it("rejects a node with an empty examples list", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      description: "d",
+      input: "Person",
+      output: "Person",
+      examples: [],
+    });
     expect(valid).toBe(false);
   });
 
   it("rejects a node carrying an fn key — contract only, no implementation", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({
-      name: "birthday",
       description: "d",
       input: "Person",
       output: "Person",
+      examples: [{ given: { Person: { age: 41 } }, expect: { Person: { age: 42 } } }],
       fn: "() => {}",
     });
     expect(valid).toBe(false);
   });
 
-  it("accepts a oneOf output", () => {
+  it("rejects a given/expect with more than one tag", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({
-      name: "expect_Person_age_42",
+      description: "d",
+      input: "Person",
+      output: "Person",
+      examples: [
+        { given: { Person: { age: 41 }, Other: {} }, expect: { Person: { age: 42 } } },
+      ],
+    });
+    expect(valid).toBe(false);
+  });
+
+  it("accepts a oneOf output with a single-tag expect", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
       description: "d",
       input: "Person",
       output: { oneOf: ["Pass", "Fail"] },
+      examples: [{ given: { Person: { age: 42 } }, expect: { Pass: {} } }],
     });
+    expect(validate.errors).toBeNull();
     expect(valid).toBe(true);
   });
 
-  it("accepts an allOf output", () => {
+  it("rejects an allOf output whose expect has no tags", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({
-      name: "place_order",
       description: "d",
       input: "OrderPlaced",
       output: { allOf: ["InvoiceRequested", "InventoryReserved"] },
+      examples: [{ given: { OrderPlaced: {} }, expect: {} }],
     });
+    expect(valid).toBe(false);
+  });
+
+  it("accepts an allOf output with multiple tags in expect", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      description: "d",
+      input: "OrderPlaced",
+      output: { allOf: ["InvoiceRequested", "InventoryReserved"] },
+      examples: [
+        {
+          given: { OrderPlaced: {} },
+          expect: { InvoiceRequested: {}, InventoryReserved: {} },
+        },
+      ],
+    });
+    expect(validate.errors).toBeNull();
     expect(valid).toBe(true);
   });
 
-  it("accepts a many output", () => {
+  it("accepts a many output whose single tag holds an array", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({
-      name: "siblings",
       description: "d",
       input: "Person",
       output: { many: "Person" },
+      examples: [
+        { given: { Person: { age: 10 } }, expect: { Person: [{ age: 8 }, { age: 12 }] } },
+      ],
     });
+    expect(validate.errors).toBeNull();
     expect(valid).toBe(true);
+  });
+
+  it("rejects a many output whose tag holds an object instead of an array", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      description: "d",
+      input: "Person",
+      output: { many: "Person" },
+      examples: [{ given: { Person: { age: 10 } }, expect: { Person: { age: 8 } } }],
+    });
+    expect(valid).toBe(false);
   });
 
   it("rejects an output with more than one shape key at once", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({
-      name: "bad",
       description: "d",
       input: "Person",
       output: { oneOf: ["Pass"], allOf: ["Fail"] },
+      examples: [{ given: { Person: {} }, expect: { Pass: {} } }],
     });
     expect(valid).toBe(false);
   });
 
-  it("accepts examples as a list of given/expect", () => {
+  it("accepts a closure with a tagged expected", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({
-      name: "birthday",
-      description: "d",
-      input: "Person",
-      output: "Person",
-      examples: [{ given: { age: 41 }, expect: { age: 42 } }],
-    });
-    expect(valid).toBe(true);
-  });
-
-  it("accepts a closure with expected", () => {
-    const validate = validatorFor(nodeSchema());
-    const valid = validate({
-      name: "expect_Person_age_42",
       description: "d",
       input: "Person",
       output: { oneOf: ["Pass", "Fail"] },
-      closure: { expected: { age: 42 } },
+      examples: [{ given: { Person: { age: 42 } }, expect: { Pass: {} } }],
+      closure: { expected: { Person: { age: 42 } } },
     });
     expect(valid).toBe(true);
   });
 
-  it("accepts a closure with literal", () => {
+  it("accepts a closure with a tagged literal", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({
-      name: "origin_Person_literal",
       description: "d",
       input: "Unit",
       output: "Person",
-      closure: { literal: { age: 41 } },
+      examples: [{ given: { Unit: {} }, expect: { Person: { age: 41 } } }],
+      closure: { literal: { Person: { age: 41 } } },
     });
     expect(valid).toBe(true);
   });
@@ -289,11 +482,11 @@ describe("nodeSchema", () => {
   it("rejects a closure with both expected and literal", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({
-      name: "bad",
       description: "d",
       input: "Person",
       output: "Person",
-      closure: { expected: { age: 41 }, literal: { age: 41 } },
+      examples: [{ given: { Person: { age: 41 } }, expect: { Person: { age: 41 } } }],
+      closure: { expected: { Person: { age: 41 } }, literal: { Person: { age: 41 } } },
     });
     expect(valid).toBe(false);
   });
@@ -301,10 +494,10 @@ describe("nodeSchema", () => {
   it("rejects a closure with neither expected nor literal", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({
-      name: "bad",
       description: "d",
       input: "Person",
       output: "Person",
+      examples: [{ given: { Person: { age: 41 } }, expect: { Person: { age: 41 } } }],
       closure: {},
     });
     expect(valid).toBe(false);

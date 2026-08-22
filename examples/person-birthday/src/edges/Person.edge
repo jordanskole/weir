@@ -1,10 +1,11 @@
-name: Person
+label: Person
 description: A person, aging one birthday at a time
 fields:
   age:
     type: uint8
     label: Age
     description: The person's age in years
+    nullable: false
     validations:
       min: 0
       max: 150
