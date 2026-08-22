@@ -1,0 +1,25 @@
+label: Todo
+description: A task a person needs to do, or has done
+fields:
+  title:
+    type: utf8
+    label: Title
+    description: The title of the task
+    nullable: false
+    validations:
+      minLength: 10
+      maxLength: 200
+  description:
+    type: utf8
+    nullable: true
+    label: A longer explaination of the task
+    description: A description of the task
+    validations:
+      minLength: 10
+      maxLength: 2000
+  is_complete:  
+    type: bool # bool is the only type that is not nullable, because it defaults to false
+    label: Is Complete
+    description: Whether the task has been completed
+
+    

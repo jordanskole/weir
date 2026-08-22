@@ -1,0 +1,25 @@
+label: Add Todo To List
+description: Adds a task to a todo list
+input:
+  TodoList
+  Todo
+output:
+  TodoList  
+examples:
+  - given:
+      TodoList:
+        title: "Grocery List"
+        description: "A list of groceries to buy"
+        tasks: []
+      Todo:
+        title: "Buy milk"
+        description: "Get 2% milk from the store"
+        is_complete: false
+    expect:
+      TodoList:
+        title: "Grocery List"
+        description: "A list of groceries to buy"
+        tasks:
+          - title: "Buy milk"
+            description: "Get 2% milk from the store"
+            is_complete: false

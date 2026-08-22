@@ -1,0 +1,21 @@
+label: Todo List
+description: A list of todos a person needs to do, or has done
+fields:
+  title: 
+    type: utf8    
+    label: Title
+    nullable: false
+    description: The title of the todo list
+    validations:
+      minLength: 10
+      maxLength: 200
+  description:
+    type: utf8    
+    label: Description
+    nullable: true
+    description: A description of the todo list
+    validations:
+      minLength: 10
+      maxLength: 2000
+  tasks:
+    many: Todo

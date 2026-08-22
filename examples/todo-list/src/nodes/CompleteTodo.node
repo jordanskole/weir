@@ -1,0 +1,15 @@
+label: Complete Todo
+description: Marks a task as complete
+input: Todo
+output: Todo
+examples:
+  - given:
+      Todo:
+        title: "Buy milk"
+        description: "Get 2% milk from the store"
+        is_complete: false
+    expect:
+      Todo:
+        title: "Buy milk"
+        description: "Get 2% milk from the store"
+        is_complete: true
