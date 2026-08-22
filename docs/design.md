@@ -59,8 +59,13 @@ retains the concrete pre-erasure instance even after the type forgets it.
 ## 3. Composition
 
 Composition primitives, closed set: sequential (`|`), parallel (tensor), symmetry
-(wire crossing), copy, discard, coproduct (branching). Trace (feedback/loops) is
-excluded, or admitted only with a declared iteration bound.
+(wire crossing), copy, discard, coproduct (branching). No loop construct exists, and
+none is needed: a node has no instance to loop back into (§1), so what a loop gets you
+is already available as ordinary forward composition through the log (§5) — ostensibly
+cyclic wiring (`C` feeding `A` again) is just a fresh, later application of the same
+function to new data, ordinary in every way, never a revisit of a prior one. A `while`
+loop needs a mutable slot re-entered in place, which the ambient-state exclusion already
+rules out; nothing here is a special case of that on top.
 
 Node outputs come in three distinct modes, which must not be conflated:
 
