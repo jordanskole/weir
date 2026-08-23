@@ -155,12 +155,33 @@ function fieldShape(): object {
   };
 }
 
+/**
+ * A field pinned to a single boolean value, for spread-with-override
+ * (`edge CompletedTodo { ...Todo, is_complete: true }`) — a distinct field
+ * kind, not a `bool` with a value attached: never `nullable`, never
+ * `validations`, both meaningless on a fixed constant. Standalone, parallel
+ * to `.node`'s existing `literal:`/`expected:` closure split, rather than a
+ * modifier on `type: bool`.
+ */
+function literalFieldShape(): object {
+  return {
+    type: "object",
+    required: ["literal"],
+    properties: {
+      literal: { type: "boolean" },
+      label: { type: "string" },
+      description: { type: "string" },
+    },
+    additionalProperties: false,
+  };
+}
+
 /** Generates a JSON Schema for a standalone `.field` file. */
 export function fieldSchema(): object {
   return {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     title: "Weir field",
-    ...fieldShape(),
+    oneOf: [literalFieldShape(), fieldShape()],
   };
 }
 
@@ -187,6 +208,8 @@ export function edgeSchema(): object {
               properties: { many: { type: "string", minLength: 1 } },
               additionalProperties: false,
             },
+            { type: "boolean" },
+            literalFieldShape(),
           ],
         },
       },

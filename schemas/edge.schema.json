@@ -412,6 +412,27 @@
               }
             },
             "additionalProperties": false
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "object",
+            "required": [
+              "literal"
+            ],
+            "properties": {
+              "literal": {
+                "type": "boolean"
+              },
+              "label": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
           }
         ]
       }
