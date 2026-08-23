@@ -38,7 +38,11 @@ wiring is always declared explicitly, never derived from type identity.
 emit distinct edges: `Person -> one of {Child, Female, Male}`, not `Person -> Person`.
 The consumer's input type *is* the proof, so the decision is never re-derived. Shape is
 shared by spread (`edge Parrot { ...Animal, wingspan: f32 }`), not inheritance — there
-is no type hierarchy.
+is no type hierarchy. Spread composes with override the way it does in any language that
+has it — a later explicit key wins over a spread-inherited one, no separate merge rule
+needed (`edge CompletedTodo { ...Todo, is_complete: true }`). A bare literal in that
+position is its own field kind, not a `bool` with a value attached: pinned to that one
+value, never `nullable`, never `validations`.
 
 Generic instantiations are **invariant**: `Animal<Parrot>` is not assignable where
 `Animal<Whale>` or `Animal<Animal>` is expected.

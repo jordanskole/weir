@@ -174,6 +174,42 @@ describe("fieldSchema", () => {
     expect(validate.errors).toBeNull();
     expect(valid).toBe(true);
   });
+
+  it("accepts a literal field with a label and description", () => {
+    const validate = validatorFor(fieldSchema());
+    const valid = validate({
+      literal: true,
+      label: "Is Complete",
+      description: "Always true on a CompletedTodo",
+    });
+    expect(validate.errors).toBeNull();
+    expect(valid).toBe(true);
+  });
+
+  it("accepts a bare literal field with no label or description", () => {
+    const validate = validatorFor(fieldSchema());
+    const valid = validate({ literal: false });
+    expect(validate.errors).toBeNull();
+    expect(valid).toBe(true);
+  });
+
+  it("rejects a literal field carrying nullable", () => {
+    const validate = validatorFor(fieldSchema());
+    const valid = validate({ literal: true, nullable: false });
+    expect(valid).toBe(false);
+  });
+
+  it("rejects a literal field carrying validations", () => {
+    const validate = validatorFor(fieldSchema());
+    const valid = validate({ literal: true, validations: {} });
+    expect(valid).toBe(false);
+  });
+
+  it("rejects a non-boolean literal value", () => {
+    const validate = validatorFor(fieldSchema());
+    const valid = validate({ literal: "done" });
+    expect(valid).toBe(false);
+  });
 });
 
 describe("edgeSchema", () => {
@@ -242,6 +278,40 @@ describe("edgeSchema", () => {
       label: "Task list",
       description: "d",
       fields: { tasks: { many: { type: "utf8", label: "bad", description: "bad" } } },
+    });
+    expect(valid).toBe(false);
+  });
+
+  it("accepts a bare boolean field value as literal sugar", () => {
+    const validate = validatorFor(edgeSchema());
+    const valid = validate({
+      label: "CompletedTodo",
+      description: "d",
+      fields: { is_complete: true },
+    });
+    expect(validate.errors).toBeNull();
+    expect(valid).toBe(true);
+  });
+
+  it("accepts an explicit literal field value with a label and description", () => {
+    const validate = validatorFor(edgeSchema());
+    const valid = validate({
+      label: "CompletedTodo",
+      description: "d",
+      fields: {
+        is_complete: { literal: true, label: "Is Complete", description: "Always true" },
+      },
+    });
+    expect(validate.errors).toBeNull();
+    expect(valid).toBe(true);
+  });
+
+  it("rejects an inline literal field value carrying nullable", () => {
+    const validate = validatorFor(edgeSchema());
+    const valid = validate({
+      label: "CompletedTodo",
+      description: "d",
+      fields: { is_complete: { literal: true, nullable: false } },
     });
     expect(valid).toBe(false);
   });
