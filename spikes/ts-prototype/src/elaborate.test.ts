@@ -3,11 +3,13 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { elaborate, parseEdgeFile, parseFieldFile } from "./elaborate.js";
+import { elaborate, parseEdgeFile, parseFieldFile, parseNodeFile } from "./elaborate.js";
+import type { AnyEdgeDef } from "./types.js";
 
 const PERSON_BIRTHDAY_SRC = fileURLToPath(
   new URL("../../../examples/person-birthday/src", import.meta.url),
 );
+const TODO_LIST_SRC = fileURLToPath(new URL("../../../examples/todo-list/src", import.meta.url));
 
 let dir: string | undefined;
 
@@ -221,6 +223,134 @@ fields:
   });
 });
 
+describe("parseNodeFile", () => {
+  const Person: AnyEdgeDef = {
+    name: "Person",
+    description: "A person",
+    fields: { age: { type: "uint8", label: "Age", description: "d", nullable: false } },
+  };
+  const Todo: AnyEdgeDef = {
+    name: "Todo",
+    description: "A task",
+    fields: { title: { type: "utf8", label: "Title", description: "d", nullable: false } },
+  };
+  const TodoList: AnyEdgeDef = {
+    name: "TodoList",
+    description: "A list of tasks",
+    fields: { title: { type: "utf8", label: "Title", description: "d", nullable: false } },
+  };
+  const Pass: AnyEdgeDef = { name: "Pass", description: "d", fields: {} };
+  const Fail: AnyEdgeDef = { name: "Fail", description: "d", fields: {} };
+  const edgesByName: Record<string, AnyEdgeDef> = { Person, Todo, TodoList, Pass, Fail };
+  const resolveEdge = (name: string): AnyEdgeDef => {
+    const edge = edgesByName[name];
+    if (!edge) throw new Error(`Cannot resolve "${name}" — no .edge file declares it.`);
+    return edge;
+  };
+
+  it("parses a single-edge input/output node, resolving both by name", () => {
+    const yaml = `
+description: Increments a person's age by one year
+input: Person
+output: Person
+examples:
+  - given:
+      Person:
+        age: 41
+    expect:
+      Person:
+        age: 42
+`;
+    const node = parseNodeFile(yaml, "birthday", resolveEdge);
+    expect(node.name).toBe("birthday");
+    expect(node.input).toEqual({ kind: "single", edge: Person });
+    expect(node.output).toEqual({ kind: "single", edge: Person });
+    expect(node.examples).toEqual([{ given: { Person: { age: 41 } }, expect: { Person: { age: 42 } } }]);
+  });
+
+  it("resolves an every: input into multiple edges, in declared order", () => {
+    const yaml = `
+description: Adds a task to a todo list
+input:
+  every:
+    - TodoList
+    - Todo
+output: TodoList
+examples:
+  - given:
+      TodoList: {}
+      Todo: {}
+    expect:
+      TodoList: {}
+`;
+    const node = parseNodeFile(yaml, "AddTodoToList", resolveEdge);
+    expect(node.input).toEqual({ kind: "every", edges: [TodoList, Todo] });
+  });
+
+  it("resolves a oneOf output into its listed edges, in declared order", () => {
+    const yaml = `
+description: Checks whether a person just turned 42
+input: Person
+output:
+  oneOf:
+    - Pass
+    - Fail
+examples:
+  - given:
+      Person:
+        age: 42
+    expect:
+      Pass: {}
+`;
+    const node = parseNodeFile(yaml, "expect_Person_age_42", resolveEdge);
+    expect(node.output).toEqual({ kind: "oneOf", edges: [Pass, Fail] });
+  });
+
+  it("resolves an allOf output into its listed edges, in declared order", () => {
+    const yaml = `
+description: d
+input: Person
+output:
+  allOf:
+    - Pass
+    - Fail
+`;
+    const node = parseNodeFile(yaml, "weird", resolveEdge);
+    expect(node.output).toEqual({ kind: "allOf", edges: [Pass, Fail] });
+  });
+
+  it("resolves a many output into its single edge", () => {
+    const yaml = `
+description: d
+input: Person
+output:
+  many: Person
+`;
+    const node = parseNodeFile(yaml, "duplicate", resolveEdge);
+    expect(node.output).toEqual({ kind: "many", edge: Person });
+  });
+
+  it("rejects a .node file that declares a name — the filename is the name", () => {
+    const yaml = `
+name: birthday
+description: d
+input: Person
+output: Person
+`;
+    expect(() => parseNodeFile(yaml, "birthday", resolveEdge)).toThrow(/name/i);
+  });
+
+  it("rejects a .node file that declares fn — contract only, no implementation", () => {
+    const yaml = `
+description: d
+input: Person
+output: Person
+fn: "() => {}"
+`;
+    expect(() => parseNodeFile(yaml, "birthday", resolveEdge)).toThrow(/fn/i);
+  });
+});
+
 describe("elaborate", () => {
   it("loads a directory of .field/.edge files, resolving references across both", async () => {
     const root = await writeFixture({
@@ -308,11 +438,80 @@ fields:
     const result = await elaborate(PERSON_BIRTHDAY_SRC);
 
     expect(Object.keys(result.fields)).toEqual(["email"]);
-    expect(Object.keys(result.edges).sort()).toEqual(["Address", "Person", "PersonWithAddress"]);
+    expect(Object.keys(result.edges).sort()).toEqual([
+      "Address",
+      "Fail",
+      "Pass",
+      "Person",
+      "PersonWithAddress",
+    ]);
 
     expect(result.edges.Person!.fields.age).toMatchObject({ type: "uint8" });
     expect(result.edges.Address!.fields.street).toMatchObject({ type: "utf8" });
     expect(result.edges.PersonWithAddress!.fields.email).toBe(result.fields.email);
     expect(result.edges.PersonWithAddress!.fields.address).toBe(result.edges.Address);
+
+    expect(Object.keys(result.nodes).sort()).toEqual(["birthday", "expect_Person_age_42"]);
+    expect(result.nodes.birthday!.input).toEqual({ kind: "single", edge: result.edges.Person });
+    expect(result.nodes.birthday!.output).toEqual({ kind: "single", edge: result.edges.Person });
+    expect(result.nodes.expect_Person_age_42!.output).toEqual({
+      kind: "oneOf",
+      edges: [result.edges.Pass, result.edges.Fail],
+    });
+  });
+
+  it("loads .node files, resolving a single-edge input against a declared edge", async () => {
+    const root = await writeFixture({
+      "edges/Person.edge": `
+description: A person
+fields:
+  age:
+    type: uint8
+    label: Age
+    description: d
+    nullable: false
+`,
+      "nodes/birthday.node": `
+description: Increments a person's age by one year
+input: Person
+output: Person
+examples:
+  - given:
+      Person:
+        age: 41
+    expect:
+      Person:
+        age: 42
+`,
+    });
+
+    const result = await elaborate(root);
+
+    expect(Object.keys(result.nodes)).toEqual(["birthday"]);
+    expect(result.nodes.birthday!.name).toBe("birthday");
+    expect(result.nodes.birthday!.input).toEqual({ kind: "single", edge: result.edges.Person });
+  });
+
+  it("rejects a .node file referencing an edge no .edge file declares", async () => {
+    const root = await writeFixture({
+      "nodes/birthday.node": `
+description: d
+input: Ghost
+output: Ghost
+`,
+    });
+
+    await expect(elaborate(root)).rejects.toThrow(/ghost/i);
+  });
+
+  it("loads the real todo-list example — proving every: input resolves against real hand-authored files", async () => {
+    const result = await elaborate(TODO_LIST_SRC);
+
+    expect(Object.keys(result.nodes).sort()).toEqual(["AddTodoToList", "CompleteTodo", "CreateTodo"]);
+    expect(result.nodes.AddTodoToList!.input).toEqual({
+      kind: "every",
+      edges: [result.edges.TodoList, result.edges.Todo],
+    });
+    expect(result.nodes.AddTodoToList!.output).toEqual({ kind: "single", edge: result.edges.TodoList });
   });
 });
