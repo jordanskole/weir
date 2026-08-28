@@ -296,3 +296,13 @@ export interface NodeDef<In extends InputSpec = InputSpec, O extends OutputSpec 
 
 type ExpectClosure<In extends InputSpec> = { expected: InputPayload<In> };
 type LiteralClosure<O extends OutputSpec> = { literal: OutputResult<O> };
+
+/**
+ * A `.node` file's declared contract only — everything `NodeDef` has except
+ * `fn` (docs/design.md §10: "`Fn` is host code, which a data format can't
+ * and shouldn't hold... A `.node` file declares the contract only").
+ */
+export type NodeDecl<In extends InputSpec = InputSpec, O extends OutputSpec = OutputSpec> = Omit<
+  NodeDef<In, O>,
+  "fn"
+>;
