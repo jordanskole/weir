@@ -252,6 +252,19 @@ function taggedOne(valueSchema: object): object {
  */
 export function nodeSchema(): object {
   const objectPayload = { type: "object" };
+  const inputShapeConditionals = [
+    // single (bare-string input): exactly one tag, payload is an object.
+    {
+      if: { properties: { input: { type: "string" } } },
+      then: { properties: { examples: { items: { properties: { given: taggedOne(objectPayload) } } } } },
+    },
+    // every: several edges must all be present, each tagged by name in given
+    // (docs/design-history.md, "`every` lands") — mirrors allOf's expect shape.
+    {
+      if: { properties: { input: { type: "object", required: ["every"] } } },
+      then: { properties: { examples: { items: { properties: { given: tagged(objectPayload) } } } } },
+    },
+  ];
   const outputShapeConditionals = [
     // single (bare-string output) or oneOf: exactly one tag, payload is an object.
     {
@@ -291,7 +304,17 @@ export function nodeSchema(): object {
     properties: {
       label: { type: "string" },
       description: { type: "string" },
-      input: edgeName,
+      input: {
+        oneOf: [
+          edgeName,
+          {
+            type: "object",
+            properties: { every: edgeNameList },
+            required: ["every"],
+            additionalProperties: false,
+          },
+        ],
+      },
       output: {
         oneOf: [
           edgeName,
@@ -321,10 +344,10 @@ export function nodeSchema(): object {
         items: {
           type: "object",
           required: ["given", "expect"],
-          // given is always single-tagged: a node's input is always exactly
-          // one edge (§10's "Left open" version-pin note aside — no
-          // multi-input/join yet).
-          properties: { given: taggedOne(objectPayload), expect: {} },
+          // given's actual shape (single- vs multi-tagged) is set entirely by
+          // inputShapeConditionals below, the same way expect's is set
+          // entirely by outputShapeConditionals.
+          properties: { given: {}, expect: {} },
           additionalProperties: false,
         },
       },
@@ -346,6 +369,6 @@ export function nodeSchema(): object {
       },
     },
     additionalProperties: false,
-    allOf: outputShapeConditionals,
+    allOf: [...inputShapeConditionals, ...outputShapeConditionals],
   };
 }
