@@ -1,10 +1,11 @@
 label: Add Todo To List
 description: Adds a task to a todo list
 input:
-  TodoList
-  Todo
+  every:
+    - TodoList
+    - Todo
 output:
-  TodoList  
+  TodoList
 examples:
   - given:
       TodoList:

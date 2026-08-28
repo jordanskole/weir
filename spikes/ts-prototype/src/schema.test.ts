@@ -449,6 +449,34 @@ describe("nodeSchema", () => {
     expect(valid).toBe(false);
   });
 
+  it("accepts an every input with a multi-tag given", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      description: "d",
+      input: { every: ["TodoList", "Todo"] },
+      output: "TodoList",
+      examples: [
+        {
+          given: { TodoList: { title: "Groceries", tasks: [] }, Todo: { title: "Buy milk" } },
+          expect: { TodoList: { title: "Groceries", tasks: [{ title: "Buy milk" }] } },
+        },
+      ],
+    });
+    expect(validate.errors).toBeNull();
+    expect(valid).toBe(true);
+  });
+
+  it("rejects an every input whose given has no tags", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      description: "d",
+      input: { every: ["TodoList", "Todo"] },
+      output: "TodoList",
+      examples: [{ given: {}, expect: { TodoList: { title: "Groceries", tasks: [] } } }],
+    });
+    expect(valid).toBe(false);
+  });
+
   it("accepts a oneOf output with a single-tag expect", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({
