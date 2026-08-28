@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { assertEdgeHash, hashEdge, hashEdges } from "./hash.js";
-import type { AnyEdgeDef, EdgeDef } from "./types.js";
+import { assertEdgeHash, hashEdge, hashEdges, hashNode } from "./hash.js";
+import type { AnyEdgeDef, EdgeDef, NodeDecl } from "./types.js";
 
 const base: EdgeDef = {
   name: "example",
@@ -312,6 +312,86 @@ describe("hashEdges", () => {
 
   it("returns an empty object for an empty input", async () => {
     expect(await hashEdges([])).toEqual({});
+  });
+});
+
+describe("hashNode", () => {
+  const Person: AnyEdgeDef = {
+    name: "Person",
+    label: "Person",
+    description: "A person",
+    fields: { age: { type: "uint8", label: "Age", description: "d", nullable: false } },
+  };
+  const Todo: AnyEdgeDef = {
+    name: "Todo",
+    label: "Todo",
+    description: "A task",
+    fields: { title: { type: "utf8", label: "Title", description: "d", nullable: false } },
+  };
+  const TodoList: AnyEdgeDef = {
+    name: "TodoList",
+    label: "Todo List",
+    description: "A list of tasks",
+    fields: { title: { type: "utf8", label: "Title", description: "d", nullable: false } },
+  };
+
+  const birthday: NodeDecl = {
+    name: "birthday",
+    description: "Increments a person's age by one year",
+    input: { kind: "single", edge: Person },
+    output: { kind: "single", edge: Person },
+  };
+
+  it("returns a 64-char hex hash and an 8-char short hash", async () => {
+    const { hash, short } = await hashNode(birthday);
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(short).toBe(hash.slice(0, 8));
+  });
+
+  it("is deterministic for the same input", async () => {
+    expect((await hashNode(birthday)).hash).toBe((await hashNode(birthday)).hash);
+  });
+
+  it("changes when the node name changes", async () => {
+    expect((await hashNode({ ...birthday, name: "other" })).hash).not.toBe(
+      (await hashNode(birthday)).hash,
+    );
+  });
+
+  it("changes when an input edge's shape changes", async () => {
+    const mutated: NodeDecl = {
+      ...birthday,
+      input: { kind: "single", edge: { ...Person, fields: { age: { type: "uint16", label: "Age", description: "d", nullable: false } } } },
+    };
+    expect((await hashNode(mutated)).hash).not.toBe((await hashNode(birthday)).hash);
+  });
+
+  it("does not change when label or description changes", async () => {
+    const mutated: NodeDecl = { ...birthday, label: "Birthday!", description: "different" };
+    expect((await hashNode(mutated)).hash).toBe((await hashNode(birthday)).hash);
+  });
+
+  it("changes when closure differs", async () => {
+    const expectNode: NodeDecl = {
+      name: "expect_Person_age_42",
+      description: "d",
+      input: { kind: "single", edge: Person },
+      output: { kind: "oneOf", edges: [{ name: "Pass", description: "d", fields: {} }, { name: "Fail", description: "d", fields: {} }] },
+      closure: { expected: { age: 42 } },
+    };
+    const differentClosure: NodeDecl = { ...expectNode, closure: { expected: { age: 43 } } };
+    expect((await hashNode(differentClosure)).hash).not.toBe((await hashNode(expectNode)).hash);
+  });
+
+  it("is independent of every: edge declaration order", async () => {
+    const addTodo: NodeDecl = {
+      name: "AddTodoToList",
+      description: "d",
+      input: { kind: "every", edges: [TodoList, Todo] },
+      output: { kind: "single", edge: TodoList },
+    };
+    const reordered: NodeDecl = { ...addTodo, input: { kind: "every", edges: [Todo, TodoList] } };
+    expect((await hashNode(reordered)).hash).toBe((await hashNode(addTodo)).hash);
   });
 });
 
