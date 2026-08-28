@@ -21,7 +21,7 @@
  * (>=20) and modern browsers.
  */
 
-import type { AnyEdgeDef, FieldDef, ManyEdgeDef } from "./types.js";
+import type { AnyEdgeDef, FieldDef, InputSpec, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
 
 interface ScalarFieldFingerprint {
   type: string;
@@ -129,6 +129,70 @@ export async function hashEdges(edges: AnyEdgeDef[]): Promise<Record<string, Sch
     edges.map(async (e) => [e.name, await hashEdge(e)] as const),
   );
   return Object.fromEntries(entries);
+}
+
+/**
+ * A node's structural fingerprint, one layer up from `EdgeFingerprint`
+ * (docs/design.md §10: a new implementation file is generated "when the
+ * node's schema hash no longer matches the one an accepted implementation
+ * exists for"). Only the contract's shape counts — description/label are
+ * excluded, same as `EdgeFingerprint`. `closure` is included: a baked-in
+ * literal (an `expect` node's expected value, an origin's literal) changes
+ * what the implementation must actually compute, even though it doesn't
+ * change `input`/`output`'s types. `examples` is excluded on purpose —
+ * examples are the acceptance test suite *for* a contract, not part of the
+ * contract itself (§10: "written once it passes both its examples and
+ * generated property cases" — examples gate acceptance, they don't define
+ * the hash being accepted against).
+ */
+interface NodeFingerprint {
+  name: string;
+  input: InputSpecFingerprint;
+  output: OutputSpecFingerprint;
+  closure?: unknown;
+}
+
+type InputSpecFingerprint =
+  | { kind: "single"; edge: EdgeFingerprint }
+  | { kind: "every"; edges: EdgeFingerprint[] };
+
+type OutputSpecFingerprint =
+  | { kind: "single"; edge: EdgeFingerprint }
+  | { kind: "oneOf"; edges: EdgeFingerprint[] }
+  | { kind: "allOf"; edges: EdgeFingerprint[] }
+  | { kind: "many"; edge: EdgeFingerprint };
+
+/** Sorted by name, same "independent of declaration order" rule as an edge's own fields. */
+function fingerprintEdgeList(edges: AnyEdgeDef[]): EdgeFingerprint[] {
+  return [...edges].sort((a, b) => a.name.localeCompare(b.name)).map(fingerprint);
+}
+
+function fingerprintInput(input: InputSpec): InputSpecFingerprint {
+  if (input.kind === "single") return { kind: "single", edge: fingerprint(input.edge) };
+  return { kind: "every", edges: fingerprintEdgeList(input.edges) };
+}
+
+function fingerprintOutput(output: OutputSpec): OutputSpecFingerprint {
+  if (output.kind === "single") return { kind: "single", edge: fingerprint(output.edge) };
+  if (output.kind === "many") return { kind: "many", edge: fingerprint(output.edge) };
+  return { kind: output.kind, edges: fingerprintEdgeList(output.edges) };
+}
+
+function fingerprintNode(node: NodeDecl): NodeFingerprint {
+  return {
+    name: node.name,
+    input: fingerprintInput(node.input),
+    output: fingerprintOutput(node.output),
+    ...(node.closure !== undefined && { closure: node.closure }),
+  };
+}
+
+export async function hashNode(node: NodeDecl): Promise<SchemaHash> {
+  const json = JSON.stringify(fingerprintNode(node));
+  const bytes = new TextEncoder().encode(json);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const hash = toHex(digest);
+  return { hash, short: hash.slice(0, 8) };
 }
 
 /**
