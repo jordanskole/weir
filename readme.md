@@ -25,6 +25,6 @@ Because a node's input and output are fully typed, that same type doubles as a w
 
 Early. Nothing works yet.
 
-See [`docs/design.md`](docs/design.md) for the current-state spec — including the formal notation and vocabulary trimmed out of this page — [`docs/design-history.md`](docs/design-history.md) for how it was arrived at, [`docs/getting-started.md`](docs/getting-started.md) for the build order, and [`docs/open-questions.md`](docs/open-questions.md) for what's still unresolved.
+See [`docs/design.md`](docs/design.md) for the current-state spec — including the formal notation and vocabulary trimmed out of this page — [`docs/design-history.md`](docs/design-history.md) for how it was arrived at, [`docs/getting-started.md`](docs/getting-started.md) for the build order, [`docs/open-questions.md`](docs/open-questions.md) for what's still unresolved, and [`docs/prior-art-blue-ribbon-properties.md`](docs/prior-art-blue-ribbon-properties.md) for an in-flight sibling project whose independent design keeps landing on the same shapes.
 
 If this rhymes with something you're already thinking about, I'd like to hear from you — that's most of the reason this is public at all.
