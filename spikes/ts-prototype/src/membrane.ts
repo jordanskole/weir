@@ -5,9 +5,11 @@
  * pass `membrane()` beyond the NodeDef itself.
  *
  * Covers `single` and `every` InputSpecs, including compound (nested-edge)
- * and many-of-compound fields in the payload being asserted. Not yet built:
- * `scope`/identity resolution, and turning a rejection into a Failed<In>
- * edge rather than a thrown error (design.md §3). `first`/`each` (docs/design-history.md,
+ * and many-of-compound fields in the payload being asserted. A rejected
+ * assert or an uncaught throw from `Fn` resolves to `Failed<In>` rather
+ * than rejecting the returned promise — never an exception escaping the
+ * boundary (design.md §3; design-history.md, "The membrane"). Not yet
+ * built: `scope`/identity resolution. `first`/`each` (docs/design-history.md,
  * "membrane()") are deferred further still — they distinguish reacting to
  * the 1st vs. every occurrence of a recurring edge, which can't happen
  * without a graph cycle (no edge type recurs within one invocation
@@ -16,6 +18,7 @@
 
 import type {
   AnyEdgeDef,
+  Failed,
   FieldDef,
   InputPayload,
   InputSpec,
@@ -129,7 +132,9 @@ export class InMemoryLog implements Log {
 }
 
 /** What `membrane()` returns for a `single`-input node: hand it a payload directly. */
-type SingleInvoke<O extends OutputSpec> = (payload: unknown) => Promise<OutputResult<O>>;
+type SingleInvoke<In extends InputSpec, O extends OutputSpec> = (
+  payload: unknown,
+) => Promise<OutputResult<O> | Failed<In>>;
 
 /**
  * What `membrane()` returns for an `every`-input node: a readiness check
@@ -138,11 +143,18 @@ type SingleInvoke<O extends OutputSpec> = (payload: unknown) => Promise<OutputRe
  * all appeared yet; a caller (a scheduler, not built here) decides when to
  * try again.
  */
-type EveryInvoke<O extends OutputSpec> = (correlationId: string, log: Log) => Promise<OutputResult<O> | undefined>;
+type EveryInvoke<In extends InputSpec, O extends OutputSpec> = (
+  correlationId: string,
+  log: Log,
+) => Promise<OutputResult<O> | Failed<In> | undefined>;
 
 type MembraneInvoke<In extends InputSpec, O extends OutputSpec> = In extends { kind: "single" }
-  ? SingleInvoke<O>
-  : EveryInvoke<O>;
+  ? SingleInvoke<In, O>
+  : EveryInvoke<In, O>;
+
+function reasonOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
 
 /**
  * Wraps a node's Fn so it can never run against an unasserted or
@@ -150,28 +162,58 @@ type MembraneInvoke<In extends InputSpec, O extends OutputSpec> = In extends { k
  * declaration itself — the returned function's behavior, and its very
  * shape (direct payload vs. correlation-id readiness check), is entirely a
  * product of what the NodeDef's `input` says, never separately configured.
+ * A rejected assert or an uncaught throw from `Fn` resolves to `Failed<In>`
+ * — `{ input, reason }` — rather than rejecting; nothing escapes the
+ * boundary as an exception (design.md §3).
  */
 export function membrane<In extends InputSpec, O extends OutputSpec>(
   nodeDef: NodeDef<In, O>,
 ): MembraneInvoke<In, O> {
   if (nodeDef.input.kind === "single") {
     const edge = nodeDef.input.edge;
-    const invoke: SingleInvoke<O> = async (payload) => {
-      const validated = assertPayload(edge, payload);
-      return nodeDef.fn(validated as InputPayload<In>);
+    const invoke: SingleInvoke<In, O> = async (payload) => {
+      let validated: InputPayload<In>;
+      try {
+        validated = assertPayload(edge, payload) as InputPayload<In>;
+      } catch (cause) {
+        return { input: payload as InputPayload<In>, reason: reasonOf(cause) };
+      }
+      try {
+        return await nodeDef.fn(validated);
+      } catch (cause) {
+        return { input: validated, reason: reasonOf(cause) };
+      }
     };
     return invoke as MembraneInvoke<In, O>;
   }
 
   const edges = nodeDef.input.edges;
-  const invoke: EveryInvoke<O> = async (correlationId, log) => {
-    const bag: Record<string, unknown> = {};
+  const invoke: EveryInvoke<In, O> = async (correlationId, log) => {
+    const rawBag: Record<string, unknown> = {};
     for (const edge of edges) {
       const value = log.latest(edge.name, correlationId);
       if (value === undefined) return undefined;
-      bag[edge.name] = assertPayload(edge, value);
+      rawBag[edge.name] = value;
     }
-    return nodeDef.fn(bag as InputPayload<In>);
+
+    const bag: Record<string, unknown> = {};
+    const errors: string[] = [];
+    for (const edge of edges) {
+      try {
+        bag[edge.name] = assertPayload(edge, rawBag[edge.name]);
+      } catch (cause) {
+        errors.push(reasonOf(cause));
+      }
+    }
+    if (errors.length > 0) {
+      return { input: rawBag as InputPayload<In>, reason: errors.join("; ") };
+    }
+
+    try {
+      return await nodeDef.fn(bag as InputPayload<In>);
+    } catch (cause) {
+      return { input: bag as InputPayload<In>, reason: reasonOf(cause) };
+    }
   };
   return invoke as MembraneInvoke<In, O>;
 }

@@ -252,15 +252,32 @@ export type OutputResult<O extends OutputSpec> = O extends {
         : never;
 
 /**
+ * What every node's real output signature includes alongside its declared
+ * shape (docs/design.md §3: "every node's real output signature includes
+ * Failed<In>"), parameterized by the failing node's own input so a retry
+ * node has something to re-emit, not just a notification something went
+ * wrong. The runtime constructs this automatically when the membrane
+ * rejects a payload or `Fn` throws (`reason` populated from whatever was
+ * thrown); an author may also construct and return one explicitly for a
+ * distinguishable failure mode — same opt-in shape as `env` on `Fn`.
+ */
+export interface Failed<In extends InputSpec> {
+  input: InputPayload<In>;
+  reason?: string;
+}
+
+/**
  * A node's implementation. Context-free by default; a second `env`
  * parameter opts a node into seeing the envelope (docs/design.md §1). Not
  * a string reference — see spikes/ts-prototype/README.md for why a spike
- * represents "Fn reference" as a real typed function.
+ * represents "Fn reference" as a real typed function. May return `Failed<In>`
+ * explicitly instead of its normal success value (above); an uncaught throw
+ * is turned into one automatically by the membrane, not by `Fn` itself.
  */
 export type Fn<In extends InputSpec, O extends OutputSpec> = (
   payload: InputPayload<In>,
   env?: Envelope,
-) => OutputResult<O> | Promise<OutputResult<O>>;
+) => OutputResult<O> | Failed<In> | Promise<OutputResult<O> | Failed<In>>;
 
 /**
  * A single example in composition syntax, structurally: given -> expect
