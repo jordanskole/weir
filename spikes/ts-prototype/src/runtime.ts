@@ -1,0 +1,155 @@
+/**
+ * The runtime (docs/getting-started.md step 5): walks a `Program`'s
+ * `wiring` in pulse order, calling each reachable node through `membrane()`
+ * and appending successful results to the `Log`. Implements the pulse/wave
+ * model design-history.md already decided ("`every` lands; a pulse/wave
+ * model settles graph-level scheduling") as a worklist rather than
+ * precomputed pulse numbers: a node is attempted once after each of its
+ * declared parents fires (every parent lists it again under its own
+ * `then:`, per `.topology`'s own convention — design-history.md, "`.topology`
+ * built"), and firing is idempotent (a `fired` set), so the *outcome* is
+ * the same as running discrete pulses to a fixpoint without needing to
+ * number them.
+ *
+ * Deliberately narrow, stated here rather than left implicit:
+ * - **`single`-output nodes only.** `oneOf`/`allOf`/`many` output routing
+ *   isn't built — a node declaring one of those is recorded in
+ *   `unsupported` and simply doesn't fire, rather than crashing the walk.
+ * - **No `Failed<In>` routing.** Design says a failure is "an edge
+ *   instance like any other" and a retry node should be able to consume
+ *   one, but `Failed<In>` isn't a real, named edge in the system yet, so
+ *   there's no key to log it under and no way a downstream node could
+ *   declare it as an input. A `Failed<In>` result is collected in
+ *   `failures` instead of the shared `Log` — honest silence downstream,
+ *   not an invented routing scheme (docs/open-questions.md, "Should
+ *   `Failed<In>` be tagged like `oneOf`'s other branches?").
+ * - **Disambiguating a real `Failed<In>` from a genuine `single`-output
+ *   success value is a heuristic** (`looksLikeFailed`), not a real
+ *   discriminant — the same open, undecided wire-format question. Safe
+ *   for every real edge in this repo today (none has exactly `{input}` or
+ *   `{input, reason}` as its full field set); would misfire against a
+ *   hypothetical edge that did.
+ * - **A node whose own name recurs as its own (transitive) descendant
+ *   fires at most once per invocation**, not once per literal repetition
+ *   a hand-authored `.topology` chain like `birthday.then.birthday.then.birthday`
+ *   implies. Firing it repeatedly without a bound would loop forever —
+ *   `.topology`'s adjacency-list `Wiring` can't distinguish "run it 3
+ *   times" from "run it forever" once collapsed from nested YAML into a
+ *   flat parent→children map, and design-history.md ("Weir has no loop
+ *   construct") already flags that a real iteration-count bound isn't
+ *   designed yet either. Firing once is the conservative, terminating
+ *   default until that exists — not a claim the repeated-application case
+ *   is actually supported.
+ */
+
+import { membrane } from "./membrane.js";
+import type { Log } from "./membrane.js";
+import type { Program } from "./implementation.js";
+import type { Failed, InputSpec, PayloadOf } from "./types.js";
+import { Identity } from "./types.js";
+
+/**
+ * `program.nodes` stores heterogeneous NodeDefs in one `Record<string,
+ * NodeDef>`, erasing each node's own literal `In`/`O` to the generic
+ * default. `membrane()`'s return type is a conditional on `In`, which TS
+ * can't resolve from that erased generic even after `nodeDef.input.kind`
+ * has been checked at the value level — a real TS narrowing limitation,
+ * not a genuine call-shape ambiguity (checked at runtime by the `kind`
+ * branch itself). These two aliases name the cast instead of hiding it.
+ */
+type AnySingleInvoke = (
+  payload: unknown,
+  correlationId: string,
+  identity?: PayloadOf<typeof Identity>,
+) => Promise<unknown>;
+type AnyEveryInvoke = (
+  correlationId: string,
+  log: Log,
+  identity?: PayloadOf<typeof Identity>,
+) => Promise<unknown>;
+
+export interface RunResult {
+  failures: { node: string; failed: Failed<InputSpec> }[];
+  unsupported: { node: string; reason: string }[];
+}
+
+/**
+ * A pragmatic, documented heuristic (see file header) — not a real
+ * discriminant. `Failed<In>` is always exactly `{ input }` or
+ * `{ input, reason }`; nothing else in this repo's edges collides.
+ */
+function looksLikeFailed(result: unknown): result is Failed<InputSpec> {
+  if (typeof result !== "object" || result === null || Array.isArray(result)) return false;
+  const keys = Object.keys(result);
+  if (!keys.includes("input")) return false;
+  return keys.every((key) => key === "input" || key === "reason");
+}
+
+export async function runNetlist(
+  program: Program,
+  log: Log,
+  correlationId: string,
+  originPayloads: Record<string, unknown>,
+  identity?: PayloadOf<typeof Identity>,
+): Promise<RunResult> {
+  const failures: RunResult["failures"] = [];
+  const unsupported: RunResult["unsupported"] = [];
+  const fired = new Set<string>();
+  const origins = new Set(program.wiring.origins);
+
+  async function tryFire(nodeName: string): Promise<boolean> {
+    if (fired.has(nodeName)) return false;
+
+    const nodeDef = program.nodes[nodeName];
+    if (!nodeDef) {
+      throw new Error(`Wiring references "${nodeName}", but no .node file declares it.`);
+    }
+
+    if (nodeDef.output.kind !== "single") {
+      fired.add(nodeName);
+      unsupported.push({
+        node: nodeName,
+        reason: `runNetlist only supports single-output nodes today (declares "${nodeDef.output.kind}").`,
+      });
+      return false;
+    }
+
+    let result: unknown;
+    if (nodeDef.input.kind === "single") {
+      let payload: unknown;
+      if (origins.has(nodeName)) {
+        if (!(nodeName in originPayloads)) return false;
+        payload = originPayloads[nodeName];
+      } else {
+        payload = log.latest(nodeDef.input.edge.name, correlationId);
+        if (payload === undefined) return false;
+      }
+      result = await (membrane(nodeDef) as AnySingleInvoke)(payload, correlationId, identity);
+    } else {
+      const every = await (membrane(nodeDef) as AnyEveryInvoke)(correlationId, log, identity);
+      if (every === undefined) return false;
+      result = every;
+    }
+
+    fired.add(nodeName);
+    if (looksLikeFailed(result)) {
+      failures.push({ node: nodeName, failed: result });
+    } else {
+      log.append(nodeDef.output.edge.name, correlationId, result);
+    }
+    return true;
+  }
+
+  const queue = [...program.wiring.origins];
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    const didFire = await tryFire(name);
+    if (didFire) {
+      for (const child of program.wiring.feeds[name] ?? []) {
+        queue.push(child);
+      }
+    }
+  }
+
+  return { failures, unsupported };
+}
