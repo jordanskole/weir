@@ -171,18 +171,38 @@ export type Payload<F extends Record<string, FieldDef | AnyEdgeDef | ManyEdgeDef
 export type PayloadOf<E extends AnyEdgeDef> = Payload<E["fields"]>;
 
 /**
- * The principal an invocation runs as — the "on behalf of" (docs/design-history.md,
- * "Identity is the actor, edges are the resource"). Every invocation has one, even a
- * system/scheduler-triggered one; there is no identity-less execution. Placeholder
- * shape until the actor model is designed — `Unit`'s idiom, not `{}` (which types
- * as "any non-nullish value", not "empty object").
+ * The one true framework-provided system edge (docs/design-history.md,
+ * "Membrane moves out of Primitives; identity resolves to one system
+ * edge") — the "on behalf of" every invocation runs as, verified exactly
+ * once by the outer membrane from a JWT and never produced by an ordinary
+ * node. `sub`/`iss` are non-nullable: there is no identity-less execution,
+ * not even a system/scheduler-triggered one (design-history.md, "Identity
+ * is the actor, edges are the resource") — an anonymous or system actor
+ * still gets real, non-null claims (e.g. `sub: "system"`), never an absent
+ * or empty Identity. What richer things `sub`/`iss` alone can't carry
+ * (a `scopes`/granted-permissions claim, in particular) stays punted:
+ * weir's field model has no scalar-array field type yet, a real,
+ * independent gap discovered building this, not the same thing as the
+ * separately-deferred PDP question (getting-started.md).
  */
-export type Identity = Record<string, never>;
+export const Identity: EdgeDef<{ sub: FieldDef<"utf8">; iss: FieldDef<"utf8"> }> = {
+  name: "Identity",
+  label: "Identity",
+  description: "The verified-once JWT claims an invocation runs on behalf of.",
+  fields: {
+    sub: { type: "utf8", label: "Subject", description: "The identity's subject claim.", nullable: false },
+    iss: { type: "utf8", label: "Issuer", description: "The identity's issuer claim.", nullable: false },
+  },
+};
 
 /**
  * Per-invocation metadata wrapping every edge instance (docs/design.md §1).
  * A node's Fn does not see this by default; a second `env` parameter is
  * what opts a node into being context-dependent (routers, dedupers).
+ * `identity` is narrowed to exactly the fields a node's `scope` declares
+ * (docs/design-history.md, "Identity is a verified-once JWT..."), `{}`
+ * when no `scope` is declared — never the whole object, hence `Partial`
+ * rather than `PayloadOf<typeof Identity>`'s full shape.
  */
 export interface Envelope {
   id: string;
@@ -190,7 +210,7 @@ export interface Envelope {
   causationId: string | null;
   timestamp: string;
   step: number;
-  identity: Identity;
+  identity: Partial<PayloadOf<typeof Identity>>;
   schemaHash: string;
 }
 
@@ -309,6 +329,17 @@ export interface NodeDef<In extends InputSpec = InputSpec, O extends OutputSpec 
    * monomorphizes"; examples/person-birthday/README.md decision 4).
    */
   closure?: ExpectClosure<In> | LiteralClosure<O>;
+  /**
+   * `verb:edge:field` declarations (docs/design-history.md, "Identity is a
+   * verified-once JWT; `scope` becomes a per-node declaration") — e.g.
+   * `"read:Identity:sub"`. Optional, deliberately unlike `nullable`: a node
+   * needing nothing beyond the thread's existing identity is a common,
+   * legitimate default, not a footgun being papered over. Only `read:Identity:*`
+   * resolves to anything today — `Identity` is the one edge this can name
+   * (design-history.md); whether the mechanism generalizes to every edge, or
+   * is `every:`'s field-narrowed sibling, is still open (open-questions.md).
+   */
+  scope?: string[];
 }
 
 type ExpectClosure<In extends InputSpec> = { expected: InputPayload<In> };

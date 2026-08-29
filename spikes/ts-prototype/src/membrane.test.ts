@@ -319,3 +319,82 @@ describe("membrane — envelope", () => {
     expect(received?.correlationId).toBe("thread-1");
   });
 });
+
+describe("membrane — scope", () => {
+  it("gives env.identity as {} when no scope is declared, even with a real identity supplied", async () => {
+    let received: unknown;
+    const node = defineNode({
+      ...birthday,
+      fn: (person, env) => {
+        received = env?.identity;
+        return person;
+      },
+    });
+    await membrane(node)({ age: 41, nickname: null }, "thread-1", { sub: "user-1", iss: "issuer" });
+    expect(received).toEqual({});
+  });
+
+  it("narrows env.identity to only the fields scope names", async () => {
+    let received: unknown;
+    const node = defineNode({
+      ...birthday,
+      scope: ["read:Identity:sub"],
+      fn: (person, env) => {
+        received = env?.identity;
+        return person;
+      },
+    });
+    await membrane(node)({ age: 41, nickname: null }, "thread-1", { sub: "user-1", iss: "issuer" });
+    expect(received).toEqual({ sub: "user-1" });
+  });
+
+  it("defaults to a system identity when the caller supplies none", async () => {
+    let received: unknown;
+    const node = defineNode({
+      ...birthday,
+      scope: ["read:Identity:sub"],
+      fn: (person, env) => {
+        received = env?.identity;
+        return person;
+      },
+    });
+    await membrane(node)({ age: 41, nickname: null }, "thread-1");
+    expect(received).toEqual({ sub: expect.any(String) });
+  });
+
+  it("resolves to Failed<In> when scope names a field Identity doesn't have", async () => {
+    const node = defineNode({ ...birthday, scope: ["read:Identity:email"] });
+    const result = await membrane(node)({ age: 41, nickname: null }, "thread-1", {
+      sub: "user-1",
+      iss: "issuer",
+    });
+    expect(result).toEqual({
+      input: { age: 41, nickname: null },
+      reason: expect.stringMatching(/email/),
+    });
+  });
+
+  it("resolves to Failed<In> when scope names an edge other than Identity", async () => {
+    const node = defineNode({ ...birthday, scope: ["read:Person:age"] });
+    const result = await membrane(node)({ age: 41, nickname: null }, "thread-1", {
+      sub: "user-1",
+      iss: "issuer",
+    });
+    expect(result).toEqual({
+      input: { age: 41, nickname: null },
+      reason: expect.stringMatching(/Person/),
+    });
+  });
+
+  it("resolves to Failed<In> for an unsupported verb", async () => {
+    const node = defineNode({ ...birthday, scope: ["write:Identity:sub"] });
+    const result = await membrane(node)({ age: 41, nickname: null }, "thread-1", {
+      sub: "user-1",
+      iss: "issuer",
+    });
+    expect(result).toEqual({
+      input: { age: 41, nickname: null },
+      reason: expect.stringMatching(/write/),
+    });
+  });
+});
