@@ -22,45 +22,57 @@ const birthday = defineNode({
 describe("membrane", () => {
   it("calls fn with a payload that matches the node's declared input edge", async () => {
     const invoke = membrane(birthday);
-    await expect(invoke({ age: 41, nickname: null })).resolves.toEqual({ age: 42, nickname: null });
+    await expect(invoke({ age: 41, nickname: null }, "thread-1")).resolves.toEqual({ age: 42, nickname: null });
   });
 
   it("is derived purely from the NodeDef — no separate configuration", async () => {
     // Same node, a second membrane() call: nothing to pass but the NodeDef itself.
     const invoke = membrane(birthday);
-    await expect(invoke({ age: 10, nickname: "Bird" })).resolves.toEqual({ age: 11, nickname: "Bird" });
+    await expect(invoke({ age: 10, nickname: "Bird" }, "thread-1")).resolves.toEqual({ age: 11, nickname: "Bird" });
   });
 
   it("resolves to Failed<In>, carrying the original payload, when a required field is missing — fn never runs", async () => {
     let called = false;
     const node = defineNode({ ...birthday, fn: (p) => { called = true; return p; } });
-    const result = await membrane(node)({ nickname: null });
+    const result = await membrane(node)({ nickname: null }, "thread-1");
     expect(result).toEqual({ input: { nickname: null }, reason: expect.stringMatching(/age/) });
     expect(called).toBe(false);
   });
 
   it("resolves to Failed<In> for the wrong type on a field", async () => {
-    const result = await membrane(birthday)({ age: "old", nickname: null });
+    const result = await membrane(birthday)({ age: "old", nickname: null }, "thread-1");
     expect(result).toEqual({ input: { age: "old", nickname: null }, reason: expect.stringMatching(/age/) });
   });
 
   it("resolves to Failed<In> for null on a non-nullable field", async () => {
-    const result = await membrane(birthday)({ age: null, nickname: null });
+    const result = await membrane(birthday)({ age: null, nickname: null }, "thread-1");
     expect(result).toEqual({ input: { age: null, nickname: null }, reason: expect.stringMatching(/age/) });
   });
 
   it("accepts null for a nullable field", async () => {
-    await expect(membrane(birthday)({ age: 5, nickname: null })).resolves.toEqual({ age: 6, nickname: null });
+    await expect(membrane(birthday)({ age: 5, nickname: null }, "thread-1")).resolves.toEqual({
+      age: 6,
+      nickname: null,
+    });
   });
 
   it("resolves to Failed<In> for a non-object payload", async () => {
-    expect(await membrane(birthday)("nope")).toEqual({ input: "nope", reason: expect.stringMatching(/Person/) });
-    expect(await membrane(birthday)(null)).toEqual({ input: null, reason: expect.stringMatching(/Person/) });
-    expect(await membrane(birthday)([])).toEqual({ input: [], reason: expect.stringMatching(/Person/) });
+    expect(await membrane(birthday)("nope", "thread-1")).toEqual({
+      input: "nope",
+      reason: expect.stringMatching(/Person/),
+    });
+    expect(await membrane(birthday)(null, "thread-1")).toEqual({
+      input: null,
+      reason: expect.stringMatching(/Person/),
+    });
+    expect(await membrane(birthday)([], "thread-1")).toEqual({
+      input: [],
+      reason: expect.stringMatching(/Person/),
+    });
   });
 
   it("lists every violation in Failed<In>.reason, not just the first", async () => {
-    const result = await membrane(birthday)({ age: "old", nickname: 5 });
+    const result = await membrane(birthday)({ age: "old", nickname: 5 }, "thread-1");
     expect(result).toEqual({
       input: { age: "old", nickname: 5 },
       reason: expect.stringMatching(/age/),
@@ -75,7 +87,7 @@ describe("membrane", () => {
         throw new Error("kaboom");
       },
     });
-    const result = await membrane(node)({ age: 41, nickname: null });
+    const result = await membrane(node)({ age: 41, nickname: null }, "thread-1");
     expect(result).toEqual({ input: { age: 41, nickname: null }, reason: "kaboom" });
   });
 
@@ -84,7 +96,7 @@ describe("membrane", () => {
       ...birthday,
       fn: (p) => ({ input: p, reason: "too old to have a birthday" }),
     });
-    const result = await membrane(node)({ age: 200, nickname: null });
+    const result = await membrane(node)({ age: 200, nickname: null }, "thread-1");
     expect(result).toEqual({ input: { age: 200, nickname: null }, reason: "too old to have a birthday" });
   });
 });
@@ -254,5 +266,56 @@ describe("membrane — every", () => {
     log.append("B", "thread-1", { value: "b" });
     const result = await membrane(throwing)("thread-1", log);
     expect(result).toEqual({ input: { A: { value: "a" }, B: { value: "b" } }, reason: "kaboom" });
+  });
+});
+
+describe("membrane — envelope", () => {
+  it("does not pass an env argument to an fn declared with one parameter", async () => {
+    let receivedArgs = -1;
+    const node = defineNode({
+      ...birthday,
+      fn: (...args: unknown[]) => {
+        receivedArgs = args.length;
+        return { age: 1, nickname: null };
+      },
+    });
+    await membrane(node)({ age: 41, nickname: null }, "thread-1");
+    expect(receivedArgs).toBe(1);
+  });
+
+  it("passes a real Envelope as the second argument to an fn declared with two parameters", async () => {
+    let received: Record<string, unknown> | undefined;
+    const node = defineNode({
+      ...birthday,
+      fn: (person, env) => {
+        received = env as unknown as Record<string, unknown>;
+        return person;
+      },
+    });
+    await membrane(node)({ age: 41, nickname: null }, "thread-1");
+
+    expect(received?.correlationId).toBe("thread-1");
+    expect(received?.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(received?.causationId).toBeNull();
+    expect(typeof received?.timestamp).toBe("string");
+    expect(new Date(received?.timestamp as string).toString()).not.toBe("Invalid Date");
+    expect(typeof received?.schemaHash).toBe("string");
+    expect(received?.identity).toEqual({});
+  });
+
+  it("gives every-input nodes a real Envelope the same way", async () => {
+    let received: Record<string, unknown> | undefined;
+    const node = defineNode({
+      ...nodeC,
+      fn: (bag, env) => {
+        received = env as unknown as Record<string, unknown>;
+        return { value: `${bag.A.value}+${bag.B.value}` };
+      },
+    });
+    const log = new InMemoryLog();
+    log.append("A", "thread-1", { value: "a" });
+    log.append("B", "thread-1", { value: "b" });
+    await membrane(node)("thread-1", log);
+    expect(received?.correlationId).toBe("thread-1");
   });
 });

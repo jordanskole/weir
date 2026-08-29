@@ -8,20 +8,38 @@
  * and many-of-compound fields in the payload being asserted. A rejected
  * assert or an uncaught throw from `Fn` resolves to `Failed<In>` rather
  * than rejecting the returned promise — never an exception escaping the
- * boundary (design.md §3; design-history.md, "The membrane"). Not yet
- * built: `scope`/identity resolution. `first`/`each` (docs/design-history.md,
+ * boundary (design.md §3; design-history.md, "The membrane"). Builds a
+ * real `Envelope` and passes it to `Fn` as its second argument when `Fn`
+ * declares one (arity-detected, `fn.length >= 2` — same opt-in shape `env`
+ * already has on `Fn`, made real here for the first time). Two of
+ * `Envelope`'s fields are honest placeholders, not resolved: `causationId`
+ * is always `null` (no causation-chain tracking exists yet — nothing
+ * currently tells a node which specific upstream edge instance triggered
+ * it) and `step` is always `0` (the pulse/wave model design-history.md
+ * already decided isn't wired into the membrane yet). `identity` is
+ * `{}`, matching `Identity`'s own still-placeholder type — `scope`
+ * resolution stays not yet built, now one layer closer since `Envelope`
+ * (identity's carrier) is real.
+ *
+ * Not yet built: `scope`/identity resolution itself, and everything
+ * downstream of a real `correlationId` source (`.topology`/the runtime
+ * decide what a node's `correlationId` actually is; the membrane only
+ * ever receives one, never mints it). `first`/`each` (docs/design-history.md,
  * "membrane()") are deferred further still — they distinguish reacting to
  * the 1st vs. every occurrence of a recurring edge, which can't happen
  * without a graph cycle (no edge type recurs within one invocation
  * otherwise), and cycle/bounded-iteration support doesn't exist yet either.
  */
 
+import { hashNode } from "./hash.js";
 import type {
   AnyEdgeDef,
+  Envelope,
   Failed,
   FieldDef,
   InputPayload,
   InputSpec,
+  NodeDecl,
   NodeDef,
   OutputResult,
   OutputSpec,
@@ -131,9 +149,10 @@ export class InMemoryLog implements Log {
   }
 }
 
-/** What `membrane()` returns for a `single`-input node: hand it a payload directly. */
+/** What `membrane()` returns for a `single`-input node: hand it a payload and the invocation's correlationId. */
 type SingleInvoke<In extends InputSpec, O extends OutputSpec> = (
   payload: unknown,
+  correlationId: string,
 ) => Promise<OutputResult<O> | Failed<In>>;
 
 /**
@@ -157,6 +176,37 @@ function reasonOf(cause: unknown): string {
 }
 
 /**
+ * Builds this invocation's Envelope. `causationId` and `step` are honest
+ * placeholders (see file header) — real values need mechanisms that don't
+ * exist yet (causation-chain tracking, pulse scheduling), not a design
+ * decision being punted silently.
+ */
+async function buildEnvelope(nodeDecl: NodeDecl, correlationId: string): Promise<Envelope> {
+  return {
+    id: crypto.randomUUID(),
+    correlationId,
+    causationId: null,
+    timestamp: new Date().toISOString(),
+    step: 0,
+    identity: {},
+    schemaHash: (await hashNode(nodeDecl)).hash,
+  };
+}
+
+/**
+ * Calls `Fn` with an `Envelope` only if it declared a second parameter to
+ * receive one — arity-detected (`fn.length`), the same opt-in `env` already
+ * had at the type level, made real here for the first time.
+ */
+function callFn<In extends InputSpec, O extends OutputSpec>(
+  nodeDef: NodeDef<In, O>,
+  payload: InputPayload<In>,
+  envelope: Envelope,
+): OutputResult<O> | Failed<In> | Promise<OutputResult<O> | Failed<In>> {
+  return nodeDef.fn.length >= 2 ? nodeDef.fn(payload, envelope) : nodeDef.fn(payload);
+}
+
+/**
  * Wraps a node's Fn so it can never run against an unasserted or
  * not-yet-ready input. `membrane(nodeDef)` takes nothing but the
  * declaration itself — the returned function's behavior, and its very
@@ -171,15 +221,16 @@ export function membrane<In extends InputSpec, O extends OutputSpec>(
 ): MembraneInvoke<In, O> {
   if (nodeDef.input.kind === "single") {
     const edge = nodeDef.input.edge;
-    const invoke: SingleInvoke<In, O> = async (payload) => {
+    const invoke: SingleInvoke<In, O> = async (payload, correlationId) => {
       let validated: InputPayload<In>;
       try {
         validated = assertPayload(edge, payload) as InputPayload<In>;
       } catch (cause) {
         return { input: payload as InputPayload<In>, reason: reasonOf(cause) };
       }
+      const envelope = await buildEnvelope(nodeDef, correlationId);
       try {
-        return await nodeDef.fn(validated);
+        return await callFn(nodeDef, validated, envelope);
       } catch (cause) {
         return { input: validated, reason: reasonOf(cause) };
       }
@@ -209,8 +260,9 @@ export function membrane<In extends InputSpec, O extends OutputSpec>(
       return { input: rawBag as InputPayload<In>, reason: errors.join("; ") };
     }
 
+    const envelope = await buildEnvelope(nodeDef, correlationId);
     try {
-      return await nodeDef.fn(bag as InputPayload<In>);
+      return await callFn(nodeDef, bag as InputPayload<In>, envelope);
     } catch (cause) {
       return { input: bag as InputPayload<In>, reason: reasonOf(cause) };
     }
