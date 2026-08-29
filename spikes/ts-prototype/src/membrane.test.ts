@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defineEdge, defineField, defineNode, every, single } from "./define.js";
-import { InMemoryLog, membrane } from "./membrane.js";
+import { InMemoryLog, assertPayload, membrane } from "./membrane.js";
 
 const Person = defineEdge({
   name: "Person",
@@ -59,6 +59,76 @@ describe("membrane", () => {
   it("lists every violation, not just the first", async () => {
     await expect(membrane(birthday)({ age: "old", nickname: 5 })).rejects.toThrow(/age/);
     await expect(membrane(birthday)({ age: "old", nickname: 5 })).rejects.toThrow(/nickname/);
+  });
+});
+
+const Address = defineEdge({
+  name: "Address",
+  label: "Address",
+  description: "A mailing address",
+  fields: {
+    street: defineField({ type: "utf8", label: "Street", description: "Street address", nullable: false }),
+  },
+});
+const PersonWithAddress = defineEdge({
+  name: "PersonWithAddress",
+  label: "Person with address",
+  description: "A person with a nested address",
+  fields: {
+    name: defineField({ type: "utf8", label: "Name", description: "The person's name", nullable: false }),
+    address: Address,
+  },
+});
+const Task = defineEdge({
+  name: "Task",
+  label: "Task",
+  description: "A task",
+  fields: {
+    title: defineField({ type: "utf8", label: "Title", description: "The task's title", nullable: false }),
+  },
+});
+const TaskList = defineEdge({
+  name: "TaskList",
+  label: "Task list",
+  description: "A list of tasks",
+  fields: { tasks: { many: Task } },
+});
+
+describe("assertPayload — compound fields", () => {
+  it("accepts a valid nested-edge payload", () => {
+    const payload = assertPayload(PersonWithAddress, { name: "Ada", address: { street: "1 Main St" } });
+    expect(payload).toEqual({ name: "Ada", address: { street: "1 Main St" } });
+  });
+
+  it("rejects a nested-edge field whose own field has the wrong type", () => {
+    expect(() =>
+      assertPayload(PersonWithAddress, { name: "Ada", address: { street: 5 } }),
+    ).toThrow(/address/);
+  });
+
+  it("rejects a compound field that isn't an object", () => {
+    expect(() => assertPayload(PersonWithAddress, { name: "Ada", address: "nope" })).toThrow(/address/);
+  });
+});
+
+describe("assertPayload — many fields", () => {
+  it("accepts an array of valid compound payloads", () => {
+    const payload = assertPayload(TaskList, { tasks: [{ title: "Buy milk" }, { title: "Walk dog" }] });
+    expect(payload).toEqual({ tasks: [{ title: "Buy milk" }, { title: "Walk dog" }] });
+  });
+
+  it("accepts an empty array", () => {
+    expect(assertPayload(TaskList, { tasks: [] })).toEqual({ tasks: [] });
+  });
+
+  it("rejects a many field that isn't an array", () => {
+    expect(() => assertPayload(TaskList, { tasks: { title: "Buy milk" } })).toThrow(/tasks/);
+  });
+
+  it("rejects an invalid item inside the array, naming its index", () => {
+    expect(() =>
+      assertPayload(TaskList, { tasks: [{ title: "Buy milk" }, { title: 5 }] }),
+    ).toThrow(/tasks\[1\]/);
   });
 });
 
