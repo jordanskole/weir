@@ -15,6 +15,7 @@
 
 import { pathToFileURL } from "node:url";
 import { elaborate } from "./elaborate.js";
+import type { Wiring } from "./elaborate.js";
 import { hashNode } from "./hash.js";
 import type { AnyEdgeDef, FieldDef, InputSpec, NodeDecl, NodeDef, OutputSpec } from "./types.js";
 
@@ -49,16 +50,18 @@ export interface Program {
   fields: Record<string, FieldDef>;
   edges: Record<string, AnyEdgeDef>;
   nodes: Record<string, NodeDef>;
+  wiring: Wiring;
 }
 
 /**
  * Crosses the declarations/implementations package boundary in one call
- * (docs/design.md §10): loads every `.field`/`.edge`/`.node` under
- * `declRoot` (elaborate.ts), then resolves each declared node's accepted
- * implementation under `implRoot` (`resolveImplementation`, above).
+ * (docs/design.md §10): loads every `.field`/`.edge`/`.node`/`.topology`
+ * under `declRoot` (elaborate.ts), then resolves each declared node's
+ * accepted implementation under `implRoot` (`resolveImplementation`,
+ * above).
  */
 export async function elaborateWithImplementations(declRoot: string, implRoot: string): Promise<Program> {
-  const { fields, edges, nodes } = await elaborate(declRoot);
+  const { fields, edges, nodes, wiring } = await elaborate(declRoot);
 
   const resolved = await Promise.all(
     Object.entries(nodes).map(
@@ -66,5 +69,5 @@ export async function elaborateWithImplementations(declRoot: string, implRoot: s
     ),
   );
 
-  return { fields, edges, nodes: Object.fromEntries(resolved) };
+  return { fields, edges, nodes: Object.fromEntries(resolved), wiring };
 }
