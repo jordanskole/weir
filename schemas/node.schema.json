@@ -15,8 +15,29 @@
       "type": "string"
     },
     "input": {
-      "type": "string",
-      "minLength": 1
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "properties": {
+            "every": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "every"
+          ],
+          "additionalProperties": false
+        }
+      ]
     },
     "output": {
       "oneOf": [
@@ -83,14 +104,7 @@
           "expect"
         ],
         "properties": {
-          "given": {
-            "type": "object",
-            "minProperties": 1,
-            "additionalProperties": {
-              "type": "object"
-            },
-            "maxProperties": 1
-          },
+          "given": {},
           "expect": {}
         },
         "additionalProperties": false
@@ -134,6 +148,62 @@
   },
   "additionalProperties": false,
   "allOf": [
+    {
+      "if": {
+        "properties": {
+          "input": {
+            "type": "string"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "examples": {
+            "items": {
+              "properties": {
+                "given": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "additionalProperties": {
+                    "type": "object"
+                  },
+                  "maxProperties": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "input": {
+            "type": "object",
+            "required": [
+              "every"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "examples": {
+            "items": {
+              "properties": {
+                "given": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "additionalProperties": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     {
       "if": {
         "properties": {
