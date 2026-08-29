@@ -31,34 +31,61 @@ describe("membrane", () => {
     await expect(invoke({ age: 10, nickname: "Bird" })).resolves.toEqual({ age: 11, nickname: "Bird" });
   });
 
-  it("rejects a payload missing a required field, before fn runs", async () => {
+  it("resolves to Failed<In>, carrying the original payload, when a required field is missing — fn never runs", async () => {
     let called = false;
     const node = defineNode({ ...birthday, fn: (p) => { called = true; return p; } });
-    await expect(membrane(node)({ nickname: null })).rejects.toThrow(/age/);
+    const result = await membrane(node)({ nickname: null });
+    expect(result).toEqual({ input: { nickname: null }, reason: expect.stringMatching(/age/) });
     expect(called).toBe(false);
   });
 
-  it("rejects the wrong type for a field", async () => {
-    await expect(membrane(birthday)({ age: "old", nickname: null })).rejects.toThrow(/age/);
+  it("resolves to Failed<In> for the wrong type on a field", async () => {
+    const result = await membrane(birthday)({ age: "old", nickname: null });
+    expect(result).toEqual({ input: { age: "old", nickname: null }, reason: expect.stringMatching(/age/) });
   });
 
-  it("rejects null for a non-nullable field", async () => {
-    await expect(membrane(birthday)({ age: null, nickname: null })).rejects.toThrow(/age/);
+  it("resolves to Failed<In> for null on a non-nullable field", async () => {
+    const result = await membrane(birthday)({ age: null, nickname: null });
+    expect(result).toEqual({ input: { age: null, nickname: null }, reason: expect.stringMatching(/age/) });
   });
 
   it("accepts null for a nullable field", async () => {
     await expect(membrane(birthday)({ age: 5, nickname: null })).resolves.toEqual({ age: 6, nickname: null });
   });
 
-  it("rejects a non-object payload", async () => {
-    await expect(membrane(birthday)("nope")).rejects.toThrow(/Person/);
-    await expect(membrane(birthday)(null)).rejects.toThrow(/Person/);
-    await expect(membrane(birthday)([])).rejects.toThrow(/Person/);
+  it("resolves to Failed<In> for a non-object payload", async () => {
+    expect(await membrane(birthday)("nope")).toEqual({ input: "nope", reason: expect.stringMatching(/Person/) });
+    expect(await membrane(birthday)(null)).toEqual({ input: null, reason: expect.stringMatching(/Person/) });
+    expect(await membrane(birthday)([])).toEqual({ input: [], reason: expect.stringMatching(/Person/) });
   });
 
-  it("lists every violation, not just the first", async () => {
-    await expect(membrane(birthday)({ age: "old", nickname: 5 })).rejects.toThrow(/age/);
-    await expect(membrane(birthday)({ age: "old", nickname: 5 })).rejects.toThrow(/nickname/);
+  it("lists every violation in Failed<In>.reason, not just the first", async () => {
+    const result = await membrane(birthday)({ age: "old", nickname: 5 });
+    expect(result).toEqual({
+      input: { age: "old", nickname: 5 },
+      reason: expect.stringMatching(/age/),
+    });
+    expect((result as { reason: string }).reason).toMatch(/nickname/);
+  });
+
+  it("resolves to Failed<In> with the thrown message as reason, when fn throws", async () => {
+    const node = defineNode({
+      ...birthday,
+      fn: () => {
+        throw new Error("kaboom");
+      },
+    });
+    const result = await membrane(node)({ age: 41, nickname: null });
+    expect(result).toEqual({ input: { age: 41, nickname: null }, reason: "kaboom" });
+  });
+
+  it("passes through an explicit Failed<In> a node returns itself", async () => {
+    const node = defineNode({
+      ...birthday,
+      fn: (p) => ({ input: p, reason: "too old to have a birthday" }),
+    });
+    const result = await membrane(node)({ age: 200, nickname: null });
+    expect(result).toEqual({ input: { age: 200, nickname: null }, reason: "too old to have a birthday" });
   });
 });
 
@@ -204,10 +231,28 @@ describe("membrane — every", () => {
     await expect(membrane(nodeC)("thread-1", log)).resolves.toEqual({ value: "a+b" });
   });
 
-  it("asserts each edge's payload before calling fn", async () => {
+  it("resolves to Failed<In>, carrying the raw bag, when one edge's payload fails assertion", async () => {
     const log = new InMemoryLog();
     log.append("A", "thread-1", { value: 5 });
     log.append("B", "thread-1", { value: "b" });
-    await expect(membrane(nodeC)("thread-1", log)).rejects.toThrow(/A/);
+    const result = await membrane(nodeC)("thread-1", log);
+    expect(result).toEqual({
+      input: { A: { value: 5 }, B: { value: "b" } },
+      reason: expect.stringMatching(/A/),
+    });
+  });
+
+  it("resolves to Failed<In> with the thrown message as reason, when fn throws", async () => {
+    const throwing = defineNode({
+      ...nodeC,
+      fn: () => {
+        throw new Error("kaboom");
+      },
+    });
+    const log = new InMemoryLog();
+    log.append("A", "thread-1", { value: "a" });
+    log.append("B", "thread-1", { value: "b" });
+    const result = await membrane(throwing)("thread-1", log);
+    expect(result).toEqual({ input: { A: { value: "a" }, B: { value: "b" } }, reason: "kaboom" });
   });
 });
