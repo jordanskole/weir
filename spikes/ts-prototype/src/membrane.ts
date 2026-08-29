@@ -16,15 +16,23 @@
  * is always `null` (no causation-chain tracking exists yet — nothing
  * currently tells a node which specific upstream edge instance triggered
  * it) and `step` is always `0` (the pulse/wave model design-history.md
- * already decided isn't wired into the membrane yet). `identity` is
- * `{}`, matching `Identity`'s own still-placeholder type — `scope`
- * resolution stays not yet built, now one layer closer since `Envelope`
- * (identity's carrier) is real.
+ * already decided isn't wired into the membrane yet). `identity` narrows
+ * the caller-supplied `Identity` claims to exactly the fields a node's
+ * `scope` declares (`{}` when no `scope` is declared) — only
+ * `read:Identity:<field>` resolves to anything today; anything else in a
+ * `scope` declaration resolves to `Failed<In>`, same as a bad assert,
+ * never an uncaught exception. A caller who supplies no identity at all
+ * gets a documented system default (`sub: "system"`), not an absent one —
+ * design-history.md's "there is no identity-less execution" taken
+ * literally. No PDP, no grant checking against a `scopes` claim — that
+ * stays explicitly deferred (getting-started.md); this only narrows data,
+ * it doesn't authorize anything.
  *
- * Not yet built: `scope`/identity resolution itself, and everything
- * downstream of a real `correlationId` source (`.topology`/the runtime
- * decide what a node's `correlationId` actually is; the membrane only
- * ever receives one, never mints it). `first`/`each` (docs/design-history.md,
+ * Not yet built: everything downstream of a real `correlationId` source
+ * (`.topology`/the runtime decide what a node's `correlationId` actually
+ * is; the membrane only ever receives one, never mints it), and a real
+ * `scopes`/granted-permissions claim on `Identity` (weir's field model has
+ * no scalar-array field type yet). `first`/`each` (docs/design-history.md,
  * "membrane()") are deferred further still — they distinguish reacting to
  * the 1st vs. every occurrence of a recurring edge, which can't happen
  * without a graph cycle (no edge type recurs within one invocation
@@ -32,6 +40,7 @@
  */
 
 import { hashNode } from "./hash.js";
+import { Identity } from "./types.js";
 import type {
   AnyEdgeDef,
   Envelope,
@@ -149,10 +158,15 @@ export class InMemoryLog implements Log {
   }
 }
 
-/** What `membrane()` returns for a `single`-input node: hand it a payload and the invocation's correlationId. */
+/**
+ * What `membrane()` returns for a `single`-input node: hand it a payload,
+ * the invocation's correlationId, and (optionally) the caller's identity —
+ * defaults to a documented system identity when omitted (file header).
+ */
 type SingleInvoke<In extends InputSpec, O extends OutputSpec> = (
   payload: unknown,
   correlationId: string,
+  identity?: PayloadOf<typeof Identity>,
 ) => Promise<OutputResult<O> | Failed<In>>;
 
 /**
@@ -165,6 +179,7 @@ type SingleInvoke<In extends InputSpec, O extends OutputSpec> = (
 type EveryInvoke<In extends InputSpec, O extends OutputSpec> = (
   correlationId: string,
   log: Log,
+  identity?: PayloadOf<typeof Identity>,
 ) => Promise<OutputResult<O> | Failed<In> | undefined>;
 
 type MembraneInvoke<In extends InputSpec, O extends OutputSpec> = In extends { kind: "single" }
@@ -175,21 +190,58 @@ function reasonOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
+/** A documented default for callers who supply no identity — never an absent one (file header). */
+const SYSTEM_IDENTITY: PayloadOf<typeof Identity> = { sub: "system", iss: "weir" };
+
+const IDENTITY_FIELDS = Object.keys(Identity.fields) as (keyof PayloadOf<typeof Identity>)[];
+
+/**
+ * Narrows a full `Identity` down to exactly the fields a node's `scope`
+ * declares — `{}` when no `scope` is declared (file header). Only
+ * `read:Identity:<field>` resolves to anything today; any other verb or
+ * edge throws, caught by the caller and turned into `Failed<In>`, never an
+ * uncaught exception.
+ */
+function narrowIdentity(
+  scope: string[] | undefined,
+  identity: PayloadOf<typeof Identity>,
+): Partial<PayloadOf<typeof Identity>> {
+  if (!scope || scope.length === 0) return {};
+
+  const narrowed: Partial<PayloadOf<typeof Identity>> = {};
+  for (const declaration of scope) {
+    const [verb, edgeName, field] = declaration.split(":");
+    if (verb !== "read" || edgeName !== "Identity") {
+      throw new Error(`scope "${declaration}": only "read:Identity:<field>" resolves to anything today.`);
+    }
+    if (!IDENTITY_FIELDS.includes(field as keyof PayloadOf<typeof Identity>)) {
+      throw new Error(`scope "${declaration}": Identity has no field "${field}".`);
+    }
+    narrowed[field as keyof PayloadOf<typeof Identity>] = identity[field as keyof PayloadOf<typeof Identity>];
+  }
+  return narrowed;
+}
+
 /**
  * Builds this invocation's Envelope. `causationId` and `step` are honest
  * placeholders (see file header) — real values need mechanisms that don't
  * exist yet (causation-chain tracking, pulse scheduling), not a design
- * decision being punted silently.
+ * decision being punted silently. Can throw (a bad `scope` declaration) —
+ * the caller is responsible for turning that into `Failed<In>`.
  */
-async function buildEnvelope(nodeDecl: NodeDecl, correlationId: string): Promise<Envelope> {
+async function buildEnvelope(
+  nodeDef: NodeDecl,
+  correlationId: string,
+  identity: PayloadOf<typeof Identity>,
+): Promise<Envelope> {
   return {
     id: crypto.randomUUID(),
     correlationId,
     causationId: null,
     timestamp: new Date().toISOString(),
     step: 0,
-    identity: {},
-    schemaHash: (await hashNode(nodeDecl)).hash,
+    identity: narrowIdentity(nodeDef.scope, identity),
+    schemaHash: (await hashNode(nodeDef)).hash,
   };
 }
 
@@ -221,14 +273,19 @@ export function membrane<In extends InputSpec, O extends OutputSpec>(
 ): MembraneInvoke<In, O> {
   if (nodeDef.input.kind === "single") {
     const edge = nodeDef.input.edge;
-    const invoke: SingleInvoke<In, O> = async (payload, correlationId) => {
+    const invoke: SingleInvoke<In, O> = async (payload, correlationId, identity) => {
       let validated: InputPayload<In>;
       try {
         validated = assertPayload(edge, payload) as InputPayload<In>;
       } catch (cause) {
         return { input: payload as InputPayload<In>, reason: reasonOf(cause) };
       }
-      const envelope = await buildEnvelope(nodeDef, correlationId);
+      let envelope: Envelope;
+      try {
+        envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY);
+      } catch (cause) {
+        return { input: validated, reason: reasonOf(cause) };
+      }
       try {
         return await callFn(nodeDef, validated, envelope);
       } catch (cause) {
@@ -239,7 +296,7 @@ export function membrane<In extends InputSpec, O extends OutputSpec>(
   }
 
   const edges = nodeDef.input.edges;
-  const invoke: EveryInvoke<In, O> = async (correlationId, log) => {
+  const invoke: EveryInvoke<In, O> = async (correlationId, log, identity) => {
     const rawBag: Record<string, unknown> = {};
     for (const edge of edges) {
       const value = log.latest(edge.name, correlationId);
@@ -260,7 +317,12 @@ export function membrane<In extends InputSpec, O extends OutputSpec>(
       return { input: rawBag as InputPayload<In>, reason: errors.join("; ") };
     }
 
-    const envelope = await buildEnvelope(nodeDef, correlationId);
+    let envelope: Envelope;
+    try {
+      envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY);
+    } catch (cause) {
+      return { input: bag as InputPayload<In>, reason: reasonOf(cause) };
+    }
     try {
       return await callFn(nodeDef, bag as InputPayload<In>, envelope);
     } catch (cause) {
