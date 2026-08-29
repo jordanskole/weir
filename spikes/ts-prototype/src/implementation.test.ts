@@ -136,5 +136,7 @@ describe("elaborateWithImplementations", () => {
       edge: "Fail",
       payload: {},
     });
+    expect(program.wiring.origins).toEqual(["birthday"]);
+    expect(program.wiring.feeds).toEqual({ birthday: ["expect_Person_age_42"] });
   });
 });

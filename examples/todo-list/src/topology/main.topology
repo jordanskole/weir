@@ -1,0 +1,4 @@
+CreateTodo:
+  then:
+    AddTodoToList: {}
+    CompleteTodo: {}

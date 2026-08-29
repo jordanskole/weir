@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { elaborate, parseEdgeFile, parseFieldFile, parseNodeFile } from "./elaborate.js";
+import { elaborate, parseEdgeFile, parseFieldFile, parseNodeFile, parseTopologyFile } from "./elaborate.js";
 import type { AnyEdgeDef } from "./types.js";
 
 const PERSON_BIRTHDAY_SRC = fileURLToPath(
@@ -351,6 +351,70 @@ fn: "() => {}"
   });
 });
 
+describe("parseTopologyFile", () => {
+  const knownNames = new Set(["A", "B", "C", "birthday"]);
+  const resolveNodeName = (name: string): void => {
+    if (!knownNames.has(name)) throw new Error(`Cannot resolve "${name}" — no .node file declares it.`);
+  };
+
+  it("parses a single sequential chain", () => {
+    const wiring = parseTopologyFile(`A:\n  then:\n    B: {}\n`, resolveNodeName);
+    expect(wiring.origins).toEqual(["A"]);
+    expect(wiring.feeds).toEqual({ A: ["B"] });
+  });
+
+  it("parses fan-out — one node feeding several next nodes", () => {
+    const wiring = parseTopologyFile(`A:\n  then:\n    B: {}\n    C: {}\n`, resolveNodeName);
+    expect(wiring.origins).toEqual(["A"]);
+    expect(wiring.feeds.A?.sort()).toEqual(["B", "C"]);
+  });
+
+  it("parses convergence — a node fed by two parents, no special join syntax", () => {
+    const yaml = `
+A:
+  then:
+    B:
+      then:
+        C: {}
+    C: {}
+`;
+    const wiring = parseTopologyFile(yaml, resolveNodeName);
+    expect(wiring.feeds.A?.sort()).toEqual(["B", "C"]);
+    expect(wiring.feeds.B).toEqual(["C"]);
+  });
+
+  it("parses a repeated node application as distinct, not a cycle", () => {
+    const yaml = `
+birthday:
+  then:
+    birthday:
+      then:
+        birthday: {}
+`;
+    expect(() => parseTopologyFile(yaml, resolveNodeName)).not.toThrow();
+    const wiring = parseTopologyFile(yaml, resolveNodeName);
+    expect(wiring.feeds.birthday).toEqual(["birthday"]);
+  });
+
+  it("treats several top-level keys as independent origins", () => {
+    const wiring = parseTopologyFile(`A: {}\nB: {}\n`, resolveNodeName);
+    expect(wiring.origins.sort()).toEqual(["A", "B"]);
+    expect(wiring.feeds).toEqual({});
+  });
+
+  it("rejects a then value that isn't a map", () => {
+    expect(() => parseTopologyFile(`A:\n  then: "oops"\n`, resolveNodeName)).toThrow(/then/i);
+  });
+
+  it("rejects a key other than then", () => {
+    expect(() => parseTopologyFile(`A:\n  bogus: {}\n`, resolveNodeName)).toThrow(/bogus/);
+  });
+
+  it("resolves every node name mentioned, including nested ones", () => {
+    expect(() => parseTopologyFile(`A:\n  then:\n    Ghost: {}\n`, resolveNodeName)).toThrow(/Ghost/);
+  });
+});
+
 describe("elaborate", () => {
   it("loads a directory of .field/.edge files, resolving references across both", async () => {
     const root = await writeFixture({
@@ -513,5 +577,67 @@ output: Ghost
       edges: [result.edges.TodoList, result.edges.Todo],
     });
     expect(result.nodes.AddTodoToList!.output).toEqual({ kind: "single", edge: result.edges.TodoList });
+  });
+
+  it("loads a .topology file, validating references against declared .node files", async () => {
+    const root = await writeFixture({
+      "edges/Person.edge": `
+description: A person
+fields:
+  age:
+    type: uint8
+    label: Age
+    description: d
+    nullable: false
+`,
+      "nodes/birthday.node": `
+description: d
+input: Person
+output: Person
+examples:
+  - given:
+      Person:
+        age: 41
+    expect:
+      Person:
+        age: 42
+`,
+      "topology/main.topology": `
+birthday:
+  then:
+    birthday: {}
+`,
+    });
+
+    const result = await elaborate(root);
+
+    expect(result.wiring.origins).toEqual(["birthday"]);
+    expect(result.wiring.feeds).toEqual({ birthday: ["birthday"] });
+  });
+
+  it("rejects a .topology file referencing a node no .node file declares", async () => {
+    const root = await writeFixture({
+      "topology/main.topology": `
+Ghost:
+  then:
+    AlsoGhost: {}
+`,
+    });
+
+    await expect(elaborate(root)).rejects.toThrow(/Ghost/);
+  });
+
+  it("loads the real person-birthday example's topology", async () => {
+    const result = await elaborate(PERSON_BIRTHDAY_SRC);
+
+    expect(result.wiring.origins).toEqual(["birthday"]);
+    expect(result.wiring.feeds).toEqual({ birthday: ["expect_Person_age_42"] });
+  });
+
+  it("loads the real todo-list example's topology — a fan-out from CreateTodo", async () => {
+    const result = await elaborate(TODO_LIST_SRC);
+
+    expect(result.wiring.origins).toEqual(["CreateTodo"]);
+    expect(result.wiring.feeds.CreateTodo?.sort()).toEqual(["AddTodoToList", "CompleteTodo"]);
   });
 });

@@ -1,0 +1,3 @@
+birthday:
+  then:
+    expect_Person_age_42: {}

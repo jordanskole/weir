@@ -1,17 +1,18 @@
 /**
- * The elaborator's edge/field/node-contract half: turns hand-authored
- * `.field`/`.edge`/`.node` YAML into validated `FieldDef`/`EdgeDef`/`NodeDecl`
- * objects (docs/design.md §10). Topology loading is out of scope here —
- * deliberately deferred, same as the rest of the elaborator (§10, "deferred,
- * not designed away"). `.node` loading only resolves the contract — `input`,
- * `output`, `examples`, `closure` — never `fn`, which a data format can't
- * hold (§10) and stays the implementation tree's job, not this one's.
+ * The elaborator: turns hand-authored `.field`/`.edge`/`.node`/`.topology`
+ * YAML into validated `FieldDef`/`EdgeDef`/`NodeDecl`/`Wiring` objects
+ * (docs/design.md §10). `.node` loading only resolves the contract —
+ * `input`, `output`, `examples`, `closure` — never `fn`, which a data
+ * format can't hold (§10) and stays the implementation tree's job, not
+ * this one's.
  *
- * No file kind declares its own `name` — the filename *is* the name (a
- * standalone `.field`/`.edge`/`.node` file has no parent map to be a key in,
- * the way an inline field does, so the filename is the only thing that could
- * name it; making that the *only* source of truth means a mismatched name
- * isn't a bug to catch, it's not a representable state at all).
+ * `.field`/`.edge`/`.node` files don't declare their own `name` — the
+ * filename *is* the name (a standalone file has no parent map to be a key
+ * in, the way an inline field does, so the filename is the only thing that
+ * could name it; making that the *only* source of truth means a mismatched
+ * name isn't a bug to catch, it's not a representable state at all).
+ * `.topology` is different in kind — a wiring description, not one more
+ * named declaration — so it has no filename-as-name convention at all.
  */
 
 import { glob, readFile } from "node:fs/promises";
@@ -163,10 +164,88 @@ export function parseNodeFile(yamlText: string, name: string, resolveEdge: EdgeR
   };
 }
 
+/** Wiring — what a `.topology` file describes (docs/open-questions.md, ".topology authoring format"). */
+export interface Wiring {
+  /** Node names with nothing feeding them within the loaded topology — top-level keys. */
+  origins: string[];
+  /** node name -> the node names it feeds, deduplicated across however many parents mention it. */
+  feeds: Record<string, string[]>;
+}
+
+/** Confirms a bare node name (as used by a `.topology` file) is really declared. Throws if not. */
+export type NodeNameResolver = (name: string) => void;
+
+/**
+ * Parses a `.topology` file's nested `then:` map into a `Wiring`
+ * (docs/open-questions.md, ".topology authoring format"): a node name is a
+ * key; `then:` maps to the node names it feeds; fan-out is several keys
+ * under one `then:`; a node fed by more than one parent needs no special
+ * join syntax — it just appears again under each parent's own `then:`.
+ * Several top-level keys are independent origins, resolving the
+ * previously-open "how do multiple roots sit in one file" question the
+ * obvious way the sketch already implied.
+ *
+ * No cycle detection: a repeated name (`birthday.then.birthday`) is a
+ * legitimate distinct application, not a cycle (docs/design-history.md,
+ * "Weir has no loop construct") — the YAML itself is always a finite tree,
+ * so nothing can actually recurse forever.
+ */
+export function parseTopologyFile(yamlText: string, resolveNodeName: NodeNameResolver): Wiring {
+  const raw = (parse(yamlText) as Record<string, unknown> | null) ?? {};
+  const origins: string[] = [];
+  const feeds = new Map<string, Set<string>>();
+
+  function walk(name: string, value: unknown): void {
+    resolveNodeName(name);
+    if (value === null || value === undefined) return;
+    if (typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`"${name}": expected an object (optionally with "then"), got ${typeof value}.`);
+    }
+    const { then, ...rest } = value as { then?: unknown };
+    const unrecognized = Object.keys(rest)[0];
+    if (unrecognized !== undefined) {
+      throw new Error(`"${name}": only "then" is a recognized key, got "${unrecognized}".`);
+    }
+    if (then === undefined) return;
+    if (then === null || typeof then !== "object" || Array.isArray(then)) {
+      throw new Error(`"${name}.then" must be a map of node names.`);
+    }
+    for (const [childName, childValue] of Object.entries(then)) {
+      if (!feeds.has(name)) feeds.set(name, new Set());
+      feeds.get(name)!.add(childName);
+      walk(childName, childValue);
+    }
+  }
+
+  for (const [name, value] of Object.entries(raw)) {
+    origins.push(name);
+    walk(name, value);
+  }
+
+  return {
+    origins,
+    feeds: Object.fromEntries([...feeds.entries()].map(([k, v]) => [k, [...v]])),
+  };
+}
+
+/** Merges two `Wiring`s — natural, if untested by any current fixture, for multiple `.topology` files in one root. */
+function mergeWiring(a: Wiring, b: Wiring): Wiring {
+  const feeds = new Map<string, Set<string>>();
+  for (const [source, targets] of [...Object.entries(a.feeds), ...Object.entries(b.feeds)]) {
+    if (!feeds.has(source)) feeds.set(source, new Set());
+    for (const target of targets) feeds.get(source)!.add(target);
+  }
+  return {
+    origins: [...a.origins, ...b.origins],
+    feeds: Object.fromEntries([...feeds.entries()].map(([k, v]) => [k, [...v]])),
+  };
+}
+
 export interface Elaborated {
   fields: Record<string, FieldDef>;
   edges: Record<string, AnyEdgeDef>;
   nodes: Record<string, NodeDecl>;
+  wiring: Wiring;
 }
 
 /**
@@ -237,5 +316,17 @@ export async function elaborate(root: string): Promise<Elaborated> {
     nodes[name] = parseNodeFile(text, name, resolveEdge);
   }
 
-  return { fields, edges, nodes };
+  const resolveNodeName: NodeNameResolver = (name) => {
+    if (!(name in nodes)) {
+      throw new Error(`Cannot resolve "${name}" — no .node file declares it.`);
+    }
+  };
+
+  let wiring: Wiring = { origins: [], feeds: {} };
+  for await (const file of glob("**/*.topology", { cwd: root })) {
+    const text = await readFile(`${root}/${file}`, "utf8");
+    wiring = mergeWiring(wiring, parseTopologyFile(text, resolveNodeName));
+  }
+
+  return { fields, edges, nodes, wiring };
 }
