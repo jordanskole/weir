@@ -1,6 +1,12 @@
 label: Todo
 description: A task a person needs to do, or has done
+index: id
 fields:
+  id:
+    type: utf8
+    label: ID
+    description: A stable identifier for this task, unique within its list
+    nullable: false
   title:
     type: utf8
     label: Title
@@ -17,9 +23,7 @@ fields:
     validations:
       minLength: 10
       maxLength: 2000
-  is_complete:  
+  is_complete:
     type: bool # bool is the only type that is not nullable, because it defaults to false
     label: Is Complete
     description: Whether the task has been completed
-
-    

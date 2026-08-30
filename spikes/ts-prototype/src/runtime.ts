@@ -12,9 +12,6 @@
  * number them.
  *
  * Deliberately narrow, stated here rather than left implicit:
- * - **`single`-output nodes only.** `oneOf`/`allOf`/`many` output routing
- *   isn't built — a node declaring one of those is recorded in
- *   `unsupported` and simply doesn't fire, rather than crashing the walk.
  * - **No `Failed<In>` routing.** Design says a failure is "an edge
  *   instance like any other" and a retry node should be able to consume
  *   one, but `Failed<In>` isn't a real, named edge in the system yet, so
@@ -45,7 +42,7 @@
 import { membrane } from "./membrane.js";
 import type { Log } from "./membrane.js";
 import type { Program } from "./implementation.js";
-import type { Failed, InputSpec, PayloadOf } from "./types.js";
+import type { Failed, InputSpec, OutputSpec, PayloadOf } from "./types.js";
 import { Identity } from "./types.js";
 
 /**
@@ -70,7 +67,6 @@ type AnyEveryInvoke = (
 
 export interface RunResult {
   failures: { node: string; failed: Failed<InputSpec> }[];
-  unsupported: { node: string; reason: string }[];
 }
 
 /**
@@ -85,6 +81,30 @@ function looksLikeFailed(result: unknown): result is Failed<InputSpec> {
   return keys.every((key) => key === "input" || key === "reason");
 }
 
+/**
+ * Logs a successful result under the right edge name(s) for its declared
+ * output kind: `single`/`many` log the one result directly under the
+ * declared edge's name (a `many` result is already one collection payload,
+ * never N separate instances — docs/design-history.md, "`many` is a
+ * collection, keyed by index, not an array"); `oneOf` logs only the branch
+ * that actually tagged itself; `allOf` logs every tagged branch.
+ */
+function logOutput(log: Log, output: OutputSpec, result: unknown, correlationId: string): void {
+  if (output.kind === "single" || output.kind === "many") {
+    log.append(output.edge.name, correlationId, result);
+    return;
+  }
+  if (output.kind === "oneOf") {
+    const tagged = result as { edge: string; payload: unknown };
+    log.append(tagged.edge, correlationId, tagged.payload);
+    return;
+  }
+  const tags = result as { edge: string; payload: unknown }[];
+  for (const tagged of tags) {
+    log.append(tagged.edge, correlationId, tagged.payload);
+  }
+}
+
 export async function runNetlist(
   program: Program,
   log: Log,
@@ -93,7 +113,6 @@ export async function runNetlist(
   identity?: PayloadOf<typeof Identity>,
 ): Promise<RunResult> {
   const failures: RunResult["failures"] = [];
-  const unsupported: RunResult["unsupported"] = [];
   const fired = new Set<string>();
   const origins = new Set(program.wiring.origins);
 
@@ -103,15 +122,6 @@ export async function runNetlist(
     const nodeDef = program.nodes[nodeName];
     if (!nodeDef) {
       throw new Error(`Wiring references "${nodeName}", but no .node file declares it.`);
-    }
-
-    if (nodeDef.output.kind !== "single") {
-      fired.add(nodeName);
-      unsupported.push({
-        node: nodeName,
-        reason: `runNetlist only supports single-output nodes today (declares "${nodeDef.output.kind}").`,
-      });
-      return false;
     }
 
     let result: unknown;
@@ -135,7 +145,7 @@ export async function runNetlist(
     if (looksLikeFailed(result)) {
       failures.push({ node: nodeName, failed: result });
     } else {
-      log.append(nodeDef.output.edge.name, correlationId, result);
+      logOutput(log, nodeDef.output, result, correlationId);
     }
     return true;
   }
@@ -151,5 +161,5 @@ export async function runNetlist(
     }
   }
 
-  return { failures, unsupported };
+  return { failures };
 }

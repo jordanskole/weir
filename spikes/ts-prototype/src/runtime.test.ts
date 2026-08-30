@@ -42,7 +42,6 @@ describe("runNetlist", () => {
     const result = await runNetlist(program, log, "thread-1", { doubled: { value: "a" } });
 
     expect(result.failures).toEqual([]);
-    expect(result.unsupported).toEqual([]);
     expect(log.latest("Start", "thread-1")).toEqual({ value: "aa" });
   });
 
@@ -212,7 +211,7 @@ describe("runNetlist", () => {
     expect(log.latest("Start", "thread-1")).toBeUndefined();
   });
 
-  it("records an unsupported node (non-single output) without crashing the rest of the walk", async () => {
+  it("routes a oneOf output — logs only the edge that actually fired", async () => {
     const Pass = defineEdge({ name: "Pass", label: "Pass", description: "d", fields: {} });
     const Fail = defineEdge({ name: "Fail", label: "Fail", description: "d", fields: {} });
     const checker = defineNode({
@@ -231,9 +230,73 @@ describe("runNetlist", () => {
 
     const result = await runNetlist(program, log, "thread-1", { checker: { value: "ok" } });
 
-    expect(result.unsupported).toEqual([
-      { node: "checker", reason: expect.stringMatching(/single-output/) },
-    ]);
+    expect(log.latest("Pass", "thread-1")).toEqual({});
+    expect(log.latest("Fail", "thread-1")).toBeUndefined();
+    expect(result.failures).toEqual([]);
+  });
+
+  it("routes an allOf output — logs every tagged branch", async () => {
+    const InvoiceRequested = defineEdge({
+      name: "InvoiceRequested",
+      label: "Invoice requested",
+      description: "d",
+      fields: {},
+    });
+    const InventoryReserved = defineEdge({
+      name: "InventoryReserved",
+      label: "Inventory reserved",
+      description: "d",
+      fields: {},
+    });
+    const placeOrder = defineNode({
+      name: "placeOrder",
+      input: single(Start),
+      output: { kind: "allOf", edges: [InvoiceRequested, InventoryReserved] },
+      fn: () => [
+        { edge: "InvoiceRequested" as const, payload: {} },
+        { edge: "InventoryReserved" as const, payload: {} },
+      ],
+    });
+    const program: Program = {
+      fields: {},
+      edges: { Start, InvoiceRequested, InventoryReserved },
+      nodes: { placeOrder },
+      wiring: { origins: ["placeOrder"], feeds: {} },
+    };
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(program, log, "thread-1", { placeOrder: { value: "a" } });
+
+    expect(log.latest("InvoiceRequested", "thread-1")).toEqual({});
+    expect(log.latest("InventoryReserved", "thread-1")).toEqual({});
+    expect(result.failures).toEqual([]);
+  });
+
+  it("routes a many output — logs the whole collection as one edge instance", async () => {
+    const Sibling = defineEdge({
+      name: "Sibling",
+      label: "Sibling",
+      description: "d",
+      index: "age",
+      fields: { age: defineField({ type: "uint8", label: "Age", description: "d", nullable: false }) },
+    });
+    const siblings = defineNode({
+      name: "siblings",
+      input: single(Start),
+      output: { kind: "many", edge: Sibling },
+      fn: () => ({ "8": { age: 8 }, "12": { age: 12 } }),
+    });
+    const program: Program = {
+      fields: {},
+      edges: { Start, Sibling },
+      nodes: { siblings },
+      wiring: { origins: ["siblings"], feeds: {} },
+    };
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(program, log, "thread-1", { siblings: { value: "a" } });
+
+    expect(log.latest("Sibling", "thread-1")).toEqual({ "8": { age: 8 }, "12": { age: 12 } });
     expect(result.failures).toEqual([]);
   });
 
@@ -266,9 +329,8 @@ describe("runNetlist", () => {
       const result = await runNetlist(program, log, "thread-1", { birthday: { age: 41, nickname: null } });
 
       expect(log.latest("Person", "thread-1")).toEqual({ age: 42, nickname: null });
-      expect(result.unsupported).toEqual([
-        { node: "expect_Person_age_42", reason: expect.stringMatching(/single-output/) },
-      ]);
+      expect(log.latest("Pass", "thread-1")).toEqual({});
+      expect(log.latest("Fail", "thread-1")).toBeUndefined();
       expect(result.failures).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -292,14 +354,13 @@ describe("runNetlist", () => {
 
       const program = await elaborateWithImplementations(TODO_LIST_SRC, dir);
       const log = new InMemoryLog();
-      const todo = { title: "Buy milk", description: null, is_complete: false };
+      const todo = { id: "todo-1", title: "Buy milk", description: null, is_complete: false };
 
       const result = await runNetlist(program, log, "thread-1", { CreateTodo: todo });
 
       expect(log.latest("Todo", "thread-1")).toEqual({ ...todo, is_complete: true });
       expect(log.latest("TodoList", "thread-1")).toBeUndefined();
       expect(result.failures).toEqual([]);
-      expect(result.unsupported).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

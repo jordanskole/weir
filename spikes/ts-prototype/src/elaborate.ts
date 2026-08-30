@@ -21,6 +21,18 @@ import { parse } from "yaml";
 import { defineEdge, defineField } from "./define.js";
 import type { AnyEdgeDef, FieldDef, InputSpec, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
 
+/**
+ * `many` is a collection keyed by the referenced edge's own declared
+ * `index` field, never a bare array (docs/design-history.md, "`many` is a
+ * collection, keyed by index, not an array") — a collection needs a real
+ * key, so an edge with no `index` can't be used inside a `many` at all.
+ */
+function requireIndex(edge: AnyEdgeDef, context: string): void {
+  if (edge.index === undefined) {
+    throw new Error(`${context} references "${edge.name}", which declares no index — a collection needs a real key.`);
+  }
+}
+
 /** Parse a `.field` file's YAML text into a validated FieldDef. */
 export function parseFieldFile(yamlText: string): FieldDef {
   const raw = parse(yamlText) as Record<string, unknown>;
@@ -64,6 +76,7 @@ export function parseEdgeFile(yamlText: string, name: string, resolveField: Fiel
       if (!("fields" in resolved)) {
         throw new Error(`"${key}.many" references "${ref}", a field, not an edge — many is for edges only.`);
       }
+      requireIndex(resolved, `"${key}.many"`);
       resolvedFields[key] = { many: resolved };
     } else {
       resolvedFields[key] = value as FieldDef;
@@ -122,7 +135,9 @@ function resolveOutputSpec(output: unknown, resolveEdge: EdgeResolver): OutputSp
       if (typeof ref !== "string" || ref.length === 0) {
         throw new Error(`"output.many" must be a bare edge-name reference.`);
       }
-      return { kind: "many", edge: resolveEdge(ref) };
+      const edge = resolveEdge(ref);
+      requireIndex(edge, `"output.many"`);
+      return { kind: "many", edge };
     }
   }
   throw new Error(`Unrecognized "output" shape: ${JSON.stringify(output)}.`);

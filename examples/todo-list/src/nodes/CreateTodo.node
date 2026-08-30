@@ -5,11 +5,13 @@ output: Todo
 examples:
   - given:
       Todo:
+        id: "todo-1"
         title: "Buy milk"
         description: "Get 2% milk from the store"
         is_complete: false
     expect:
       Todo:
+        id: "todo-1"
         title: "Buy milk"
         description: "Get 2% milk from the store"
         is_complete: false

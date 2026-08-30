@@ -155,13 +155,20 @@ export type ScalarTsType<T extends ScalarType> = T extends "utf8" | "datetime"
  * own payload shape), or many instances of a compound edge (ManyEdgeDef,
  * an array of that edge's payload shape).
  */
+/**
+ * A `many` field or output is a collection, not an array — keyed by the
+ * referenced edge's own declared `index` field, never bare position
+ * (docs/design-history.md, "`many` is a collection, keyed by index, not
+ * an array"). One edge instance, one collection payload; never N separate
+ * instances of the referenced edge.
+ */
 export type Payload<F extends Record<string, FieldDef | AnyEdgeDef | ManyEdgeDef>> = {
   [K in keyof F]: F[K] extends FieldDef<infer T, infer N>
     ? N extends true
       ? ScalarTsType<T> | null
       : ScalarTsType<T>
     : F[K] extends ManyEdgeDef<infer E>
-      ? PayloadOf<E>[]
+      ? Record<string, PayloadOf<E>>
       : F[K] extends AnyEdgeDef
         ? PayloadOf<F[K]>
         : never;
@@ -268,7 +275,7 @@ export type OutputResult<O extends OutputSpec> = O extends {
     : O extends { kind: "allOf"; edges: infer Es extends AnyEdgeDef[] }
       ? { [I in keyof Es]: Es[I] extends AnyEdgeDef ? Tagged<Es[I]> : never }
       : O extends { kind: "many"; edge: infer E extends AnyEdgeDef }
-        ? PayloadOf<E>[]
+        ? Record<string, PayloadOf<E>>
         : never;
 
 /**

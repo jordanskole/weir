@@ -178,7 +178,9 @@ fields:
       name: "Task",
       label: "Task",
       description: "A task",
+      index: "id",
       fields: {
+        id: { type: "utf8" as const, label: "ID", description: "d", nullable: false as const },
         title: {
           type: "utf8" as const,
           label: "Title",
@@ -192,6 +194,24 @@ fields:
       return taskEdge;
     });
     expect(edge.fields.tasks).toEqual({ many: taskEdge });
+  });
+
+  it("rejects a many: reference to an edge with no declared index", () => {
+    const yaml = `
+description: A list of tasks
+fields:
+  tasks:
+    many: Task
+`;
+    const taskEdgeWithNoIndex = {
+      name: "Task",
+      label: "Task",
+      description: "A task",
+      fields: {
+        title: { type: "utf8" as const, label: "Title", description: "d", nullable: false as const },
+      },
+    };
+    expect(() => parseEdgeFile(yaml, "TaskList", () => taskEdgeWithNoIndex)).toThrow(/index/i);
   });
 
   it("rejects a many: value that isn't a bare-name reference", () => {
@@ -232,7 +252,11 @@ describe("parseNodeFile", () => {
   const Todo: AnyEdgeDef = {
     name: "Todo",
     description: "A task",
-    fields: { title: { type: "utf8", label: "Title", description: "d", nullable: false } },
+    index: "id",
+    fields: {
+      id: { type: "utf8", label: "ID", description: "d", nullable: false },
+      title: { type: "utf8", label: "Title", description: "d", nullable: false },
+    },
   };
   const TodoList: AnyEdgeDef = {
     name: "TodoList",
@@ -324,10 +348,20 @@ output:
 description: d
 input: Person
 output:
-  many: Person
+  many: Todo
 `;
     const node = parseNodeFile(yaml, "duplicate", resolveEdge);
-    expect(node.output).toEqual({ kind: "many", edge: Person });
+    expect(node.output).toEqual({ kind: "many", edge: Todo });
+  });
+
+  it("rejects a many output referencing an edge with no declared index", () => {
+    const yaml = `
+description: d
+input: Person
+output:
+  many: Person
+`;
+    expect(() => parseNodeFile(yaml, "duplicate", resolveEdge)).toThrow(/index/i);
   });
 
   it("rejects a .node file that declares a name — the filename is the name", () => {
