@@ -19,6 +19,7 @@ import { glob, readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { parse } from "yaml";
 import { defineEdge, defineField } from "./define.js";
+import { failedEdgeName } from "./types.js";
 import type { AnyEdgeDef, FieldDef, InputSpec, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
 
 /**
@@ -30,6 +31,33 @@ import type { AnyEdgeDef, FieldDef, InputSpec, ManyEdgeDef, NodeDecl, OutputSpec
 function requireIndex(edge: AnyEdgeDef, context: string): void {
   if (edge.index === undefined) {
     throw new Error(`${context} references "${edge.name}", which declares no index — a collection needs a real key.`);
+  }
+}
+
+/**
+ * Synthesizes one `Failed_<EdgeName>` edge per declared edge — `{ input:
+ * <edge>, reason }` — so a `.node` file can declare `input: Failed_Todo`
+ * without hand-authoring it (docs/design-history.md, "The runtime, built
+ * narrow on purpose... `Failed<In>` routing"; naming convention shared
+ * with `runtime.ts` via `failedEdgeName`). Iterates a snapshot of `edges`
+ * taken before synthesis starts, so a synthesized `Failed_*` edge never
+ * itself grows a `Failed_Failed_*` counterpart. Single-input nodes only —
+ * `every`-input `Failed<In>`'s bag shape has no synthesized edge yet
+ * (`runtime.ts` still collects those in `failures`, unrouted).
+ */
+function synthesizeFailedEdges(edges: Record<string, AnyEdgeDef>): void {
+  for (const edge of Object.values({ ...edges })) {
+    const name = failedEdgeName(edge.name);
+    if (name in edges) continue;
+    edges[name] = defineEdge({
+      name,
+      label: `Failed (${edge.label})`,
+      description: `A node that takes "${edge.name}" as input failed — the original input, plus why (docs/design.md §3).`,
+      fields: {
+        input: edge,
+        reason: { type: "utf8", label: "Reason", description: "Why the node failed, if known.", nullable: true },
+      },
+    });
   }
 }
 
@@ -314,6 +342,8 @@ export async function elaborate(root: string): Promise<Elaborated> {
   for (const name of rawEdgeTextByName.keys()) {
     resolve(name);
   }
+
+  synthesizeFailedEdges(edges);
 
   const resolveEdge: EdgeResolver = (name) => {
     const edge = edges[name];

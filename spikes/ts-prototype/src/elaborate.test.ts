@@ -485,7 +485,12 @@ fields:
     const result = await elaborate(root);
 
     expect(Object.keys(result.fields)).toEqual(["email"]);
-    expect(Object.keys(result.edges).sort()).toEqual(["Address", "PersonWithAddress"]);
+    expect(Object.keys(result.edges).sort()).toEqual([
+      "Address",
+      "Failed_Address",
+      "Failed_PersonWithAddress",
+      "PersonWithAddress",
+    ]);
     expect(result.edges.PersonWithAddress!.fields.email).toBe(result.fields.email);
     expect(result.edges.PersonWithAddress!.fields.address).toBe(result.edges.Address);
   });
@@ -532,6 +537,58 @@ fields:
     await expect(elaborate(root)).rejects.toThrow(/circular/i);
   });
 
+  it("synthesizes a Failed_<EdgeName> edge for every declared edge", async () => {
+    const root = await writeFixture({
+      "edges/Person.edge": `
+description: A person
+fields:
+  age:
+    type: uint8
+    label: Age
+    description: d
+    nullable: false
+`,
+    });
+
+    const result = await elaborate(root);
+
+    expect(result.edges.Failed_Person).toBeDefined();
+    expect(result.edges.Failed_Person!.fields.input).toBe(result.edges.Person);
+    expect(result.edges.Failed_Person!.fields.reason).toMatchObject({ type: "utf8", nullable: true });
+  });
+
+  it("lets a .node file declare input: Failed_<EdgeName>, resolving against the synthesized edge", async () => {
+    const root = await writeFixture({
+      "edges/Todo.edge": `
+description: A task
+fields:
+  title:
+    type: utf8
+    label: Title
+    description: d
+    nullable: false
+`,
+      "nodes/HandleFailed.node": `
+description: Recovers a failed Todo
+input: Failed_Todo
+output: Todo
+examples:
+  - given:
+      Failed_Todo:
+        input:
+          title: "Buy milk"
+        reason: "kaboom"
+    expect:
+      Todo:
+        title: "Buy milk"
+`,
+    });
+
+    const result = await elaborate(root);
+
+    expect(result.nodes.HandleFailed!.input).toEqual({ kind: "single", edge: result.edges.Failed_Todo });
+  });
+
   it("loads the real person-birthday example — proving the hand-authored files stay valid", async () => {
     const result = await elaborate(PERSON_BIRTHDAY_SRC);
 
@@ -539,6 +596,11 @@ fields:
     expect(Object.keys(result.edges).sort()).toEqual([
       "Address",
       "Fail",
+      "Failed_Address",
+      "Failed_Fail",
+      "Failed_Pass",
+      "Failed_Person",
+      "Failed_PersonWithAddress",
       "Pass",
       "Person",
       "PersonWithAddress",

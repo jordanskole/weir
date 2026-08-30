@@ -12,14 +12,16 @@
  * number them.
  *
  * Deliberately narrow, stated here rather than left implicit:
- * - **No `Failed<In>` routing.** Design says a failure is "an edge
- *   instance like any other" and a retry node should be able to consume
- *   one, but `Failed<In>` isn't a real, named edge in the system yet, so
- *   there's no key to log it under and no way a downstream node could
- *   declare it as an input. A `Failed<In>` result is collected in
- *   `failures` instead of the shared `Log` — honest silence downstream,
- *   not an invented routing scheme (docs/open-questions.md, "Should
- *   `Failed<In>` be tagged like `oneOf`'s other branches?").
+ * - **`Failed<In>` routing exists for `single`-input nodes only.** A
+ *   `single`-input node's failure logs under `failedEdgeName(inputEdge)`
+ *   (`Failed_Todo` for a `Todo`-input node, synthesized automatically by
+ *   `elaborate()`'s `synthesizeFailedEdges`) — the same readiness
+ *   mechanism routes it to a downstream node declaring that edge as its
+ *   own input, no new mechanism needed (docs/design-history.md, "The
+ *   runtime, built narrow on purpose... `Failed<In>` routing"). An
+ *   `every`-input node's `Failed<In>` is bag-shaped (`{A: ..., B: ...}`),
+ *   has no synthesized edge, and still collects in `failures`, unrouted —
+ *   a real, separate next increment, not silently dropped.
  * - **Disambiguating a real `Failed<In>` from a genuine `single`-output
  *   success value is a heuristic** (`looksLikeFailed`), not a real
  *   discriminant — the same open, undecided wire-format question. Safe
@@ -43,7 +45,7 @@ import { membrane } from "./membrane.js";
 import type { Log } from "./membrane.js";
 import type { Program } from "./implementation.js";
 import type { Failed, InputSpec, OutputSpec, PayloadOf } from "./types.js";
-import { Identity } from "./types.js";
+import { Identity, failedEdgeName } from "./types.js";
 
 /**
  * `program.nodes` stores heterogeneous NodeDefs in one `Record<string,
@@ -143,7 +145,13 @@ export async function runNetlist(
 
     fired.add(nodeName);
     if (looksLikeFailed(result)) {
-      failures.push({ node: nodeName, failed: result });
+      if (nodeDef.input.kind === "single") {
+        log.append(failedEdgeName(nodeDef.input.edge.name), correlationId, result);
+      } else {
+        // every-input Failed<In> is bag-shaped; no synthesized edge exists for it yet
+        // (elaborate.ts's synthesizeFailedEdges is single-input only) — still collected here.
+        failures.push({ node: nodeName, failed: result });
+      }
     } else {
       logOutput(log, nodeDef.output, result, correlationId);
     }
