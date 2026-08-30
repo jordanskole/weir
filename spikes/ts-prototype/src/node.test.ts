@@ -57,7 +57,9 @@ const Task = defineEdge({
   name: "Task",
   label: "Task",
   description: "A task",
+  index: "id",
   fields: {
+    id: defineField({ type: "utf8", label: "ID", description: "The task's id", nullable: false }),
     title: defineField({
       type: "utf8",
       label: "Title",
@@ -193,15 +195,21 @@ describe("defineNode", () => {
     ]);
   });
 
-  it("types a many node — N instances of one edge", () => {
-    const siblings = defineNode({
-      name: "siblings",
+  it("types a many node — a collection keyed by the referenced edge's index, not an array", () => {
+    const relatedTasks = defineNode({
+      name: "relatedTasks",
       input: single(Person),
-      output: many(Person),
-      fn: (person) => [{ age: person.age - 2 }, { age: person.age + 2 }],
+      output: many(Task),
+      fn: () => ({
+        "task-1": { id: "task-1", title: "Groceries" },
+        "task-2": { id: "task-2", title: "Laundry" },
+      }),
     });
 
-    expect(siblings.fn({ age: 10 })).toEqual([{ age: 8 }, { age: 12 }]);
+    expect(relatedTasks.fn({ age: 10 })).toEqual({
+      "task-1": { id: "task-1", title: "Groceries" },
+      "task-2": { id: "task-2", title: "Laundry" },
+    });
   });
 
   it("types a node whose input edge has a nested compound (edge-valued) field", () => {
@@ -228,15 +236,18 @@ describe("defineNode", () => {
       output: single(TaskList),
       fn: (list) => ({
         ...list,
-        title: `${list.title} (${list.tasks.length} tasks)`,
+        title: `${list.title} (${Object.keys(list.tasks).length} tasks)`,
       }),
     });
 
     expect(
-      summarize.fn({ title: "Groceries", tasks: [{ title: "Milk" }, { title: "Eggs" }] }),
+      summarize.fn({
+        title: "Groceries",
+        tasks: { "task-1": { id: "task-1", title: "Milk" }, "task-2": { id: "task-2", title: "Eggs" } },
+      }),
     ).toEqual({
       title: "Groceries (2 tasks)",
-      tasks: [{ title: "Milk" }, { title: "Eggs" }],
+      tasks: { "task-1": { id: "task-1", title: "Milk" }, "task-2": { id: "task-2", title: "Eggs" } },
     });
   });
 

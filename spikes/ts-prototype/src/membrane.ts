@@ -70,11 +70,15 @@ function typeofFor(field: FieldDef): "string" | "boolean" | "number" {
 /**
  * Asserts an unknown value against an edge's declared fields — scalar,
  * compound (a nested edge, asserted recursively against its own fields),
- * or many-of-compound (an array, each item asserted against the inner
- * edge) — collecting every violation rather than stopping at the first, so
- * a caller sees the whole shape of what's wrong at once. Same recursive
- * discriminant ("many" in value / "fields" in value / else scalar) as
- * hash.ts's `fingerprint()`, one layer down from schema to data.
+ * or many-of-compound (a collection, keyed by the referenced edge's own
+ * declared `index` field — never a bare array; docs/design-history.md,
+ * "`many` is a collection, keyed by index, not an array") — collecting
+ * every violation rather than stopping at the first, so a caller sees the
+ * whole shape of what's wrong at once. Same recursive discriminant ("many"
+ * in value / "fields" in value / else scalar) as hash.ts's `fingerprint()`,
+ * one layer down from schema to data. Throws immediately, not collected as
+ * a data error, if the referenced edge declares no `index` at all — that's
+ * a declaration bug, not bad input data.
  */
 export function assertPayload<E extends AnyEdgeDef>(edge: E, payload: unknown): PayloadOf<E> {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
@@ -88,17 +92,33 @@ export function assertPayload<E extends AnyEdgeDef>(edge: E, payload: unknown): 
     const value = record[key];
 
     if ("many" in fieldDef) {
-      if (!Array.isArray(value)) {
-        errors.push(`${key} should be an array, got ${describeType(value)}`);
+      const collectionEdge = fieldDef.many;
+      if (collectionEdge.index === undefined) {
+        throw new Error(
+          `${edge.name}.${key}: many requires "${collectionEdge.name}" to declare an index — a collection needs a real key.`,
+        );
+      }
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        errors.push(
+          `${key} should be a collection (an object keyed by "${collectionEdge.index}"), got ${describeType(value)}`,
+        );
         continue;
       }
-      value.forEach((item, i) => {
+      for (const [entryKey, entryValue] of Object.entries(value)) {
         try {
-          assertPayload(fieldDef.many, item);
+          const validated = assertPayload(collectionEdge, entryValue) as Record<string, unknown>;
+          const actualKey = validated[collectionEdge.index];
+          // Object keys are always strings, even when the index field's own type isn't
+          // (a uint8 index like 8 stores under the key "8") — compare by string form.
+          if (String(actualKey) !== entryKey) {
+            errors.push(
+              `${key}["${entryKey}"]: keyed by "${entryKey}" but its own "${collectionEdge.index}" is "${String(actualKey)}"`,
+            );
+          }
         } catch (cause) {
-          errors.push(`${key}[${i}]: ${(cause as Error).message}`);
+          errors.push(`${key}["${entryKey}"]: ${(cause as Error).message}`);
         }
-      });
+      }
       continue;
     }
 

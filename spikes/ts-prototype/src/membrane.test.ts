@@ -122,6 +122,16 @@ const Task = defineEdge({
   name: "Task",
   label: "Task",
   description: "A task",
+  index: "id",
+  fields: {
+    id: defineField({ type: "utf8", label: "ID", description: "The task's id", nullable: false }),
+    title: defineField({ type: "utf8", label: "Title", description: "The task's title", nullable: false }),
+  },
+});
+const TaskWithNoIndex = defineEdge({
+  name: "TaskWithNoIndex",
+  label: "Task",
+  description: "A task with no declared index",
   fields: {
     title: defineField({ type: "utf8", label: "Title", description: "The task's title", nullable: false }),
   },
@@ -151,23 +161,67 @@ describe("assertPayload — compound fields", () => {
 });
 
 describe("assertPayload — many fields", () => {
-  it("accepts an array of valid compound payloads", () => {
-    const payload = assertPayload(TaskList, { tasks: [{ title: "Buy milk" }, { title: "Walk dog" }] });
-    expect(payload).toEqual({ tasks: [{ title: "Buy milk" }, { title: "Walk dog" }] });
+  it("accepts a collection of valid compound payloads, keyed by the referenced edge's index", () => {
+    const payload = assertPayload(TaskList, {
+      tasks: { "task-1": { id: "task-1", title: "Buy milk" }, "task-2": { id: "task-2", title: "Walk dog" } },
+    });
+    expect(payload).toEqual({
+      tasks: { "task-1": { id: "task-1", title: "Buy milk" }, "task-2": { id: "task-2", title: "Walk dog" } },
+    });
   });
 
-  it("accepts an empty array", () => {
-    expect(assertPayload(TaskList, { tasks: [] })).toEqual({ tasks: [] });
+  it("accepts an empty collection", () => {
+    expect(assertPayload(TaskList, { tasks: {} })).toEqual({ tasks: {} });
   });
 
-  it("rejects a many field that isn't an array", () => {
-    expect(() => assertPayload(TaskList, { tasks: { title: "Buy milk" } })).toThrow(/tasks/);
+  it("rejects a many field that's an array, not a collection", () => {
+    expect(() => assertPayload(TaskList, { tasks: [{ id: "task-1", title: "Buy milk" }] })).toThrow(/tasks/);
   });
 
-  it("rejects an invalid item inside the array, naming its index", () => {
+  it("rejects a many field that isn't an object at all", () => {
+    expect(() => assertPayload(TaskList, { tasks: "nope" })).toThrow(/tasks/);
+  });
+
+  it("rejects an invalid entry inside the collection, naming its key", () => {
     expect(() =>
-      assertPayload(TaskList, { tasks: [{ title: "Buy milk" }, { title: 5 }] }),
-    ).toThrow(/tasks\[1\]/);
+      assertPayload(TaskList, {
+        tasks: { "task-1": { id: "task-1", title: "Buy milk" }, "task-2": { id: "task-2", title: 5 } },
+      }),
+    ).toThrow(/tasks\["task-2"\]/);
+  });
+
+  it("rejects an entry keyed inconsistently with its own index field", () => {
+    expect(() =>
+      assertPayload(TaskList, { tasks: { "task-1": { id: "task-2", title: "Buy milk" } } }),
+    ).toThrow(/task-1/);
+  });
+
+  it("throws immediately when the referenced edge declares no index at all", () => {
+    const badTaskList = defineEdge({
+      name: "BadTaskList",
+      label: "Bad task list",
+      description: "d",
+      fields: { tasks: { many: TaskWithNoIndex } },
+    });
+    expect(() => assertPayload(badTaskList, { tasks: {} })).toThrow(/index/i);
+  });
+
+  it("accepts a collection keyed by a numeric index field — object keys are strings, the field value isn't", () => {
+    const Sibling = defineEdge({
+      name: "Sibling",
+      label: "Sibling",
+      description: "d",
+      index: "age",
+      fields: { age: defineField({ type: "uint8", label: "Age", description: "d", nullable: false }) },
+    });
+    const Siblings = defineEdge({
+      name: "Siblings",
+      label: "Siblings",
+      description: "d",
+      fields: { people: { many: Sibling } },
+    });
+    const payload = assertPayload(Siblings, { people: { "8": { age: 8 }, "12": { age: 12 } } });
+    expect(payload).toEqual({ people: { "8": { age: 8 }, "12": { age: 12 } } });
   });
 });
 

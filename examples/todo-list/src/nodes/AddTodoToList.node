@@ -11,8 +11,9 @@ examples:
       TodoList:
         title: "Grocery List"
         description: "A list of groceries to buy"
-        tasks: []
+        tasks: {}
       Todo:
+        id: "todo-1"
         title: "Buy milk"
         description: "Get 2% milk from the store"
         is_complete: false
@@ -21,6 +22,8 @@ examples:
         title: "Grocery List"
         description: "A list of groceries to buy"
         tasks:
-          - title: "Buy milk"
+          todo-1:
+            id: "todo-1"
+            title: "Buy milk"
             description: "Get 2% milk from the store"
             is_complete: false
