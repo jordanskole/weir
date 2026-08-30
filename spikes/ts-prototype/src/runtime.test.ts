@@ -441,4 +441,52 @@ describe("runNetlist", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("real: AddTodoToList fails on a malformed Todo — every-input Failed<In> lands in `failures`, unrouted", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "weir-runtime-"));
+    try {
+      const raw = await elaborate(TODO_LIST_SRC);
+
+      for (const [name, fn] of [
+        ["CreateTodo", `export default function CreateTodo(payload) { return payload; }`],
+        ["CompleteTodo", `export default function CompleteTodo(payload) { return { ...payload, is_complete: true }; }`],
+        ["AddTodoToList", `export default function AddTodoToList(payload) { return payload.TodoList; }`],
+      ] as const) {
+        const hash = (await hashNode(raw.nodes[name]!)).short;
+        await mkdir(join(dir, name), { recursive: true });
+        await writeFile(join(dir, name, `${hash}.ts`), `${fn}\n`, "utf8");
+      }
+
+      const program = await elaborateWithImplementations(TODO_LIST_SRC, dir);
+      const log = new InMemoryLog();
+      const validTodoList = { title: "Grocery List", description: null, tasks: {} };
+      // title should be a string — a real assertPayload type violation, not a
+      // `validations` (minLength etc.) one, since those aren't enforced yet.
+      const malformedTodo = { id: "todo-1", title: 12345, description: null, is_complete: false };
+      log.append("TodoList", "thread-1", validTodoList);
+      log.append("Todo", "thread-1", malformedTodo);
+
+      const result = await runNetlist(
+        { ...program, wiring: { origins: ["AddTodoToList"], feeds: {} } },
+        log,
+        "thread-1",
+        {},
+      );
+
+      expect(result.failures).toEqual([
+        {
+          node: "AddTodoToList",
+          failed: {
+            input: { TodoList: validTodoList, Todo: malformedTodo },
+            reason: expect.stringMatching(/title/),
+          },
+        },
+      ]);
+      expect(log.latest("TodoList", "thread-1")).toEqual(validTodoList);
+      expect(log.latest("Failed_Todo", "thread-1")).toBeUndefined();
+      expect(log.latest("Failed_TodoList", "thread-1")).toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
