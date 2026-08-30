@@ -14,7 +14,7 @@ examples:
         tasks: {}
       Todo:
         id: "todo-1"
-        title: "Buy milk"
+        title: "Buy milk and eggs"
         description: "Get 2% milk from the store"
         is_complete: false
     expect:
@@ -24,6 +24,6 @@ examples:
         tasks:
           todo-1:
             id: "todo-1"
-            title: "Buy milk"
+            title: "Buy milk and eggs"
             description: "Get 2% milk from the store"
             is_complete: false

@@ -225,6 +225,84 @@ describe("assertPayload — many fields", () => {
   });
 });
 
+describe("assertPayload — validations", () => {
+  const Todo = defineEdge({
+    name: "Todo",
+    label: "Todo",
+    description: "A task",
+    fields: {
+      title: defineField({
+        type: "utf8",
+        label: "Title",
+        description: "d",
+        nullable: false,
+        validations: { minLength: 10, maxLength: 200 },
+      }),
+      code: defineField({
+        type: "utf8",
+        label: "Code",
+        description: "d",
+        nullable: false,
+        validations: { pattern: "^[A-Z]{3}-\\d{4}$" },
+      }),
+      priority: defineField({
+        type: "uint8",
+        label: "Priority",
+        description: "d",
+        nullable: false,
+        validations: { min: 1, max: 5 },
+      }),
+      status: defineField({
+        type: "utf8",
+        label: "Status",
+        description: "d",
+        nullable: false,
+        enumValues: ["open", "done"],
+      }),
+    },
+  });
+  const valid = { title: "Buy the groceries", code: "ABC-1234", priority: 3, status: "open" };
+
+  it("accepts a payload satisfying every validation", () => {
+    expect(assertPayload(Todo, valid)).toEqual(valid);
+  });
+
+  it("rejects a string shorter than minLength", () => {
+    expect(() => assertPayload(Todo, { ...valid, title: "short" })).toThrow(/title.*10/);
+  });
+
+  it("rejects a string longer than maxLength", () => {
+    expect(() => assertPayload(Todo, { ...valid, title: "x".repeat(201) })).toThrow(/title.*200/);
+  });
+
+  it("rejects a string that doesn't match pattern", () => {
+    expect(() => assertPayload(Todo, { ...valid, code: "nope" })).toThrow(/code/);
+  });
+
+  it("rejects a number below min", () => {
+    expect(() => assertPayload(Todo, { ...valid, priority: 0 })).toThrow(/priority.*1/);
+  });
+
+  it("rejects a number above max", () => {
+    expect(() => assertPayload(Todo, { ...valid, priority: 6 })).toThrow(/priority.*5/);
+  });
+
+  it("rejects a value not in enumValues", () => {
+    expect(() => assertPayload(Todo, { ...valid, status: "archived" })).toThrow(/status/);
+  });
+
+  it("lists validation violations alongside type violations, not just the first", () => {
+    let error: Error | undefined;
+    try {
+      assertPayload(Todo, { ...valid, title: "short", priority: 99 });
+    } catch (cause) {
+      error = cause as Error;
+    }
+    expect(error?.message).toMatch(/title/);
+    expect(error?.message).toMatch(/priority/);
+  });
+});
+
 const A = defineEdge({
   name: "A",
   label: "A",
