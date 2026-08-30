@@ -294,6 +294,19 @@ export interface Failed<In extends InputSpec> {
 }
 
 /**
+ * The naming convention a `single`-input node's `Failed<In>` routes
+ * through — one synthesized edge per input edge, shared by every node
+ * that fails on that same input (docs/design-history.md, "The runtime,
+ * built narrow on purpose... `Failed<In>` routing"). `elaborate()`
+ * synthesizes one of these per declared edge so a `.node` file can
+ * declare `input: Failed_Todo`; `runtime.ts` logs a failure under this
+ * same name — one convention, named once, used by both.
+ */
+export function failedEdgeName(inputEdgeName: string): string {
+  return `Failed_${inputEdgeName}`;
+}
+
+/**
  * A node's implementation. Context-free by default; a second `env`
  * parameter opts a node into seeing the envelope (docs/design.md §1). Not
  * a string reference — see spikes/ts-prototype/README.md for why a spike

@@ -184,7 +184,7 @@ describe("runNetlist", () => {
     expect(cCalls).toBe(1);
   });
 
-  it("records a Failed<In> result without propagating it downstream", async () => {
+  it("routes a single-input node's failure to Failed_<InputEdgeName>, not the original edge", async () => {
     const failing = defineNode({
       name: "failing",
       input: single(Start),
@@ -207,8 +207,84 @@ describe("runNetlist", () => {
 
     const result = await runNetlist(program, log, "thread-1", { failing: { value: "a" } });
 
-    expect(result.failures).toEqual([{ node: "failing", failed: { input: { value: "a" }, reason: "kaboom" } }]);
+    expect(result.failures).toEqual([]);
+    expect(log.latest("Failed_Start", "thread-1")).toEqual({ input: { value: "a" }, reason: "kaboom" });
     expect(log.latest("Start", "thread-1")).toBeUndefined();
+  });
+
+  it("a downstream node declaring Failed_<InputEdgeName> as its input becomes ready once the failure is logged", async () => {
+    const FailedStart = defineEdge({
+      name: "Failed_Start",
+      label: "Failed (Start)",
+      description: "d",
+      fields: { input: Start, reason: defineField({ type: "utf8", label: "Reason", description: "d", nullable: true }) },
+    });
+    const failing = defineNode({
+      name: "failing",
+      input: single(Start),
+      output: single(Start),
+      fn: () => {
+        throw new Error("kaboom");
+      },
+    });
+    const handleFailed = defineNode({
+      name: "handleFailed",
+      input: single(FailedStart),
+      output: single(Start),
+      fn: (failed) => failed.input,
+    });
+    const program: Program = {
+      fields: {},
+      edges: { Start, Failed_Start: FailedStart },
+      nodes: { failing, handleFailed },
+      wiring: { origins: ["failing"], feeds: { failing: ["handleFailed"] } },
+    };
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(program, log, "thread-1", { failing: { value: "a" } });
+
+    expect(result.failures).toEqual([]);
+    expect(log.latest("Failed_Start", "thread-1")).toEqual({ input: { value: "a" }, reason: "kaboom" });
+    expect(log.latest("Start", "thread-1")).toEqual({ value: "a" });
+  });
+
+  it("still collects an every-input node's failure in `failures` — bag-shaped Failed<In> isn't routed yet", async () => {
+    const A = defineEdge({
+      name: "A",
+      label: "A",
+      description: "d",
+      fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+    });
+    const B = defineEdge({
+      name: "B",
+      label: "B",
+      description: "d",
+      fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+    });
+    const failingJoin = defineNode({
+      name: "failingJoin",
+      input: every(A, B),
+      output: single(Start),
+      fn: () => {
+        throw new Error("kaboom");
+      },
+    });
+    const program: Program = {
+      fields: {},
+      edges: { Start, A, B },
+      nodes: { failingJoin },
+      wiring: { origins: ["failingJoin"], feeds: {} },
+    };
+    const log = new InMemoryLog();
+    log.append("A", "thread-1", { value: "a" });
+    log.append("B", "thread-1", { value: "b" });
+
+    const result = await runNetlist(program, log, "thread-1", {});
+
+    expect(result.failures).toEqual([
+      { node: "failingJoin", failed: { input: { A: { value: "a" }, B: { value: "b" } }, reason: "kaboom" } },
+    ]);
+    expect(log.latest("Failed_A", "thread-1")).toBeUndefined();
   });
 
   it("routes a oneOf output — logs only the edge that actually fired", async () => {
