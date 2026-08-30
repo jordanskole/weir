@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Weir topology",
+  "type": "object",
+  "propertyNames": {
+    "minLength": 1
+  },
+  "additionalProperties": {
+    "$ref": "#/$defs/topologyNode"
+  },
+  "$defs": {
+    "topologyNode": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "then": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/topologyNode"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

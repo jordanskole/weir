@@ -1,6 +1,6 @@
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
-import { edgeSchema, fieldSchema, nodeSchema } from "./schema.js";
+import { edgeSchema, fieldSchema, nodeSchema, topologySchema } from "./schema.js";
 
 const ajv = new Ajv2020({ strict: false });
 
@@ -599,5 +599,52 @@ describe("nodeSchema", () => {
       closure: {},
     });
     expect(valid).toBe(false);
+  });
+});
+
+describe("topologySchema", () => {
+  it("accepts a single sequential chain", () => {
+    const validate = validatorFor(topologySchema());
+    expect(validate({ A: { then: { B: {} } } })).toBe(true);
+  });
+
+  it("accepts a leaf node declared as null", () => {
+    const validate = validatorFor(topologySchema());
+    expect(validate({ A: null })).toBe(true);
+  });
+
+  it("accepts fan-out — one node feeding several next nodes", () => {
+    const validate = validatorFor(topologySchema());
+    expect(validate({ A: { then: { B: {}, C: {} } } })).toBe(true);
+  });
+
+  it("accepts a node fed by two parents, nested arbitrarily deep", () => {
+    const validate = validatorFor(topologySchema());
+    const valid = validate({
+      A: { then: { B: { then: { C: {} } }, C: {} } },
+    });
+    expect(validate.errors).toBeNull();
+    expect(valid).toBe(true);
+  });
+
+  it("accepts several independent top-level origins", () => {
+    const validate = validatorFor(topologySchema());
+    expect(validate({ A: {}, B: null })).toBe(true);
+  });
+
+  it("rejects a then value that isn't an object", () => {
+    const validate = validatorFor(topologySchema());
+    expect(validate({ A: { then: "oops" } })).toBe(false);
+  });
+
+  it("rejects a key other than then, at any depth", () => {
+    const validate = validatorFor(topologySchema());
+    expect(validate({ A: { bogus: {} } })).toBe(false);
+    expect(validate({ A: { then: { B: { bogus: {} } } } })).toBe(false);
+  });
+
+  it("rejects a top-level value that's neither null nor an object", () => {
+    const validate = validatorFor(topologySchema());
+    expect(validate({ A: "oops" })).toBe(false);
   });
 });

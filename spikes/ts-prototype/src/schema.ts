@@ -1,15 +1,20 @@
 /**
- * JSON Schema generation for `.field`/`.edge` YAML — the "schema-driven
- * editor support" docs/design.md §10 promises, generated mechanically from
- * the same types (and the same INTEGER_RANGES table) that already validate
- * everything else via defineField. Consumed by VS Code's YAML tooling
- * (redhat.vscode-yaml / yaml-language-server), not by weir's own runtime.
+ * JSON Schema generation for `.field`/`.edge`/`.node`/`.topology` YAML —
+ * the "schema-driven editor support" docs/design.md §10 promises,
+ * generated mechanically from the same types (and the same
+ * INTEGER_RANGES table) that already validate everything else via
+ * defineField. Consumed by VS Code's YAML tooling (redhat.vscode-yaml /
+ * yaml-language-server), not by weir's own runtime.
  *
  * What this can't express: cross-field relationships (min <= max,
  * enumValues excluding pattern/minLength/maxLength) — standard JSON Schema
  * has no clean way to compare sibling properties. Those checks still only
  * run for real in defineField/elaborate(); this schema catches the shape
- * mistakes a human makes while typing, not every rule.
+ * mistakes a human makes while typing, not every rule. `topologySchema()`
+ * has one more: it can check the nested `then:` map's *shape*, never that
+ * a name it mentions is a real declared node — that needs the same
+ * cross-file information `nodeSchema()` already can't reach without
+ * `elaborate()`.
  */
 
 import { INTEGER_RANGES, UNSIGNED_TYPES } from "./define.js";
@@ -370,5 +375,38 @@ export function nodeSchema(): object {
     },
     additionalProperties: false,
     allOf: [...inputShapeConditionals, ...outputShapeConditionals],
+  };
+}
+
+/**
+ * Generates a JSON Schema for a `.topology` file — the nested `then:` map
+ * (docs/design-history.md, "`.topology` built"): a node name is a key;
+ * `then:` maps to the node names it feeds; a leaf is `null` or `{}`;
+ * fan-out is several keys under one `then:`; a node fed by more than one
+ * parent needs no special syntax, it just appears again under each
+ * parent's own `then:`. Recursive via `$defs/topologyNode`, since the
+ * nesting has no fixed depth. `then` is the only recognized key at any
+ * level — matches `parseTopologyFile`'s own "only 'then' is a recognized
+ * key" rejection (elaborate.ts).
+ */
+export function topologySchema(): object {
+  const topologyNode = {
+    oneOf: [
+      { type: "null" },
+      {
+        type: "object",
+        properties: { then: { type: "object", additionalProperties: { $ref: "#/$defs/topologyNode" } } },
+        additionalProperties: false,
+      },
+    ],
+  };
+
+  return {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "Weir topology",
+    type: "object",
+    propertyNames: { minLength: 1 },
+    additionalProperties: { $ref: "#/$defs/topologyNode" },
+    $defs: { topologyNode },
   };
 }
