@@ -68,17 +68,64 @@ function typeofFor(field: FieldDef): "string" | "boolean" | "number" {
 }
 
 /**
- * Asserts an unknown value against an edge's declared fields — scalar,
- * compound (a nested edge, asserted recursively against its own fields),
- * or many-of-compound (a collection, keyed by the referenced edge's own
- * declared `index` field — never a bare array; docs/design-history.md,
- * "`many` is a collection, keyed by index, not an array") — collecting
- * every violation rather than stopping at the first, so a caller sees the
- * whole shape of what's wrong at once. Same recursive discriminant ("many"
- * in value / "fields" in value / else scalar) as hash.ts's `fingerprint()`,
- * one layer down from schema to data. Throws immediately, not collected as
- * a data error, if the referenced edge declares no `index` at all — that's
- * a declaration bug, not bad input data.
+ * Checks a scalar value against its field's declared `enumValues` and
+ * `validations` (`min`/`max` for numbers, `minLength`/`maxLength`/`pattern`
+ * for strings) — the part of the declared schema `assertPayload` used to
+ * check only structurally (via `hash.ts`'s fingerprint) and never actually
+ * enforced against real data (docs/open-questions.md, "`assertPayload`
+ * doesn't enforce `validations`"). Only called once the value's scalar
+ * type already matches, so `typeof` narrowing here is safe.
+ */
+function validationErrors(key: string, field: FieldDef, value: string | number | boolean): string[] {
+  const errors: string[] = [];
+
+  if (field.enumValues !== undefined && typeof value === "string" && !field.enumValues.includes(value)) {
+    errors.push(`${key} must be one of ${field.enumValues.join(", ")}, got "${value}"`);
+  }
+
+  const validations = field.validations as
+    | { min?: number; max?: number; minLength?: number; maxLength?: number; pattern?: string }
+    | undefined;
+  if (validations === undefined) return errors;
+
+  if (typeof value === "number") {
+    if (validations.min !== undefined && value < validations.min) {
+      errors.push(`${key} must be >= ${validations.min}, got ${value}`);
+    }
+    if (validations.max !== undefined && value > validations.max) {
+      errors.push(`${key} must be <= ${validations.max}, got ${value}`);
+    }
+  }
+
+  if (typeof value === "string") {
+    if (validations.minLength !== undefined && value.length < validations.minLength) {
+      errors.push(`${key} must be at least ${validations.minLength} characters, got ${value.length}`);
+    }
+    if (validations.maxLength !== undefined && value.length > validations.maxLength) {
+      errors.push(`${key} must be at most ${validations.maxLength} characters, got ${value.length}`);
+    }
+    if (validations.pattern !== undefined && !new RegExp(validations.pattern).test(value)) {
+      errors.push(`${key} must match pattern ${validations.pattern}, got "${value}"`);
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Asserts an unknown value against an edge's declared fields — scalar
+ * (type, nullability, and now `enumValues`/`validations` too — see
+ * `validationErrors`), compound (a nested edge, asserted recursively
+ * against its own fields), or many-of-compound (a collection, keyed by
+ * the referenced edge's own declared `index` field — never a bare array;
+ * docs/design-history.md, "`many` is a collection, keyed by index, not an
+ * array") — collecting every violation rather than stopping at the first,
+ * so a caller sees the whole shape of what's wrong at once. Same
+ * recursive discriminant ("many" in value / "fields" in value / else
+ * scalar) as hash.ts's `fingerprint()`, one layer down from schema to
+ * data. Throws immediately, not collected as a data error, if the
+ * referenced edge declares no `index` at all — that's a declaration bug,
+ * not bad input data.
  */
 export function assertPayload<E extends AnyEdgeDef>(edge: E, payload: unknown): PayloadOf<E> {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
@@ -143,6 +190,8 @@ export function assertPayload<E extends AnyEdgeDef>(edge: E, payload: unknown): 
     const expected = typeofFor(field);
     if (typeof value !== expected) {
       errors.push(`${key} should be ${expected}, got ${describeType(value)}`);
+    } else {
+      errors.push(...validationErrors(key, field, value as string | number | boolean));
     }
   }
 

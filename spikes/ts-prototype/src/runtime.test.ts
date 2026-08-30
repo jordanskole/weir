@@ -430,7 +430,7 @@ describe("runNetlist", () => {
 
       const program = await elaborateWithImplementations(TODO_LIST_SRC, dir);
       const log = new InMemoryLog();
-      const todo = { id: "todo-1", title: "Buy milk", description: null, is_complete: false };
+      const todo = { id: "todo-1", title: "Buy milk and eggs", description: null, is_complete: false };
 
       const result = await runNetlist(program, log, "thread-1", { CreateTodo: todo });
 
