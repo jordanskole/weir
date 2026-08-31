@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { defineEdge, defineField, defineNode, every, single } from "./define.js";
+import { defineEdge, defineField, defineNode, defineOneOfNodes, every, single } from "./define.js";
 import { elaborate } from "./elaborate.js";
 import { hashNode } from "./hash.js";
 import { elaborateWithImplementations } from "./implementation.js";
@@ -487,5 +487,116 @@ describe("runNetlist", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("real: a oneOf-desugared shadow fires through the worklist via an aliased .topology reference", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "weir-runtime-"));
+    const root = await mkdtemp(join(tmpdir(), "weir-decl-"));
+    try {
+      await mkdir(join(root, "edges"), { recursive: true });
+      await mkdir(join(root, "nodes"), { recursive: true });
+      await mkdir(join(root, "topology"), { recursive: true });
+      // Todo/Person exist so elaborate()'s unconditional synthesizeFailedEdges
+      // auto-creates Failed_Todo/Failed_Person for us — hand-authoring those
+      // edges directly would fight that mechanism and produce the wrong shape
+      // ({input: <embedded Todo/Person>, reason}, not a bare scalar).
+      await writeFile(
+        join(root, "edges", "Todo.edge"),
+        `description: d\nfields:\n  title:\n    type: utf8\n    label: v\n    description: d\n    nullable: false\n`,
+        "utf8",
+      );
+      await writeFile(
+        join(root, "edges", "Person.edge"),
+        `description: d\nfields:\n  name:\n    type: utf8\n    label: v\n    description: d\n    nullable: false\n`,
+        "utf8",
+      );
+      await writeFile(
+        join(root, "edges", "Start.edge"),
+        `description: d\nfields:\n  value:\n    type: utf8\n    label: v\n    description: d\n    nullable: false\n`,
+        "utf8",
+      );
+      await writeFile(
+        join(root, "nodes", "failing.node"),
+        `description: d\ninput: Todo\noutput: Todo\nexamples:\n  - given:\n      Todo:\n        title: "bad todo"\n    expect:\n      Todo:\n        title: "bad todo"\n`,
+        "utf8",
+      );
+      await writeFile(
+        join(root, "nodes", "HandleFailed.node"),
+        `description: d\ninput:\n  oneOf:\n    - Failed_Todo\n    - Failed_Person\noutput: Start\nexamples:\n  - given:\n      Failed_Todo:\n        input:\n          title: "bad todo"\n        reason: "kaboom"\n    expect:\n      Start:\n        value: "recovered"\n  - given:\n      Failed_Person:\n        input:\n          name: "bad person"\n        reason: "kaboom"\n    expect:\n      Start:\n        value: "recovered"\n`,
+        "utf8",
+      );
+      await writeFile(join(root, "topology", "main.topology"), `failing:\n  then:\n    HandleFailed: {}\n`, "utf8");
+
+      const raw = await elaborate(root);
+      // failing fails on Todo -> logs Failed_Todo, which HandleFailed__Failed_Todo
+      // is listening for; HandleFailed__Failed_Person never becomes ready (nothing
+      // ever logs Failed_Person) — proving the alias's "wasted, harmless attempt"
+      // on the shadow that can't actually fire, not just the one that can.
+      for (const [name, fn] of [
+        ["failing", `export default function failing() { throw new Error("kaboom"); }`],
+        ["HandleFailed__Failed_Todo", `export default function handle() { return { value: "recovered" }; }`],
+        ["HandleFailed__Failed_Person", `export default function handle() { return { value: "recovered" }; }`],
+      ] as const) {
+        const hash = (await hashNode(raw.nodes[name]!)).short;
+        await mkdir(join(dir, name), { recursive: true });
+        await writeFile(join(dir, name, `${hash}.ts`), `${fn}\n`, "utf8");
+      }
+
+      const program = await elaborateWithImplementations(root, dir);
+      const log = new InMemoryLog();
+
+      await runNetlist(program, log, "thread-1", { failing: { title: "bad todo" } });
+
+      expect(log.latest("Failed_Todo", "thread-1")).toEqual({ input: { title: "bad todo" }, reason: "kaboom" });
+      expect(log.latest("Failed_Person", "thread-1")).toBeUndefined();
+      expect(log.latest("Start", "thread-1")).toEqual({ value: "recovered" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("desugared shadows fire independently — no cross-shadow exclusivity, unlike the old any", async () => {
+    const A = defineEdge({
+      name: "A",
+      label: "A",
+      description: "d",
+      fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+    });
+    const B = defineEdge({
+      name: "B",
+      label: "B",
+      description: "d",
+      fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+    });
+    const Out = defineEdge({
+      name: "Out",
+      label: "Out",
+      description: "d",
+      fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+    });
+    // A side-effect counter, not the shared Out edge's log state, proves both
+    // fired: InMemoryLog.latest() only keeps the most recent write, so two
+    // firings to the same edge would be indistinguishable from "only one
+    // fired" by log state alone. defineOneOfNodes shares one `output` across
+    // every shadow (same as parseOneOfNodeFile's .node YAML equivalent), so
+    // there's no way to give each shadow its own output edge to tell them
+    // apart that way either — the counter is the real, unambiguous proof.
+    const received: string[] = [];
+    const shadows = defineOneOfNodes("Handle", [A, B], single(Out), (payload) => {
+      received.push(payload.value);
+      return { value: payload.value };
+    });
+    // Both listed as origins with real originPayloads, not pre-logged edges
+    // read via log.latest — runNetlist requires an origin's payload to come
+    // from originPayloads (it returns false early otherwise, never touching
+    // the log), so this is the correct way to seed two independent origins
+    // in one worklist run, not a simplification of the real scenario.
+    const program = programWith(shadows, { origins: ["Handle__A", "Handle__B"], feeds: {} });
+    const log = new InMemoryLog();
+
+    await runNetlist(program, log, "thread-1", { Handle__A: { value: "a" }, Handle__B: { value: "b" } });
+
+    expect(received.sort()).toEqual(["a", "b"]);
   });
 });
