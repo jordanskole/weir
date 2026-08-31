@@ -387,8 +387,9 @@ fn: "() => {}"
 
 describe("parseTopologyFile", () => {
   const knownNames = new Set(["A", "B", "C", "birthday"]);
-  const resolveNodeName = (name: string): void => {
+  const resolveNodeName = (name: string): string[] => {
     if (!knownNames.has(name)) throw new Error(`Cannot resolve "${name}" — no .node file declares it.`);
+    return [name];
   };
 
   it("parses a single sequential chain", () => {
@@ -446,6 +447,30 @@ birthday:
 
   it("resolves every node name mentioned, including nested ones", () => {
     expect(() => parseTopologyFile(`A:\n  then:\n    Ghost: {}\n`, resolveNodeName)).toThrow(/Ghost/);
+  });
+
+  it("expands an aliased name (a oneOf-desugared original) into all its shadows, as a parent", () => {
+    const aliasing = (name: string): string[] => {
+      if (name === "HandleFailed") return ["HandleFailed__Failed_Todo", "HandleFailed__Failed_Person"];
+      return knownNames.has(name) ? [name] : (() => {
+        throw new Error(`Cannot resolve "${name}" — no .node file declares it.`);
+      })();
+    };
+    const wiring = parseTopologyFile(`HandleFailed:\n  then:\n    A: {}\n`, aliasing);
+    expect(wiring.origins.sort()).toEqual(["HandleFailed__Failed_Person", "HandleFailed__Failed_Todo"]);
+    expect(wiring.feeds["HandleFailed__Failed_Todo"]).toEqual(["A"]);
+    expect(wiring.feeds["HandleFailed__Failed_Person"]).toEqual(["A"]);
+  });
+
+  it("expands an aliased name into all its shadows, as a child", () => {
+    const aliasing = (name: string): string[] => {
+      if (name === "HandleFailed") return ["HandleFailed__Failed_Todo", "HandleFailed__Failed_Person"];
+      return knownNames.has(name) ? [name] : (() => {
+        throw new Error(`Cannot resolve "${name}" — no .node file declares it.`);
+      })();
+    };
+    const wiring = parseTopologyFile(`A:\n  then:\n    HandleFailed: {}\n`, aliasing);
+    expect(wiring.feeds.A?.sort()).toEqual(["HandleFailed__Failed_Person", "HandleFailed__Failed_Todo"]);
   });
 });
 
@@ -956,5 +981,79 @@ Ghost:
 
     expect(result.wiring.origins).toEqual(["CreateTodo"]);
     expect(result.wiring.feeds.CreateTodo?.sort()).toEqual(["AddTodoToList", "CompleteTodo"]);
+  });
+
+  it("lets a .topology file reference a oneOf-desugared node's original name, expanding to all shadows", async () => {
+    const root = await writeFixture({
+      "edges/Start.edge": `
+description: A starting value
+fields:
+  value:
+    type: utf8
+    label: Value
+    description: d
+    nullable: false
+`,
+      "edges/Failed_Todo.edge": `
+description: A failed Todo
+fields:
+  input:
+    type: utf8
+    label: Input
+    description: d
+    nullable: false
+`,
+      "edges/Failed_Person.edge": `
+description: A failed Person
+fields:
+  input:
+    type: utf8
+    label: Input
+    description: d
+    nullable: false
+`,
+      "nodes/failing.node": `
+description: d
+input: Start
+output: Start
+examples:
+  - given:
+      Start:
+        value: "a"
+    expect:
+      Start:
+        value: "a"
+`,
+      "nodes/HandleFailed.node": `
+description: Handles whichever failure shows up first
+input:
+  oneOf:
+    - Failed_Todo
+    - Failed_Person
+output: Start
+examples:
+  - given:
+      Failed_Todo:
+        input: "bad todo"
+    expect:
+      Start:
+        value: "a"
+  - given:
+      Failed_Person:
+        input: "bad person"
+    expect:
+      Start:
+        value: "a"
+`,
+      "topology/main.topology": `
+failing:
+  then:
+    HandleFailed: {}
+`,
+    });
+
+    const result = await elaborate(root);
+
+    expect(result.wiring.feeds.failing?.sort()).toEqual(["HandleFailed__Failed_Person", "HandleFailed__Failed_Todo"]);
   });
 });
