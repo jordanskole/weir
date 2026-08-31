@@ -44,9 +44,7 @@ function requireIndex(edge: AnyEdgeDef, context: string): void {
  * itself grows a `Failed_Failed_*` counterpart. Single-input nodes only —
  * `allOf`-input combos get their own synthesis (`synthesizeAllOfFailedEdges`,
  * below) since unconditional-for-every-edge doesn't generalize to
- * combinations (that's a powerset, not a linear scan). `any`-input
- * `Failed<In>`'s tagged-union shape still has no natural single synthesized
- * edge name (`runtime.ts` still collects those in `failures`, unrouted).
+ * combinations (that's a powerset, not a linear scan).
  */
 function reasonField(): FieldDef {
   return { type: "utf8", label: "Reason", description: "Why the node failed, if known.", nullable: true };
