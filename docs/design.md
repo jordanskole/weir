@@ -11,7 +11,7 @@ questions — see `design-history.md` and `open-questions.md` for those.
 Edges may be parameterized (`Animal<T extends {...}>`); parameters are instantiated
 into concrete edges at elaboration and never reach the runtime.
 
-**Node** — a pure function from its declared input (one edge, or several via `every:`,
+**Node** — a pure function from its declared input (one edge, or several via `allOf:`,
 §5) to an edge. No instance state, no `this`, no ambient access. A node whose body is host code is a **primitive**; a node whose body is
 a subgraph is a **composite**. A composite with one input edge and one output edge is
 indistinguishable from a primitive at its boundary, so topologies nest without limit
@@ -136,7 +136,7 @@ trigger them independently at different times — there is exactly one call to t
 outer membrane per external event, and every origin-shaped edge it declares needing
 resolves from that single payload at once.
 
-**Multi-input nodes** declare `input: { every: [A, B] }` rather than a bare edge name.
+**Multi-input nodes** declare `input: { allOf: [A, B] }` rather than a bare edge name.
 This is a readiness condition, not a wire: the membrane resolves it by checking whether
 an `A`-shaped and a `B`-shaped edge both exist yet in the current `correlation_id`'s
 logs, and calls `Fn` once both are present, however many other invocations separate
@@ -255,7 +255,7 @@ A node reads `Identity` the same way it reads any other edge — declared, not a
 `.node` file's `scope` field names exactly which field(s) it needs (`read:Identity:sub`),
 and the membrane resolves each declared entry to precisely that field before calling
 `Fn` — never the whole object. Whether `scope`'s `verb:edge:field` shape is really the
-same mechanism as `every:` applied to ordinary edges too, or a separate declaration that
+same mechanism as `allOf:` applied to ordinary edges too, or a separate declaration that
 happens to look similar, isn't settled (open-questions.md). This doesn't reintroduce
 ambient state (§5): nothing ever writes to `Identity` once the outer membrane populates
 it, and a node's ability to *proceed* still depends on a gate it explicitly declared,

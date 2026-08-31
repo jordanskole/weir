@@ -72,6 +72,7 @@ type AnyAllOfInvoke = (
 ) => Promise<unknown>;
 
 export interface RunResult {
+  /** Currently always empty — the only InputSpec kind whose failures ever landed here (the removed `any` kind) no longer exists. Retained rather than removed, since deleting it would be a separate public-API change. */
   failures: { node: string; failed: Failed<InputSpec> }[];
 }
 
