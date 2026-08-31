@@ -247,12 +247,13 @@ export function parseNodeFile(yamlText: string, name: string, resolveEdge: EdgeR
 }
 
 /**
- * Parses a `.node` file whose `input` is `{ oneOf: [...] }` into N separate
+ * Parses a `.node` file whose `input` is `{ anyOf: [...] }` into N separate
  * `NodeDecl`s, one per listed edge — desugaring sugar, not a real
- * `InputSpec` kind (docs/superpowers/specs/2026-08-31-any-desugaring-design.md).
- * Named `<name>__<edgeName>`, double underscore (edge names can already
- * contain single underscores, e.g. `Failed_Todo_TodoList`, so a single
- * underscore join would be ambiguous to a human reading the name).
+ * `InputSpec` kind (docs/superpowers/specs/2026-08-31-any-desugaring-design.md,
+ * docs/superpowers/specs/2026-08-31-oneof-input-becomes-anyof.md). Named
+ * `<name>__<edgeName>`, double underscore (edge names can already contain
+ * single underscores, e.g. `Failed_Todo_TodoList`, so a single underscore
+ * join would be ambiguous to a human reading the name).
  *
  * Each example in the original file's `examples` array is routed to the one
  * shadow whose edge name appears as its `given`'s tag key (schema.ts's
@@ -261,7 +262,7 @@ export function parseNodeFile(yamlText: string, name: string, resolveEdge: EdgeR
  * key at all — the same "examples optional" looseness `parseNodeFile`
  * already has, not a new gap this introduces.
  */
-function parseOneOfNodeFile(
+function parseAnyOfNodeFile(
   yamlText: string,
   name: string,
   resolveEdge: EdgeResolver,
@@ -276,13 +277,13 @@ function parseOneOfNodeFile(
   const { label, description, input, output, examples, closure } = raw as {
     label?: unknown;
     description?: unknown;
-    input?: { oneOf: unknown };
+    input?: { anyOf: unknown };
     output?: unknown;
     examples?: unknown;
     closure?: unknown;
   };
 
-  const edges = resolveEdgeNameList(input?.oneOf, "input.oneOf", resolveEdge);
+  const edges = resolveEdgeNameList(input?.anyOf, "input.anyOf", resolveEdge);
   const outputSpec = resolveOutputSpec(output, resolveEdge);
   const allExamples = (examples as { given: Record<string, unknown>; expect: unknown }[] | undefined) ?? [];
 
@@ -484,22 +485,22 @@ export async function elaborate(root: string): Promise<Elaborated> {
   synthesizeAllOfFailedEdges(edges, [...allOfCombosByKey.values()]);
 
   const nodes: Record<string, NodeDecl> = {};
-  const oneOfAliases = new Map<string, string[]>();
+  const anyOfAliases = new Map<string, string[]>();
   for (const [name, text] of nodeTextByName) {
     const raw = parse(text) as { input?: unknown };
-    const isOneOf =
-      raw.input !== null && typeof raw.input === "object" && !Array.isArray(raw.input) && "oneOf" in raw.input;
-    if (isOneOf) {
-      const shadows = parseOneOfNodeFile(text, name, resolveEdge);
+    const isAnyOf =
+      raw.input !== null && typeof raw.input === "object" && !Array.isArray(raw.input) && "anyOf" in raw.input;
+    if (isAnyOf) {
+      const shadows = parseAnyOfNodeFile(text, name, resolveEdge);
       Object.assign(nodes, shadows);
-      oneOfAliases.set(name, Object.keys(shadows));
+      anyOfAliases.set(name, Object.keys(shadows));
     } else {
       nodes[name] = parseNodeFile(text, name, resolveEdge);
     }
   }
 
   const resolveNodeName: NodeNameResolver = (name) => {
-    const aliased = oneOfAliases.get(name);
+    const aliased = anyOfAliases.get(name);
     if (aliased) return aliased;
     if (!(name in nodes)) {
       throw new Error(`Cannot resolve "${name}" — no .node file declares it.`);

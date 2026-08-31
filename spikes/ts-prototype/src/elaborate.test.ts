@@ -449,7 +449,7 @@ birthday:
     expect(() => parseTopologyFile(`A:\n  then:\n    Ghost: {}\n`, resolveNodeName)).toThrow(/Ghost/);
   });
 
-  it("expands an aliased name (a oneOf-desugared original) into all its shadows, as a parent", () => {
+  it("expands an aliased name (an anyOf-desugared original) into all its shadows, as a parent", () => {
     const aliasing = (name: string): string[] => {
       if (name === "HandleFailed") return ["HandleFailed__Failed_Todo", "HandleFailed__Failed_Person"];
       return knownNames.has(name) ? [name] : (() => {
@@ -582,7 +582,7 @@ fields:
     expect(result.edges.Failed_Person!.fields.reason).toMatchObject({ type: "utf8", nullable: true });
   });
 
-  it("desugars a oneOf: input into N single-input NodeDecls, named <Node>__<Edge>", async () => {
+  it("desugars an anyOf: input into N single-input NodeDecls, named <Node>__<Edge>", async () => {
     const root = await writeFixture({
       "edges/Failed_Todo.edge": `
 description: A failed Todo
@@ -614,7 +614,7 @@ fields:
       "nodes/HandleFailed.node": `
 description: Handles whichever failure shows up first
 input:
-  oneOf:
+  anyOf:
     - Failed_Todo
     - Failed_Person
 output: Recovered
@@ -652,7 +652,7 @@ examples:
     expect(result.nodes.HandleFailed).toBeUndefined();
   });
 
-  it("gives a oneOf-desugared shadow no examples key when none of the file's examples tag its edge", async () => {
+  it("gives an anyOf-desugared shadow no examples key when none of the file's examples tag its edge", async () => {
     const root = await writeFixture({
       "edges/Failed_Todo.edge": `
 description: A failed Todo
@@ -684,7 +684,7 @@ fields:
       "nodes/HandleFailed.node": `
 description: Handles whichever failure shows up first
 input:
-  oneOf:
+  anyOf:
     - Failed_Todo
     - Failed_Person
 output: Recovered
@@ -983,7 +983,7 @@ Ghost:
     expect(result.wiring.feeds.CreateTodo?.sort()).toEqual(["AddTodoToList", "CompleteTodo"]);
   });
 
-  it("lets a .topology file reference a oneOf-desugared node's original name, expanding to all shadows", async () => {
+  it("lets a .topology file reference an anyOf-desugared node's original name, expanding to all shadows", async () => {
     const root = await writeFixture({
       "edges/Start.edge": `
 description: A starting value
@@ -1027,7 +1027,7 @@ examples:
       "nodes/HandleFailed.node": `
 description: Handles whichever failure shows up first
 input:
-  oneOf:
+  anyOf:
     - Failed_Todo
     - Failed_Person
 output: Start
