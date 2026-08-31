@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { any, defineEdge, defineField, defineNode, every, single } from "./define.js";
+import { defineEdge, defineField, defineNode, every, single } from "./define.js";
 import { InMemoryLog, assertPayload, membrane } from "./membrane.js";
 
 const Person = defineEdge({
@@ -398,90 +398,6 @@ describe("membrane — every", () => {
     log.append("B", "thread-1", { value: "b" });
     const result = await membrane(throwing)("thread-1", log);
     expect(result).toEqual({ input: { A: { value: "a" }, B: { value: "b" } }, reason: "kaboom" });
-  });
-});
-
-// `any` is the coproduct-shaped sibling of `every` (docs/design-history.md,
-// "`every` lands... any, by contrast, is about breadth") — fires on the
-// first of several distinct edges to arrive, tagged so fn knows which one
-// it got, same pulse-arrival mechanism as `every`, min instead of max.
-const nodeAny = defineNode({
-  name: "AnyAB",
-  input: any(A, B),
-  output: single(C),
-  fn: (hit) => ({ value: `${hit.edge}:${hit.payload.value}` }),
-});
-
-describe("membrane — any", () => {
-  it("is not ready with no declared edges present at all", async () => {
-    const log = new InMemoryLog();
-    await expect(membrane(nodeAny)("thread-1", log)).resolves.toBeUndefined();
-  });
-
-  it("fires on whichever single declared edge has arrived, tagged by name", async () => {
-    const log = new InMemoryLog();
-    log.append("B", "thread-1", { value: "b" });
-    await expect(membrane(nodeAny)("thread-1", log)).resolves.toEqual({ value: "B:b" });
-  });
-
-  it("prefers the first declared edge when more than one has already arrived", async () => {
-    const log = new InMemoryLog();
-    log.append("A", "thread-1", { value: "a" });
-    log.append("B", "thread-1", { value: "b" });
-    await expect(membrane(nodeAny)("thread-1", log)).resolves.toEqual({ value: "A:a" });
-  });
-
-  it("keeps different correlation_ids independent", async () => {
-    const log = new InMemoryLog();
-    log.append("A", "thread-1", { value: "a" });
-    log.append("B", "thread-2", { value: "b2" });
-    await expect(membrane(nodeAny)("thread-1", log)).resolves.toEqual({ value: "A:a" });
-    await expect(membrane(nodeAny)("thread-2", log)).resolves.toEqual({ value: "B:b2" });
-  });
-
-  it("reading is not consuming — a second call resolves the same way", async () => {
-    const log = new InMemoryLog();
-    log.append("B", "thread-1", { value: "b" });
-    await expect(membrane(nodeAny)("thread-1", log)).resolves.toEqual({ value: "B:b" });
-    await expect(membrane(nodeAny)("thread-1", log)).resolves.toEqual({ value: "B:b" });
-  });
-
-  it("resolves to Failed<In>, tagging which edge matched, when its payload fails assertion", async () => {
-    const log = new InMemoryLog();
-    log.append("A", "thread-1", { value: 5 });
-    const result = await membrane(nodeAny)("thread-1", log);
-    expect(result).toEqual({
-      input: { edge: "A", payload: { value: 5 } },
-      reason: expect.stringMatching(/value/),
-    });
-  });
-
-  it("resolves to Failed<In> with the thrown message as reason, when fn throws", async () => {
-    const throwing = defineNode({
-      ...nodeAny,
-      fn: () => {
-        throw new Error("kaboom");
-      },
-    });
-    const log = new InMemoryLog();
-    log.append("A", "thread-1", { value: "a" });
-    const result = await membrane(throwing)("thread-1", log);
-    expect(result).toEqual({ input: { edge: "A", payload: { value: "a" } }, reason: "kaboom" });
-  });
-
-  it("gives any-input nodes a real Envelope the same way", async () => {
-    let received: Record<string, unknown> | undefined;
-    const node = defineNode({
-      ...nodeAny,
-      fn: (hit, env) => {
-        received = env as unknown as Record<string, unknown>;
-        return { value: hit.payload.value };
-      },
-    });
-    const log = new InMemoryLog();
-    log.append("A", "thread-1", { value: "a" });
-    await membrane(node)("thread-1", log);
-    expect(received?.correlationId).toBe("thread-1");
   });
 });
 

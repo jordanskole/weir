@@ -311,24 +311,6 @@ examples:
     expect(node.input).toEqual({ kind: "every", edges: [TodoList, Todo] });
   });
 
-  it("resolves an any: input into multiple edges, in declared order", () => {
-    const yaml = `
-description: Handles whichever failure shows up first
-input:
-  any:
-    - TodoList
-    - Todo
-output: TodoList
-examples:
-  - given:
-      TodoList: {}
-    expect:
-      TodoList: {}
-`;
-    const node = parseNodeFile(yaml, "HandleFailed", resolveEdge);
-    expect(node.input).toEqual({ kind: "any", edges: [TodoList, Todo] });
-  });
-
   it("resolves a oneOf output into its listed edges, in declared order", () => {
     const yaml = `
 description: Checks whether a person just turned 42

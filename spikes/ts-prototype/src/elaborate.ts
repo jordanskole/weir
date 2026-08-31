@@ -167,11 +167,10 @@ export type EdgeResolver = (name: string) => AnyEdgeDef;
 
 /**
  * Resolves a `.node` file's `input` value into an `InputSpec`. Handles the
- * three shapes `nodeSchema()` (schema.ts) validates today: a bare edge name
- * (`single`), `{ every: [...] }`, and `{ any: [...] }` (docs/design-history.md,
- * "`every` lands"). `oneOf`/`allOf`/`many` never appear on `input` — those
- * are output-only fan-out shapes (docs/design-history.md, "Fan-out is three
- * different things").
+ * shapes `nodeSchema()` (schema.ts) validates today: a bare edge name
+ * (`single`) and `{ every: [...] }`. `oneOf`/`allOf`/`many` never appear on
+ * `input` — those are output-only fan-out shapes (docs/design-history.md,
+ * "Fan-out is three different things").
  */
 function resolveInputSpec(input: unknown, resolveEdge: EdgeResolver): InputSpec {
   if (typeof input === "string") {
@@ -179,9 +178,6 @@ function resolveInputSpec(input: unknown, resolveEdge: EdgeResolver): InputSpec 
   }
   if (input !== null && typeof input === "object" && "every" in input) {
     return { kind: "every", edges: resolveEdgeNameList(input.every, "input.every", resolveEdge) };
-  }
-  if (input !== null && typeof input === "object" && "any" in input) {
-    return { kind: "any", edges: resolveEdgeNameList(input.any, "input.any", resolveEdge) };
   }
   throw new Error(`Unrecognized "input" shape: ${JSON.stringify(input)}.`);
 }

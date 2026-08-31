@@ -4,7 +4,7 @@
  * primitive a `.node` author declares or configures; there is nothing to
  * pass `membrane()` beyond the NodeDef itself.
  *
- * Covers `single`, `every`, and `any` InputSpecs, including compound (nested-edge)
+ * Covers `single` and `every` InputSpecs, including compound (nested-edge)
  * and many-of-compound fields in the payload being asserted. A rejected
  * assert or an uncaught throw from `Fn` resolves to `Failed<In>` rather
  * than rejecting the returned promise — never an exception escaping the
@@ -251,23 +251,9 @@ type EveryInvoke<In extends InputSpec, O extends OutputSpec> = (
   identity?: PayloadOf<typeof Identity>,
 ) => Promise<OutputResult<O> | Failed<In> | undefined>;
 
-/**
- * What `membrane()` returns for an `any`-input node: same call shape as
- * `EveryInvoke` (a readiness check against a correlation_id's logs), but
- * resolves as soon as the *first* declared edge has appeared rather than
- * requiring all of them.
- */
-type AnyInvoke<In extends InputSpec, O extends OutputSpec> = (
-  correlationId: string,
-  log: Log,
-  identity?: PayloadOf<typeof Identity>,
-) => Promise<OutputResult<O> | Failed<In> | undefined>;
-
 type MembraneInvoke<In extends InputSpec, O extends OutputSpec> = In extends { kind: "single" }
   ? SingleInvoke<In, O>
-  : In extends { kind: "every" }
-    ? EveryInvoke<In, O>
-    : AnyInvoke<In, O>;
+  : EveryInvoke<In, O>;
 
 function reasonOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
@@ -416,45 +402,9 @@ export function membrane<In extends InputSpec, O extends OutputSpec>(
     return invoke as MembraneInvoke<In, O>;
   }
 
-  if (nodeDef.input.kind === "any") {
-    const edges = nodeDef.input.edges;
-    const invoke: AnyInvoke<In, O> = async (correlationId, log, identity) => {
-      let match: { edge: AnyEdgeDef; raw: unknown } | undefined;
-      for (const edge of edges) {
-        const value = log.latest(edge.name, correlationId);
-        if (value !== undefined) {
-          match = { edge, raw: value };
-          break;
-        }
-      }
-      if (!match) return undefined;
-
-      let tagged: { edge: string; payload: unknown };
-      try {
-        tagged = { edge: match.edge.name, payload: assertPayload(match.edge, match.raw) };
-      } catch (cause) {
-        return { input: { edge: match.edge.name, payload: match.raw } as InputPayload<In>, reason: reasonOf(cause) };
-      }
-
-      let envelope: Envelope;
-      try {
-        envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY);
-      } catch (cause) {
-        return { input: tagged as InputPayload<In>, reason: reasonOf(cause) };
-      }
-      try {
-        return await callFn(nodeDef, tagged as InputPayload<In>, envelope);
-      } catch (cause) {
-        return { input: tagged as InputPayload<In>, reason: reasonOf(cause) };
-      }
-    };
-    return invoke as MembraneInvoke<In, O>;
-  }
-
-  // Exhaustiveness guard: InputSpec is a closed union of single/every/any, so
-  // nodeDef.input is `never` here — a future sibling kind (design-history.md's
-  // still-deferred `first`/`each`) would fail loudly instead of silently
-  // falling through to this branch's behavior.
+  // Exhaustiveness guard: InputSpec is a closed union of single/every, so
+  // nodeDef.input is `never` here — a future sibling kind would fail loudly
+  // instead of silently falling through to this branch's behavior.
   const unreachable: never = nodeDef.input;
   throw new Error(`Unrecognized InputSpec kind: ${JSON.stringify(unreachable)}`);
 }

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { any, defineEdge, defineField, defineNode, every, single } from "./define.js";
+import { defineEdge, defineField, defineNode, every, single } from "./define.js";
 import { elaborate } from "./elaborate.js";
 import { hashNode } from "./hash.js";
 import { elaborateWithImplementations } from "./implementation.js";
@@ -287,93 +287,6 @@ describe("runNetlist", () => {
       B: { value: "b" },
       reason: "kaboom",
     });
-  });
-
-  it("fires an any-input node once any one of its declared edges appears, not waiting for all", async () => {
-    const A = defineEdge({
-      name: "A",
-      label: "A",
-      description: "d",
-      fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
-    });
-    const B = defineEdge({
-      name: "B",
-      label: "B",
-      description: "d",
-      fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
-    });
-    const D = defineEdge({
-      name: "D",
-      label: "D",
-      description: "d",
-      fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
-    });
-    let dCalls = 0;
-    const nodeA = defineNode({
-      name: "nodeA",
-      input: single(Start),
-      output: single(A),
-      fn: (s) => ({ value: s.value }),
-    });
-    const nodeD = defineNode({
-      name: "nodeD",
-      input: any(A, B),
-      output: single(D),
-      fn: (hit) => {
-        dCalls++;
-        return { value: `${hit.edge}:${hit.payload.value}` };
-      },
-    });
-    const program: Program = {
-      fields: {},
-      edges: { Start, A, B, D },
-      nodes: { nodeA, nodeD },
-      wiring: { origins: ["nodeA"], feeds: { nodeA: ["nodeD"] } },
-    };
-    const log = new InMemoryLog();
-
-    await runNetlist(program, log, "thread-1", { nodeA: { value: "a" } });
-
-    expect(log.latest("D", "thread-1")).toEqual({ value: "A:a" });
-    expect(dCalls).toBe(1);
-  });
-
-  it("still collects an any-input node's failure in `failures` — tagged Failed<In> isn't routed yet", async () => {
-    const A = defineEdge({
-      name: "A",
-      label: "A",
-      description: "d",
-      fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
-    });
-    const B = defineEdge({
-      name: "B",
-      label: "B",
-      description: "d",
-      fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
-    });
-    const failingAny = defineNode({
-      name: "failingAny",
-      input: any(A, B),
-      output: single(Start),
-      fn: () => {
-        throw new Error("kaboom");
-      },
-    });
-    const program: Program = {
-      fields: {},
-      edges: { Start, A, B },
-      nodes: { failingAny },
-      wiring: { origins: ["failingAny"], feeds: {} },
-    };
-    const log = new InMemoryLog();
-    log.append("A", "thread-1", { value: "a" });
-
-    const result = await runNetlist(program, log, "thread-1", {});
-
-    expect(result.failures).toEqual([
-      { node: "failingAny", failed: { input: { edge: "A", payload: { value: "a" } }, reason: "kaboom" } },
-    ]);
-    expect(log.latest("Failed_A", "thread-1")).toBeUndefined();
   });
 
   it("routes a oneOf output — logs only the edge that actually fired", async () => {
