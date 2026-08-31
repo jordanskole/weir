@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { defineEdge, defineField, defineNode, defineOneOfNodes, allOf, single } from "./define.js";
+import { defineEdge, defineField, defineNode, defineAnyOfNodes, allOf, single } from "./define.js";
 import { elaborate } from "./elaborate.js";
 import { hashNode } from "./hash.js";
 import { elaborateWithImplementations } from "./implementation.js";
@@ -522,7 +522,7 @@ describe("runNetlist", () => {
       );
       await writeFile(
         join(root, "nodes", "HandleFailed.node"),
-        `description: d\ninput:\n  oneOf:\n    - Failed_Todo\n    - Failed_Person\noutput: Start\nexamples:\n  - given:\n      Failed_Todo:\n        input:\n          title: "bad todo"\n        reason: "kaboom"\n    expect:\n      Start:\n        value: "recovered"\n  - given:\n      Failed_Person:\n        input:\n          name: "bad person"\n        reason: "kaboom"\n    expect:\n      Start:\n        value: "recovered"\n`,
+        `description: d\ninput:\n  anyOf:\n    - Failed_Todo\n    - Failed_Person\noutput: Start\nexamples:\n  - given:\n      Failed_Todo:\n        input:\n          title: "bad todo"\n        reason: "kaboom"\n    expect:\n      Start:\n        value: "recovered"\n  - given:\n      Failed_Person:\n        input:\n          name: "bad person"\n        reason: "kaboom"\n    expect:\n      Start:\n        value: "recovered"\n`,
         "utf8",
       );
       await writeFile(join(root, "topology", "main.topology"), `failing:\n  then:\n    HandleFailed: {}\n`, "utf8");
@@ -578,12 +578,12 @@ describe("runNetlist", () => {
     // A side-effect counter, not the shared Out edge's log state, proves both
     // fired: InMemoryLog.latest() only keeps the most recent write, so two
     // firings to the same edge would be indistinguishable from "only one
-    // fired" by log state alone. defineOneOfNodes shares one `output` across
-    // every shadow (same as parseOneOfNodeFile's .node YAML equivalent), so
+    // fired" by log state alone. defineAnyOfNodes shares one `output` across
+    // every shadow (same as parseAnyOfNodeFile's .node YAML equivalent), so
     // there's no way to give each shadow its own output edge to tell them
     // apart that way either — the counter is the real, unambiguous proof.
     const received: string[] = [];
-    const shadows = defineOneOfNodes("Handle", [A, B], single(Out), (payload) => {
+    const shadows = defineAnyOfNodes("Handle", [A, B], single(Out), (payload) => {
       received.push(payload.value);
       return { value: payload.value };
     });

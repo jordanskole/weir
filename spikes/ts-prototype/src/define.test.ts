@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defineEdge, defineField, defineOneOfNodes, single } from "./define.js";
+import { defineEdge, defineField, defineAnyOfNodes, single } from "./define.js";
 import type { EdgeDef, FieldDef } from "./types.js";
 
 /** Every FieldDef requires label/description; this test file doesn't exercise that, so share it. */
@@ -212,7 +212,7 @@ describe("defineEdge", () => {
   });
 });
 
-describe("defineOneOfNodes", () => {
+describe("defineAnyOfNodes", () => {
   const A = defineEdge({
     name: "A",
     label: "A",
@@ -233,7 +233,7 @@ describe("defineOneOfNodes", () => {
   });
 
   it("builds one single-input NodeDef per edge, named <Name>__<Edge>, sharing one fn", () => {
-    const nodes = defineOneOfNodes("Handle", [A, B], single(Out), (payload) => ({ value: payload.value }));
+    const nodes = defineAnyOfNodes("Handle", [A, B], single(Out), (payload) => ({ value: payload.value }));
 
     expect(Object.keys(nodes).sort()).toEqual(["Handle__A", "Handle__B"]);
     expect(nodes.Handle__A!.input).toEqual({ kind: "single", edge: A });
@@ -243,7 +243,7 @@ describe("defineOneOfNodes", () => {
 
   it("calls the shared fn with the bare, untagged payload for whichever edge it's for", async () => {
     const received: unknown[] = [];
-    const nodes = defineOneOfNodes("Handle", [A, B], single(Out), (payload) => {
+    const nodes = defineAnyOfNodes("Handle", [A, B], single(Out), (payload) => {
       received.push(payload);
       return { value: "x" };
     });

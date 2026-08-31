@@ -203,7 +203,7 @@ export function many<E extends AnyEdgeDef>(edge: E): { kind: "many"; edge: E } {
 }
 
 /**
- * The TS-level equivalent of `elaborate.ts`'s `parseOneOfNodeFile` — builds
+ * The TS-level equivalent of `elaborate.ts`'s `parseAnyOfNodeFile` — builds
  * N ordinary single-input `NodeDef`s, one per listed edge, named
  * `<name>__<edgeName>` (same double-underscore convention, for the same
  * reason: edge names can already contain single underscores). For direct
@@ -217,7 +217,7 @@ export function many<E extends AnyEdgeDef>(edge: E): { kind: "many"; edge: E } {
  * with a different `fn`, or call `defineNode` directly per shadow — this
  * helper only covers the shared-logic case.
  */
-export function defineOneOfNodes<Es extends AnyEdgeDef[], O extends OutputSpec>(
+export function defineAnyOfNodes<Es extends AnyEdgeDef[], O extends OutputSpec>(
   name: string,
   edges: Es,
   output: O,
