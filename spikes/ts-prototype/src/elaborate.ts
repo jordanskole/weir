@@ -248,6 +248,63 @@ export function parseNodeFile(yamlText: string, name: string, resolveEdge: EdgeR
   };
 }
 
+/**
+ * Parses a `.node` file whose `input` is `{ oneOf: [...] }` into N separate
+ * `NodeDecl`s, one per listed edge — desugaring sugar, not a real
+ * `InputSpec` kind (docs/superpowers/specs/2026-08-31-any-desugaring-design.md).
+ * Named `<name>__<edgeName>`, double underscore (edge names can already
+ * contain single underscores, e.g. `Failed_Todo_TodoList`, so a single
+ * underscore join would be ambiguous to a human reading the name).
+ *
+ * Each example in the original file's `examples` array is routed to the one
+ * shadow whose edge name appears as its `given`'s tag key (schema.ts's
+ * `taggedOne` already guarantees exactly one tag per example at the
+ * authoring level). A shadow with no matching examples gets no `examples`
+ * key at all — the same "examples optional" looseness `parseNodeFile`
+ * already has, not a new gap this introduces.
+ */
+function parseOneOfNodeFile(
+  yamlText: string,
+  name: string,
+  resolveEdge: EdgeResolver,
+): Record<string, NodeDecl> {
+  const raw = parse(yamlText) as Record<string, unknown>;
+  if ("name" in raw) {
+    throw new Error(`.node files don't declare "name" — the filename is the name.`);
+  }
+  if ("fn" in raw) {
+    throw new Error(`.node files declare the contract only (docs/design.md §10) — "fn" belongs in the implementation tree, not here.`);
+  }
+  const { label, description, input, output, examples, closure } = raw as {
+    label?: unknown;
+    description?: unknown;
+    input?: { oneOf: unknown };
+    output?: unknown;
+    examples?: unknown;
+    closure?: unknown;
+  };
+
+  const edges = resolveEdgeNameList(input?.oneOf, "input.oneOf", resolveEdge);
+  const outputSpec = resolveOutputSpec(output, resolveEdge);
+  const allExamples = (examples as { given: Record<string, unknown>; expect: unknown }[] | undefined) ?? [];
+
+  const decls: Record<string, NodeDecl> = {};
+  for (const edge of edges) {
+    const shadowName = `${name}__${edge.name}`;
+    const shadowExamples = allExamples.filter((example) => edge.name in example.given);
+    decls[shadowName] = {
+      name: shadowName,
+      ...(typeof label === "string" && { label }),
+      ...(typeof description === "string" && { description }),
+      input: { kind: "single", edge },
+      output: outputSpec,
+      ...(shadowExamples.length > 0 && { examples: shadowExamples as NodeDecl["examples"] }),
+      ...(closure !== undefined && { closure: closure as NodeDecl["closure"] }),
+    };
+  }
+  return decls;
+}
+
 /** Wiring — what a `.topology` file describes (docs/open-questions.md, ".topology authoring format"). */
 export interface Wiring {
   /** Node names with nothing feeding them within the loaded topology — top-level keys. */
@@ -420,7 +477,14 @@ export async function elaborate(root: string): Promise<Elaborated> {
 
   const nodes: Record<string, NodeDecl> = {};
   for (const [name, text] of nodeTextByName) {
-    nodes[name] = parseNodeFile(text, name, resolveEdge);
+    const raw = parse(text) as { input?: unknown };
+    const isOneOf =
+      raw.input !== null && typeof raw.input === "object" && !Array.isArray(raw.input) && "oneOf" in raw.input;
+    if (isOneOf) {
+      Object.assign(nodes, parseOneOfNodeFile(text, name, resolveEdge));
+    } else {
+      nodes[name] = parseNodeFile(text, name, resolveEdge);
+    }
   }
 
   const resolveNodeName: NodeNameResolver = (name) => {

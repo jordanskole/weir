@@ -557,6 +557,128 @@ fields:
     expect(result.edges.Failed_Person!.fields.reason).toMatchObject({ type: "utf8", nullable: true });
   });
 
+  it("desugars a oneOf: input into N single-input NodeDecls, named <Node>__<Edge>", async () => {
+    const root = await writeFixture({
+      "edges/Failed_Todo.edge": `
+description: A failed Todo
+fields:
+  input:
+    type: utf8
+    label: Input
+    description: d
+    nullable: false
+`,
+      "edges/Failed_Person.edge": `
+description: A failed Person
+fields:
+  input:
+    type: utf8
+    label: Input
+    description: d
+    nullable: false
+`,
+      "edges/Recovered.edge": `
+description: A recovered value
+fields:
+  value:
+    type: utf8
+    label: Value
+    description: d
+    nullable: false
+`,
+      "nodes/HandleFailed.node": `
+description: Handles whichever failure shows up first
+input:
+  oneOf:
+    - Failed_Todo
+    - Failed_Person
+output: Recovered
+examples:
+  - given:
+      Failed_Todo:
+        input: "bad todo"
+    expect:
+      Recovered:
+        value: "recovered todo"
+  - given:
+      Failed_Person:
+        input: "bad person"
+    expect:
+      Recovered:
+        value: "recovered person"
+`,
+    });
+
+    const result = await elaborate(root);
+
+    expect(Object.keys(result.nodes).sort()).toEqual(["HandleFailed__Failed_Person", "HandleFailed__Failed_Todo"]);
+    expect(result.nodes.HandleFailed__Failed_Todo!.input).toEqual({ kind: "single", edge: result.edges.Failed_Todo });
+    expect(result.nodes.HandleFailed__Failed_Todo!.output).toEqual({ kind: "single", edge: result.edges.Recovered });
+    expect(result.nodes.HandleFailed__Failed_Todo!.examples).toEqual([
+      { given: { Failed_Todo: { input: "bad todo" } }, expect: { Recovered: { value: "recovered todo" } } },
+    ]);
+    expect(result.nodes.HandleFailed__Failed_Person!.input).toEqual({
+      kind: "single",
+      edge: result.edges.Failed_Person,
+    });
+    expect(result.nodes.HandleFailed__Failed_Person!.examples).toEqual([
+      { given: { Failed_Person: { input: "bad person" } }, expect: { Recovered: { value: "recovered person" } } },
+    ]);
+    expect(result.nodes.HandleFailed).toBeUndefined();
+  });
+
+  it("gives a oneOf-desugared shadow no examples key when none of the file's examples tag its edge", async () => {
+    const root = await writeFixture({
+      "edges/Failed_Todo.edge": `
+description: A failed Todo
+fields:
+  input:
+    type: utf8
+    label: Input
+    description: d
+    nullable: false
+`,
+      "edges/Failed_Person.edge": `
+description: A failed Person
+fields:
+  input:
+    type: utf8
+    label: Input
+    description: d
+    nullable: false
+`,
+      "edges/Recovered.edge": `
+description: A recovered value
+fields:
+  value:
+    type: utf8
+    label: Value
+    description: d
+    nullable: false
+`,
+      "nodes/HandleFailed.node": `
+description: Handles whichever failure shows up first
+input:
+  oneOf:
+    - Failed_Todo
+    - Failed_Person
+output: Recovered
+examples:
+  - given:
+      Failed_Todo:
+        input: "bad todo"
+    expect:
+      Recovered:
+        value: "recovered todo"
+`,
+    });
+
+    const result = await elaborate(root);
+
+    expect(result.nodes.HandleFailed__Failed_Todo!.examples).toHaveLength(1);
+    expect(result.nodes.HandleFailed__Failed_Person!.examples).toBeUndefined();
+  });
+
   it("synthesizes a Failed_<A>_<B> edge for a declared every: combo, sorted and order-independent", async () => {
     const root = await writeFixture({
       "edges/A.edge": `
