@@ -489,7 +489,7 @@ describe("runNetlist", () => {
     }
   });
 
-  it("real: a oneOf-desugared shadow fires through the worklist via an aliased .topology reference", async () => {
+  it("real: an anyOf-desugared shadow fires through the worklist via an aliased .topology reference", async () => {
     const dir = await mkdtemp(join(tmpdir(), "weir-runtime-"));
     const root = await mkdtemp(join(tmpdir(), "weir-decl-"));
     try {
