@@ -292,11 +292,11 @@ examples:
     expect(node.examples).toEqual([{ given: { Person: { age: 41 } }, expect: { Person: { age: 42 } } }]);
   });
 
-  it("resolves an every: input into multiple edges, in declared order", () => {
+  it("resolves an allOf: input into multiple edges, in declared order", () => {
     const yaml = `
 description: Adds a task to a todo list
 input:
-  every:
+  allOf:
     - TodoList
     - Todo
 output: TodoList
@@ -308,7 +308,7 @@ examples:
       TodoList: {}
 `;
     const node = parseNodeFile(yaml, "AddTodoToList", resolveEdge);
-    expect(node.input).toEqual({ kind: "every", edges: [TodoList, Todo] });
+    expect(node.input).toEqual({ kind: "allOf", edges: [TodoList, Todo] });
   });
 
   it("resolves a oneOf output into its listed edges, in declared order", () => {
@@ -704,7 +704,7 @@ examples:
     expect(result.nodes.HandleFailed__Failed_Person!.examples).toBeUndefined();
   });
 
-  it("synthesizes a Failed_<A>_<B> edge for a declared every: combo, sorted and order-independent", async () => {
+  it("synthesizes a Failed_<A>_<B> edge for a declared allOf: combo, sorted and order-independent", async () => {
     const root = await writeFixture({
       "edges/A.edge": `
 description: Edge A
@@ -727,7 +727,7 @@ fields:
       "nodes/Combine.node": `
 description: Combines A and B
 input:
-  every:
+  allOf:
     - B
     - A
 output: A
@@ -771,7 +771,7 @@ fields:
       "nodes/Combine.node": `
 description: Combines A and B
 input:
-  every:
+  allOf:
     - A
     - B
 output: A
@@ -909,12 +909,12 @@ output: Ghost
     await expect(elaborate(root)).rejects.toThrow(/ghost/i);
   });
 
-  it("loads the real todo-list example — proving every: input resolves against real hand-authored files", async () => {
+  it("loads the real todo-list example — proving allOf: input resolves against real hand-authored files", async () => {
     const result = await elaborate(TODO_LIST_SRC);
 
     expect(Object.keys(result.nodes).sort()).toEqual(["AddTodoToList", "CompleteTodo", "CreateTodo"]);
     expect(result.nodes.AddTodoToList!.input).toEqual({
-      kind: "every",
+      kind: "allOf",
       edges: [result.edges.TodoList, result.edges.Todo],
     });
     expect(result.nodes.AddTodoToList!.output).toEqual({ kind: "single", edge: result.edges.TodoList });

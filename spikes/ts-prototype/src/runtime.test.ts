@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { defineEdge, defineField, defineNode, defineOneOfNodes, every, single } from "./define.js";
+import { defineEdge, defineField, defineNode, defineOneOfNodes, allOf, single } from "./define.js";
 import { elaborate } from "./elaborate.js";
 import { hashNode } from "./hash.js";
 import { elaborateWithImplementations } from "./implementation.js";
@@ -163,7 +163,7 @@ describe("runNetlist", () => {
     });
     const nodeC = defineNode({
       name: "nodeC",
-      input: every(A, B),
+      input: allOf(A, B),
       output: single(C),
       fn: ({ A, B }) => {
         cCalls++;
@@ -248,7 +248,7 @@ describe("runNetlist", () => {
     expect(log.latest("Start", "thread-1")).toEqual({ value: "a" });
   });
 
-  it("routes an every-input node's failure to the sorted-name combo edge, order-independent", async () => {
+  it("routes an allOf-input node's failure to the sorted-name combo edge, order-independent", async () => {
     const A = defineEdge({
       name: "A",
       label: "A",
@@ -263,7 +263,7 @@ describe("runNetlist", () => {
     });
     const failingJoin = defineNode({
       name: "failingJoin",
-      input: every(B, A), // declared out of alphabetical order — the synthesized name should sort anyway
+      input: allOf(B, A), // declared out of alphabetical order — the synthesized name should sort anyway
       output: single(Start),
       fn: () => {
         throw new Error("kaboom");
@@ -444,7 +444,7 @@ describe("runNetlist", () => {
     }
   });
 
-  it("real: AddTodoToList fails on a malformed Todo — every-input Failed<In> routes to Failed_Todo_TodoList", async () => {
+  it("real: AddTodoToList fails on a malformed Todo — allOf-input Failed<In> routes to Failed_Todo_TodoList", async () => {
     const dir = await mkdtemp(join(tmpdir(), "weir-runtime-"));
     try {
       const raw = await elaborate(TODO_LIST_SRC);

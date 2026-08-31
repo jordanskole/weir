@@ -12,14 +12,14 @@
  * number them.
  *
  * Deliberately narrow, stated here rather than left implicit:
- * - **`Failed<In>` routing exists for `single`- and `every`-input nodes —
+ * - **`Failed<In>` routing exists for `single`- and `allOf`-input nodes —
  *   every InputSpec kind there is.** A `single`-input node's failure logs
  *   under `failedEdgeName(inputEdge)` (`Failed_Todo` for a `Todo`-input
  *   node, synthesized automatically by `elaborate()`'s
- *   `synthesizeFailedEdges`); an `every`-input node's bag-shaped failure
- *   (`{A: ..., B: ...}`) logs under `failedEveryEdgeName(edges)`
+ *   `synthesizeFailedEdges`); an `allOf`-input node's bag-shaped failure
+ *   (`{A: ..., B: ...}`) logs under `failedAllOfEdgeName(edges)`
  *   (`Failed_A_B`, sorted and order-independent, synthesized by
- *   `synthesizeEveryFailedEdges` for whichever combos are actually
+ *   `synthesizeAllOfFailedEdges` for whichever combos are actually
  *   declared) — both cases route through the same readiness mechanism a
  *   downstream node declaring that edge as its own input already uses, no
  *   new mechanism needed (docs/design-history.md, "The runtime, built
@@ -47,7 +47,7 @@ import { membrane } from "./membrane.js";
 import type { Log } from "./membrane.js";
 import type { Program } from "./implementation.js";
 import type { Failed, InputSpec, OutputSpec, PayloadOf } from "./types.js";
-import { Identity, failedEdgeName, failedEveryEdgeName } from "./types.js";
+import { Identity, failedEdgeName, failedAllOfEdgeName } from "./types.js";
 
 /**
  * `program.nodes` stores heterogeneous NodeDefs in one `Record<string,
@@ -57,7 +57,7 @@ import { Identity, failedEdgeName, failedEveryEdgeName } from "./types.js";
  * has been checked at the value level — a real TS narrowing limitation,
  * not a genuine call-shape ambiguity (checked at runtime by the `kind`
  * branch itself). These two aliases name the cast instead of hiding it.
- * `AnyEveryInvoke` names the cast for `every`-input nodes' call shape
+ * `AnyAllOfInvoke` names the cast for `allOf`-input nodes' call shape
  * (`correlationId, log, identity?`); `In` is erased here too.
  */
 type AnySingleInvoke = (
@@ -65,7 +65,7 @@ type AnySingleInvoke = (
   correlationId: string,
   identity?: PayloadOf<typeof Identity>,
 ) => Promise<unknown>;
-type AnyEveryInvoke = (
+type AnyAllOfInvoke = (
   correlationId: string,
   log: Log,
   identity?: PayloadOf<typeof Identity>,
@@ -142,9 +142,9 @@ export async function runNetlist(
       }
       result = await (membrane(nodeDef) as AnySingleInvoke)(payload, correlationId, identity);
     } else {
-      const every = await (membrane(nodeDef) as AnyEveryInvoke)(correlationId, log, identity);
-      if (every === undefined) return false;
-      result = every;
+      const allOf = await (membrane(nodeDef) as AnyAllOfInvoke)(correlationId, log, identity);
+      if (allOf === undefined) return false;
+      result = allOf;
     }
 
     fired.add(nodeName);
@@ -152,10 +152,10 @@ export async function runNetlist(
       if (nodeDef.input.kind === "single") {
         log.append(failedEdgeName(nodeDef.input.edge.name), correlationId, result);
       } else {
-        // The synthesized combo edge is flat (elaborate.ts's synthesizeEveryFailedEdges:
+        // The synthesized combo edge is flat (elaborate.ts's synthesizeAllOfFailedEdges:
         // {A, B, reason}, no `input` wrapper) — spread the bag alongside reason to match.
         const bag = result.input as Record<string, unknown>;
-        log.append(failedEveryEdgeName(nodeDef.input.edges), correlationId, { ...bag, reason: result.reason });
+        log.append(failedAllOfEdgeName(nodeDef.input.edges), correlationId, { ...bag, reason: result.reason });
       }
     } else {
       logOutput(log, nodeDef.output, result, correlationId);

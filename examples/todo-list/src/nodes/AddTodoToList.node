@@ -1,7 +1,7 @@
 label: Add Todo To List
 description: Adds a task to a todo list
 input:
-  every:
+  allOf:
     - TodoList
     - Todo
 output:

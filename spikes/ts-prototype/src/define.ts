@@ -180,23 +180,19 @@ export function single<E extends AnyEdgeDef>(edge: E): { kind: "single"; edge: E
   return { kind: "single", edge };
 }
 
-/**
- * A multi-input readiness condition (docs/design.md §5): fires once every
- * listed edge type has appeared for the current correlation_id, not a
- * synchronous join. Distinct from `allOf` — `allOf` is an output fan-out
- * (several edges fire from one node), `every` is an input fan-in (several
- * edges must already exist before one node can fire).
- */
-export function every<Es extends AnyEdgeDef[]>(...edges: Es): { kind: "every"; edges: Es } {
-  return { kind: "every", edges };
-}
-
 /** Coproduct: exactly one of the listed edges fires, chosen by value. */
 export function oneOf<Es extends AnyEdgeDef[]>(...edges: Es): { kind: "oneOf"; edges: Es } {
   return { kind: "oneOf", edges };
 }
 
-/** Product (fission): every listed edge fires. */
+/**
+ * Product: every listed edge fires. Shared between input and output
+ * positions, same as `single` already is — as an output, "every listed
+ * edge fires from this node" (fission); as an input, "every listed edge
+ * must already exist before this node can fire" (fan-in, a readiness
+ * check against a correlation_id's logs, not a synchronous join). The
+ * structural shape is identical either way, so one function serves both.
+ */
 export function allOf<Es extends AnyEdgeDef[]>(...edges: Es): { kind: "allOf"; edges: Es } {
   return { kind: "allOf", edges };
 }
@@ -212,7 +208,7 @@ export function many<E extends AnyEdgeDef>(edge: E): { kind: "many"; edge: E } {
  * `<name>__<edgeName>` (same double-underscore convention, for the same
  * reason: edge names can already contain single underscores). For direct
  * construction (tests, programmatic use) bypassing `.node` YAML entirely,
- * the same role `defineNode`/`single`/`every` already play relative to the
+ * the same role `defineNode`/`single`/`allOf` already play relative to the
  * elaborator's YAML path.
  *
  * `fn` is shared across every shadow — each receives the bare, untagged

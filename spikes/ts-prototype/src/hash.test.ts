@@ -383,14 +383,14 @@ describe("hashNode", () => {
     expect((await hashNode(differentClosure)).hash).not.toBe((await hashNode(expectNode)).hash);
   });
 
-  it("is independent of every: edge declaration order", async () => {
+  it("is independent of allOf: edge declaration order", async () => {
     const addTodo: NodeDecl = {
       name: "AddTodoToList",
       description: "d",
-      input: { kind: "every", edges: [TodoList, Todo] },
+      input: { kind: "allOf", edges: [TodoList, Todo] },
       output: { kind: "single", edge: TodoList },
     };
-    const reordered: NodeDecl = { ...addTodo, input: { kind: "every", edges: [Todo, TodoList] } };
+    const reordered: NodeDecl = { ...addTodo, input: { kind: "allOf", edges: [Todo, TodoList] } };
     expect((await hashNode(reordered)).hash).toBe((await hashNode(addTodo)).hash);
   });
 });

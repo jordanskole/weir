@@ -19,7 +19,7 @@ import { glob, readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { parse } from "yaml";
 import { defineEdge, defineField } from "./define.js";
-import { failedEdgeName, failedEveryEdgeName } from "./types.js";
+import { failedEdgeName, failedAllOfEdgeName } from "./types.js";
 import type { AnyEdgeDef, FieldDef, InputSpec, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
 
 /**
@@ -42,7 +42,7 @@ function requireIndex(edge: AnyEdgeDef, context: string): void {
  * with `runtime.ts` via `failedEdgeName`). Iterates a snapshot of `edges`
  * taken before synthesis starts, so a synthesized `Failed_*` edge never
  * itself grows a `Failed_Failed_*` counterpart. Single-input nodes only —
- * `every`-input combos get their own synthesis (`synthesizeEveryFailedEdges`,
+ * `allOf`-input combos get their own synthesis (`synthesizeAllOfFailedEdges`,
  * below) since unconditional-for-every-edge doesn't generalize to
  * combinations (that's a powerset, not a linear scan). `any`-input
  * `Failed<In>`'s tagged-union shape still has no natural single synthesized
@@ -66,13 +66,13 @@ function synthesizeFailedEdges(edges: Record<string, AnyEdgeDef>): void {
 }
 
 /**
- * Synthesizes one `Failed_<A>_<B>` edge per distinct `every: [...]` combo
+ * Synthesizes one `Failed_<A>_<B>` edge per distinct `allOf: [...]` combo
  * actually declared by some `.node` file — `{ <A's name>: A, <B's name>: B,
  * reason }`, flat rather than wrapped in an `input` field, since the bag
- * `every`'s payload already is a fixed multi-field shape, not a single
+ * `allOf`'s payload already is a fixed multi-field shape, not a single
  * edge to embed (docs/design-history.md, "`any` built... every-input
  * Failed<In> still collects in failures"; naming convention shared with
- * `runtime.ts` via `failedEveryEdgeName`).
+ * `runtime.ts` via `failedAllOfEdgeName`).
  *
  * Unlike `synthesizeFailedEdges`, this can't run unconditionally for every
  * possible subset of declared edges — that's a powerset, not a linear scan
@@ -86,9 +86,9 @@ function synthesizeFailedEdges(edges: Record<string, AnyEdgeDef>): void {
  * already carries; not guarded against here either, for the same reason
  * (no real edge in this repo collides today).
  */
-function synthesizeEveryFailedEdges(edges: Record<string, AnyEdgeDef>, combos: AnyEdgeDef[][]): void {
+function synthesizeAllOfFailedEdges(edges: Record<string, AnyEdgeDef>, combos: AnyEdgeDef[][]): void {
   for (const combo of combos) {
-    const name = failedEveryEdgeName(combo);
+    const name = failedAllOfEdgeName(combo);
     if (name in edges) continue;
     const fields: Record<string, AnyEdgeDef | FieldDef> = { reason: reasonField() };
     for (const edge of combo) {
@@ -97,7 +97,7 @@ function synthesizeEveryFailedEdges(edges: Record<string, AnyEdgeDef>, combos: A
     edges[name] = defineEdge({
       name,
       label: `Failed (${combo.map((edge) => edge.label).join(" + ")})`,
-      description: `A node whose every: input required ${combo.map((edge) => edge.name).join(", ")} failed — the raw bag, plus why (docs/design.md §3).`,
+      description: `A node whose allOf: input required ${combo.map((edge) => edge.name).join(", ")} failed — the raw bag, plus why (docs/design.md §3).`,
       fields,
     });
   }
@@ -168,7 +168,7 @@ export type EdgeResolver = (name: string) => AnyEdgeDef;
 /**
  * Resolves a `.node` file's `input` value into an `InputSpec`. Handles the
  * shapes `nodeSchema()` (schema.ts) validates today: a bare edge name
- * (`single`) and `{ every: [...] }`. `oneOf`/`allOf`/`many` never appear on
+ * (`single`) and `{ allOf: [...] }`. `oneOf`/`allOf`/`many` never appear on
  * `input` — those are output-only fan-out shapes (docs/design-history.md,
  * "Fan-out is three different things").
  */
@@ -176,8 +176,8 @@ function resolveInputSpec(input: unknown, resolveEdge: EdgeResolver): InputSpec 
   if (typeof input === "string") {
     return { kind: "single", edge: resolveEdge(input) };
   }
-  if (input !== null && typeof input === "object" && "every" in input) {
-    return { kind: "every", edges: resolveEdgeNameList(input.every, "input.every", resolveEdge) };
+  if (input !== null && typeof input === "object" && "allOf" in input) {
+    return { kind: "allOf", edges: resolveEdgeNameList(input.allOf, "input.allOf", resolveEdge) };
   }
   throw new Error(`Unrecognized "input" shape: ${JSON.stringify(input)}.`);
 }
@@ -468,22 +468,22 @@ export async function elaborate(root: string): Promise<Elaborated> {
     nodeTextByName.set(name, await readFile(`${root}/${file}`, "utf8"));
   }
 
-  // A raw pre-scan for `every:` combos, before the real parseNodeFile pass:
-  // synthesizeEveryFailedEdges needs to run before any node can reference a
+  // A raw pre-scan for `allOf:` combos, before the real parseNodeFile pass:
+  // synthesizeAllOfFailedEdges needs to run before any node can reference a
   // combo's synthesized name (e.g. `input: Failed_A_B`), but which combos
   // exist can only be discovered by looking at what's actually declared —
   // unlike synthesizeFailedEdges, synthesizing for every possible subset
   // isn't an option (that's a powerset, not a linear scan).
-  const everyCombosByKey = new Map<string, AnyEdgeDef[]>();
+  const allOfCombosByKey = new Map<string, AnyEdgeDef[]>();
   for (const text of nodeTextByName.values()) {
     const raw = parse(text) as { input?: unknown };
     if (raw.input === null || typeof raw.input !== "object" || Array.isArray(raw.input)) continue;
-    if (!("every" in raw.input) || !Array.isArray(raw.input.every)) continue;
-    const comboEdges = raw.input.every.map((n) => resolveEdge(n as string));
+    if (!("allOf" in raw.input) || !Array.isArray(raw.input.allOf)) continue;
+    const comboEdges = raw.input.allOf.map((n) => resolveEdge(n as string));
     const key = [...comboEdges].map((edge) => edge.name).sort().join(",");
-    if (!everyCombosByKey.has(key)) everyCombosByKey.set(key, comboEdges);
+    if (!allOfCombosByKey.has(key)) allOfCombosByKey.set(key, comboEdges);
   }
-  synthesizeEveryFailedEdges(edges, [...everyCombosByKey.values()]);
+  synthesizeAllOfFailedEdges(edges, [...allOfCombosByKey.values()]);
 
   const nodes: Record<string, NodeDecl> = {};
   const oneOfAliases = new Map<string, string[]>();

@@ -4,7 +4,7 @@
  * primitive a `.node` author declares or configures; there is nothing to
  * pass `membrane()` beyond the NodeDef itself.
  *
- * Covers `single` and `every` InputSpecs, including compound (nested-edge)
+ * Covers `single` and `allOf` InputSpecs, including compound (nested-edge)
  * and many-of-compound fields in the payload being asserted. A rejected
  * assert or an uncaught throw from `Fn` resolves to `Failed<In>` rather
  * than rejecting the returned promise — never an exception escaping the
@@ -239,13 +239,13 @@ type SingleInvoke<In extends InputSpec, O extends OutputSpec> = (
 ) => Promise<OutputResult<O> | Failed<In>>;
 
 /**
- * What `membrane()` returns for an `every`-input node: a readiness check
+ * What `membrane()` returns for an `allOf`-input node: a readiness check
  * against a correlation_id's logs, not a direct payload. Resolves to
  * `undefined` — not an error — when the edges it declared needing haven't
  * all appeared yet; a caller (a scheduler, not built here) decides when to
  * try again.
  */
-type EveryInvoke<In extends InputSpec, O extends OutputSpec> = (
+type AllOfInvoke<In extends InputSpec, O extends OutputSpec> = (
   correlationId: string,
   log: Log,
   identity?: PayloadOf<typeof Identity>,
@@ -253,7 +253,7 @@ type EveryInvoke<In extends InputSpec, O extends OutputSpec> = (
 
 type MembraneInvoke<In extends InputSpec, O extends OutputSpec> = In extends { kind: "single" }
   ? SingleInvoke<In, O>
-  : EveryInvoke<In, O>;
+  : AllOfInvoke<In, O>;
 
 function reasonOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
@@ -364,9 +364,9 @@ export function membrane<In extends InputSpec, O extends OutputSpec>(
     return invoke as MembraneInvoke<In, O>;
   }
 
-  if (nodeDef.input.kind === "every") {
+  if (nodeDef.input.kind === "allOf") {
     const edges = nodeDef.input.edges;
-    const invoke: EveryInvoke<In, O> = async (correlationId, log, identity) => {
+    const invoke: AllOfInvoke<In, O> = async (correlationId, log, identity) => {
       const rawBag: Record<string, unknown> = {};
       for (const edge of edges) {
         const value = log.latest(edge.name, correlationId);
@@ -402,7 +402,7 @@ export function membrane<In extends InputSpec, O extends OutputSpec>(
     return invoke as MembraneInvoke<In, O>;
   }
 
-  // Exhaustiveness guard: InputSpec is a closed union of single/every, so
+  // Exhaustiveness guard: InputSpec is a closed union of single/allOf, so
   // nodeDef.input is `never` here — a future sibling kind would fail loudly
   // instead of silently falling through to this branch's behavior.
   const unreachable: never = nodeDef.input;
