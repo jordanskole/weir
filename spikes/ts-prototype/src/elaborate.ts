@@ -313,8 +313,12 @@ export interface Wiring {
   feeds: Record<string, string[]>;
 }
 
-/** Confirms a bare node name (as used by a `.topology` file) is really declared. Throws if not. */
-export type NodeNameResolver = (name: string) => void;
+/**
+ * Resolves a bare node name (as used by a `.topology` file) to the real
+ * underlying node name(s) it refers to. Throws if unresolvable. `[name]` for
+ * an ordinary node; all shadow names for a oneOf-desugared original.
+ */
+export type NodeNameResolver = (name: string) => string[];
 
 /**
  * Parses a `.topology` file's nested `then:` map into a `Wiring`
@@ -329,7 +333,11 @@ export type NodeNameResolver = (name: string) => void;
  * No cycle detection: a repeated name (`birthday.then.birthday`) is a
  * legitimate distinct application, not a cycle (docs/design-history.md,
  * "Weir has no loop construct") — the YAML itself is always a finite tree,
- * so nothing can actually recurse forever.
+ * so nothing can actually recurse forever. A name that resolves to more
+ * than one real node (a oneOf-desugared original) expands to references to
+ * all of them, uniformly, whether it appears as a parent or a child —
+ * deliberately imprecise rather than smart, since a wasted readiness check
+ * on the wrong shadow is free (docs/superpowers/specs/2026-08-31-any-desugaring-design.md).
  */
 export function parseTopologyFile(yamlText: string, resolveNodeName: NodeNameResolver): Wiring {
   const raw = (parse(yamlText) as Record<string, unknown> | null) ?? {};
@@ -352,14 +360,16 @@ export function parseTopologyFile(yamlText: string, resolveNodeName: NodeNameRes
       throw new Error(`"${name}.then" must be a map of node names.`);
     }
     for (const [childName, childValue] of Object.entries(then)) {
-      if (!feeds.has(name)) feeds.set(name, new Set());
-      feeds.get(name)!.add(childName);
+      for (const parent of resolveNodeName(name)) {
+        if (!feeds.has(parent)) feeds.set(parent, new Set());
+        for (const child of resolveNodeName(childName)) feeds.get(parent)!.add(child);
+      }
       walk(childName, childValue);
     }
   }
 
   for (const [name, value] of Object.entries(raw)) {
-    origins.push(name);
+    origins.push(...resolveNodeName(name));
     walk(name, value);
   }
 
@@ -476,21 +486,27 @@ export async function elaborate(root: string): Promise<Elaborated> {
   synthesizeEveryFailedEdges(edges, [...everyCombosByKey.values()]);
 
   const nodes: Record<string, NodeDecl> = {};
+  const oneOfAliases = new Map<string, string[]>();
   for (const [name, text] of nodeTextByName) {
     const raw = parse(text) as { input?: unknown };
     const isOneOf =
       raw.input !== null && typeof raw.input === "object" && !Array.isArray(raw.input) && "oneOf" in raw.input;
     if (isOneOf) {
-      Object.assign(nodes, parseOneOfNodeFile(text, name, resolveEdge));
+      const shadows = parseOneOfNodeFile(text, name, resolveEdge);
+      Object.assign(nodes, shadows);
+      oneOfAliases.set(name, Object.keys(shadows));
     } else {
       nodes[name] = parseNodeFile(text, name, resolveEdge);
     }
   }
 
   const resolveNodeName: NodeNameResolver = (name) => {
+    const aliased = oneOfAliases.get(name);
+    if (aliased) return aliased;
     if (!(name in nodes)) {
       throw new Error(`Cannot resolve "${name}" — no .node file declares it.`);
     }
+    return [name];
   };
 
   let wiring: Wiring = { origins: [], feeds: {} };
