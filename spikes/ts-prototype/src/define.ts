@@ -11,11 +11,14 @@
 import type {
   AnyEdgeDef,
   EdgeDef,
+  Envelope,
   FieldDef,
   InputSpec,
   ManyEdgeDef,
   NodeDef,
+  OutputResult,
   OutputSpec,
+  PayloadOf,
   ScalarType,
 } from "./types.js";
 
@@ -201,4 +204,38 @@ export function allOf<Es extends AnyEdgeDef[]>(...edges: Es): { kind: "allOf"; e
 /** Cardinality: N instances of one edge. */
 export function many<E extends AnyEdgeDef>(edge: E): { kind: "many"; edge: E } {
   return { kind: "many", edge };
+}
+
+/**
+ * The TS-level equivalent of `elaborate.ts`'s `parseOneOfNodeFile` — builds
+ * N ordinary single-input `NodeDef`s, one per listed edge, named
+ * `<name>__<edgeName>` (same double-underscore convention, for the same
+ * reason: edge names can already contain single underscores). For direct
+ * construction (tests, programmatic use) bypassing `.node` YAML entirely,
+ * the same role `defineNode`/`single`/`every` already play relative to the
+ * elaborator's YAML path.
+ *
+ * `fn` is shared across every shadow — each receives the bare, untagged
+ * payload for its own edge only, never a runtime discriminant. A caller
+ * wanting genuinely different logic per edge should call this once per edge
+ * with a different `fn`, or call `defineNode` directly per shadow — this
+ * helper only covers the shared-logic case.
+ */
+export function defineOneOfNodes<Es extends AnyEdgeDef[], O extends OutputSpec>(
+  name: string,
+  edges: Es,
+  output: O,
+  fn: (payload: PayloadOf<Es[number]>, env?: Envelope) => OutputResult<O> | Promise<OutputResult<O>>,
+): Record<string, NodeDef<{ kind: "single"; edge: Es[number] }, O>> {
+  const nodes: Record<string, NodeDef<{ kind: "single"; edge: Es[number] }, O>> = {};
+  for (const edge of edges) {
+    const shadowName = `${name}__${edge.name}`;
+    nodes[shadowName] = defineNode({
+      name: shadowName,
+      input: { kind: "single", edge },
+      output,
+      fn: fn as NodeDef<{ kind: "single"; edge: typeof edge }, O>["fn"],
+    });
+  }
+  return nodes;
 }

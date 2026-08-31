@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defineEdge, defineField } from "./define.js";
+import { defineEdge, defineField, defineOneOfNodes, single } from "./define.js";
 import type { EdgeDef, FieldDef } from "./types.js";
 
 /** Every FieldDef requires label/description; this test file doesn't exercise that, so share it. */
@@ -209,5 +209,46 @@ describe("defineEdge", () => {
       fields: { age: { type: "uint8", ...meta } },
     };
     expect(defineEdge(edge)).toBe(edge);
+  });
+});
+
+describe("defineOneOfNodes", () => {
+  const A = defineEdge({
+    name: "A",
+    label: "A",
+    description: "Edge A",
+    fields: { value: defineField({ type: "utf8", label: "Value", description: "d", nullable: false }) },
+  });
+  const B = defineEdge({
+    name: "B",
+    label: "B",
+    description: "Edge B",
+    fields: { value: defineField({ type: "utf8", label: "Value", description: "d", nullable: false }) },
+  });
+  const Out = defineEdge({
+    name: "Out",
+    label: "Out",
+    description: "Edge Out",
+    fields: { value: defineField({ type: "utf8", label: "Value", description: "d", nullable: false }) },
+  });
+
+  it("builds one single-input NodeDef per edge, named <Name>__<Edge>, sharing one fn", () => {
+    const nodes = defineOneOfNodes("Handle", [A, B], single(Out), (payload) => ({ value: payload.value }));
+
+    expect(Object.keys(nodes).sort()).toEqual(["Handle__A", "Handle__B"]);
+    expect(nodes.Handle__A!.input).toEqual({ kind: "single", edge: A });
+    expect(nodes.Handle__A!.output).toEqual({ kind: "single", edge: Out });
+    expect(nodes.Handle__B!.input).toEqual({ kind: "single", edge: B });
+  });
+
+  it("calls the shared fn with the bare, untagged payload for whichever edge it's for", async () => {
+    const received: unknown[] = [];
+    const nodes = defineOneOfNodes("Handle", [A, B], single(Out), (payload) => {
+      received.push(payload);
+      return { value: "x" };
+    });
+
+    await nodes.Handle__A!.fn({ value: "a" });
+    expect(received).toEqual([{ value: "a" }]);
   });
 });
