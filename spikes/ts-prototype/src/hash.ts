@@ -154,7 +154,7 @@ interface NodeFingerprint {
 
 type InputSpecFingerprint =
   | { kind: "single"; edge: EdgeFingerprint }
-  | { kind: "every"; edges: EdgeFingerprint[] };
+  | { kind: "allOf"; edges: EdgeFingerprint[] };
 
 type OutputSpecFingerprint =
   | { kind: "single"; edge: EdgeFingerprint }
@@ -169,7 +169,7 @@ function fingerprintEdgeList(edges: AnyEdgeDef[]): EdgeFingerprint[] {
 
 function fingerprintInput(input: InputSpec): InputSpecFingerprint {
   if (input.kind === "single") return { kind: "single", edge: fingerprint(input.edge) };
-  return { kind: "every", edges: fingerprintEdgeList(input.edges) };
+  return { kind: "allOf", edges: fingerprintEdgeList(input.edges) };
 }
 
 function fingerprintOutput(output: OutputSpec): OutputSpecFingerprint {

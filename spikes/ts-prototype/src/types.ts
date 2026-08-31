@@ -223,7 +223,7 @@ export interface Envelope {
 
 /**
  * A node's input shape (docs/design.md §5) — a single edge, or several via
- * `every`, a readiness condition the membrane resolves against a
+ * `allOf`, a readiness condition the membrane resolves against a
  * `correlation_id`'s per-edge-type logs, never a synchronous join or an
  * accumulator (docs/design-history.md, "The membrane"). Mirrors OutputSpec's
  * "kind is the discriminant" idiom on purpose — `single` here is the same
@@ -232,11 +232,11 @@ export interface Envelope {
  */
 export type InputSpec =
   | { kind: "single"; edge: AnyEdgeDef }
-  | { kind: "every"; edges: AnyEdgeDef[] };
+  | { kind: "allOf"; edges: AnyEdgeDef[] };
 
 /**
  * The payload shape Fn receives for a given InputSpec: the edge's own
- * payload for `single`; a bag keyed by edge name for `every`, matching the
+ * payload for `single`; a bag keyed by edge name for `allOf`, matching the
  * `given`/`expect` name-as-key tagging convention already decided for
  * `.node` examples (docs/design-history.md).
  */
@@ -245,7 +245,7 @@ export type InputPayload<I extends InputSpec> = I extends {
   edge: infer E extends AnyEdgeDef;
 }
   ? PayloadOf<E>
-  : I extends { kind: "every"; edges: infer Es extends AnyEdgeDef[] }
+  : I extends { kind: "allOf"; edges: infer Es extends AnyEdgeDef[] }
     ? { [K in Es[number]["name"]]: PayloadOf<Extract<Es[number], { name: K }>> }
     : never;
 
@@ -307,19 +307,19 @@ export function failedEdgeName(inputEdgeName: string): string {
 }
 
 /**
- * The naming convention an `every`-input node's `Failed<In>` routes
+ * The naming convention an `allOf`-input node's `Failed<In>` routes
  * through — one synthesized edge per distinct declared combination of
- * edges, shared by every node whose `every: [...]` names that same set
+ * edges, shared by every node whose `allOf: [...]` names that same set
  * (docs/design-history.md, "`any` built... every-input Failed<In> still
  * collects in failures"). Names are sorted before joining so the
- * synthesized edge is order-independent: `every(A, B)` and `every(B, A)`
- * resolve to the same `Failed_A_B`, matching `every`'s own readiness check
+ * synthesized edge is order-independent: `allOf(A, B)` and `allOf(B, A)`
+ * resolve to the same `Failed_A_B`, matching `allOf`'s own readiness check
  * (a set of required edges, not an ordered sequence). `elaborate()`
  * synthesizes one of these per distinct combo actually declared; `runtime.ts`
  * logs a failure under this same name — one convention, named once, used
  * by both, mirroring `failedEdgeName`.
  */
-export function failedEveryEdgeName(edges: AnyEdgeDef[]): string {
+export function failedAllOfEdgeName(edges: AnyEdgeDef[]): string {
   const sortedNames = edges.map((edge) => edge.name).sort();
   return `Failed_${sortedNames.join("_")}`;
 }
@@ -375,7 +375,7 @@ export interface NodeDef<In extends InputSpec = InputSpec, O extends OutputSpec 
    * legitimate default, not a footgun being papered over. Only `read:Identity:*`
    * resolves to anything today — `Identity` is the one edge this can name
    * (design-history.md); whether the mechanism generalizes to every edge, or
-   * is `every:`'s field-narrowed sibling, is still open (open-questions.md).
+   * is `allOf:`'s field-narrowed sibling, is still open (open-questions.md).
    */
   scope?: string[];
 }

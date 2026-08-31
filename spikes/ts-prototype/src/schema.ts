@@ -263,10 +263,11 @@ export function nodeSchema(): object {
       if: { properties: { input: { type: "string" } } },
       then: { properties: { examples: { items: { properties: { given: taggedOne(objectPayload) } } } } },
     },
-    // every: several edges must all be present, each tagged by name in given
-    // (docs/design-history.md, "`every` lands") — mirrors allOf's expect shape.
+    // allOf (input position): several edges must all be present, each
+    // tagged by name in given — mirrors allOf's own expect shape on the
+    // output side.
     {
-      if: { properties: { input: { type: "object", required: ["every"] } } },
+      if: { properties: { input: { type: "object", required: ["allOf"] } } },
       then: { properties: { examples: { items: { properties: { given: tagged(objectPayload) } } } } },
     },
     // oneOf (input position): exactly one of several declared edges arrives,
@@ -323,8 +324,8 @@ export function nodeSchema(): object {
           edgeName,
           {
             type: "object",
-            properties: { every: edgeNameList },
-            required: ["every"],
+            properties: { allOf: edgeNameList },
+            required: ["allOf"],
             additionalProperties: false,
           },
           {

@@ -449,11 +449,11 @@ describe("nodeSchema", () => {
     expect(valid).toBe(false);
   });
 
-  it("accepts an every input with a multi-tag given", () => {
+  it("accepts an allOf input with a multi-tag given", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({
       description: "d",
-      input: { every: ["TodoList", "Todo"] },
+      input: { allOf: ["TodoList", "Todo"] },
       output: "TodoList",
       examples: [
         {
@@ -466,11 +466,11 @@ describe("nodeSchema", () => {
     expect(valid).toBe(true);
   });
 
-  it("rejects an every input whose given has no tags", () => {
+  it("rejects an allOf input whose given has no tags", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({
       description: "d",
-      input: { every: ["TodoList", "Todo"] },
+      input: { allOf: ["TodoList", "Todo"] },
       output: "TodoList",
       examples: [{ given: {}, expect: { TodoList: { title: "Groceries", tasks: [] } } }],
     });

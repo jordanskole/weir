@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defineEdge, defineField, defineNode, every, single } from "./define.js";
+import { defineEdge, defineField, defineNode, allOf, single } from "./define.js";
 import { InMemoryLog, assertPayload, membrane } from "./membrane.js";
 
 const Person = defineEdge({
@@ -322,17 +322,17 @@ const C = defineEdge({
   fields: { value: defineField({ type: "utf8", label: "Value", description: "C's value", nullable: false }) },
 });
 
-// docs/design.md §5's diamond: a node depending on `every: [A, B]` is a
+// docs/design.md §5's diamond: a node depending on `allOf: [A, B]` is a
 // readiness check against each edge's own log for one correlation_id, not a
 // synchronous join — matches the pulse model (docs/design-history.md).
 const nodeC = defineNode({
   name: "C",
-  input: every(A, B),
+  input: allOf(A, B),
   output: single(C),
   fn: ({ A, B }) => ({ value: `${A.value}+${B.value}` }),
 });
 
-describe("membrane — every", () => {
+describe("membrane — allOf", () => {
   it("is not ready when only some declared edges are present for this correlation_id", async () => {
     const log = new InMemoryLog();
     log.append("A", "thread-1", { value: "a" });
@@ -344,7 +344,7 @@ describe("membrane — every", () => {
     await expect(membrane(nodeC)("thread-1", log)).resolves.toBeUndefined();
   });
 
-  it("calls fn once every declared edge is present, keyed by edge name", async () => {
+  it("calls fn once all declared edges are present, keyed by edge name", async () => {
     const log = new InMemoryLog();
     log.append("A", "thread-1", { value: "a" });
     log.append("B", "thread-1", { value: "b" });
@@ -435,7 +435,7 @@ describe("membrane — envelope", () => {
     expect(received?.identity).toEqual({});
   });
 
-  it("gives every-input nodes a real Envelope the same way", async () => {
+  it("gives allOf-input nodes a real Envelope the same way", async () => {
     let received: Record<string, unknown> | undefined;
     const node = defineNode({
       ...nodeC,
