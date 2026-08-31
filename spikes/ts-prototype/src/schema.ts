@@ -270,13 +270,16 @@ export function nodeSchema(): object {
       if: { properties: { input: { type: "object", required: ["allOf"] } } },
       then: { properties: { examples: { items: { properties: { given: tagged(objectPayload) } } } } },
     },
-    // oneOf (input position): exactly one of several declared edges arrives,
-    // tagged by name in given — mirrors oneOf's own expect shape on the
-    // output side (docs/superpowers/specs/2026-08-31-any-desugaring-design.md).
-    // Desugars into N single-input nodes at elaboration time (elaborate.ts);
-    // this only validates the authoring-level YAML shape.
+    // anyOf (input position): one or more of several declared edges may
+    // arrive, each independently — NOT the same "exactly one" guarantee
+    // output's oneOf carries (docs/superpowers/specs/2026-08-31-oneof-input-becomes-anyof.md).
+    // Each individual example still tags exactly one edge, since it
+    // demonstrates one shadow's behavior at a time — that's what taggedOne
+    // below checks, unchanged from before this rename. Desugars into N
+    // single-input nodes at elaboration time (elaborate.ts); this only
+    // validates the authoring-level YAML shape.
     {
-      if: { properties: { input: { type: "object", required: ["oneOf"] } } },
+      if: { properties: { input: { type: "object", required: ["anyOf"] } } },
       then: { properties: { examples: { items: { properties: { given: taggedOne(objectPayload) } } } } },
     },
   ];
@@ -330,8 +333,8 @@ export function nodeSchema(): object {
           },
           {
             type: "object",
-            properties: { oneOf: edgeNameList },
-            required: ["oneOf"],
+            properties: { anyOf: edgeNameList },
+            required: ["anyOf"],
             additionalProperties: false,
           },
         ],
