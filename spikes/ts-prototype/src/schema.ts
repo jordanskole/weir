@@ -269,11 +269,13 @@ export function nodeSchema(): object {
       if: { properties: { input: { type: "object", required: ["every"] } } },
       then: { properties: { examples: { items: { properties: { given: tagged(objectPayload) } } } } },
     },
-    // any: exactly one of several declared edges arrives, tagged by name in
-    // given — mirrors oneOf's expect shape (docs/design-history.md, "`every`
-    // lands... any, by contrast, is about breadth").
+    // oneOf (input position): exactly one of several declared edges arrives,
+    // tagged by name in given — mirrors oneOf's own expect shape on the
+    // output side (docs/superpowers/specs/2026-08-31-any-desugaring-design.md).
+    // Desugars into N single-input nodes at elaboration time (elaborate.ts);
+    // this only validates the authoring-level YAML shape.
     {
-      if: { properties: { input: { type: "object", required: ["any"] } } },
+      if: { properties: { input: { type: "object", required: ["oneOf"] } } },
       then: { properties: { examples: { items: { properties: { given: taggedOne(objectPayload) } } } } },
     },
   ];
@@ -327,8 +329,8 @@ export function nodeSchema(): object {
           },
           {
             type: "object",
-            properties: { any: edgeNameList },
-            required: ["any"],
+            properties: { oneOf: edgeNameList },
+            required: ["oneOf"],
             additionalProperties: false,
           },
         ],
