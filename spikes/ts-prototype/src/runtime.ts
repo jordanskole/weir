@@ -12,8 +12,8 @@
  * number them.
  *
  * Deliberately narrow, stated here rather than left implicit:
- * - **`Failed<In>` routing exists for `single`- and `every`-input nodes;
- *   `any`-input nodes still don't.** A `single`-input node's failure logs
+ * - **`Failed<In>` routing exists for `single`- and `every`-input nodes —
+ *   every InputSpec kind there is.** A `single`-input node's failure logs
  *   under `failedEdgeName(inputEdge)` (`Failed_Todo` for a `Todo`-input
  *   node, synthesized automatically by `elaborate()`'s
  *   `synthesizeFailedEdges`); an `every`-input node's bag-shaped failure
@@ -23,10 +23,7 @@
  *   declared) — both cases route through the same readiness mechanism a
  *   downstream node declaring that edge as its own input already uses, no
  *   new mechanism needed (docs/design-history.md, "The runtime, built
- *   narrow on purpose... `Failed<In>` routing"). An `any`-input node's
- *   `Failed<In>` is tagged (`{edge, payload}`) instead — no synthesized
- *   edge exists for that shape, and it still collects in `failures`,
- *   unrouted — a real, separate next increment, not silently dropped.
+ *   narrow on purpose... `Failed<In>` routing").
  * - **Disambiguating a real `Failed<In>` from a genuine `single`-output
  *   success value is a heuristic** (`looksLikeFailed`), not a real
  *   discriminant — the same open, undecided wire-format question. Safe
@@ -60,18 +57,15 @@ import { Identity, failedEdgeName, failedEveryEdgeName } from "./types.js";
  * has been checked at the value level — a real TS narrowing limitation,
  * not a genuine call-shape ambiguity (checked at runtime by the `kind`
  * branch itself). These two aliases name the cast instead of hiding it.
- * `AnyMultiInvoke` covers both `every`- and `any`-input nodes — their
- * `membrane()` call shape is identical (`correlationId, log, identity?`);
- * only what's inside `In` differs, and that's erased here too. (Named
- * "Multi" rather than reusing the real `any` InputSpec kind's name, to
- * avoid the two meanings of "any" colliding in this file.)
+ * `AnyEveryInvoke` names the cast for `every`-input nodes' call shape
+ * (`correlationId, log, identity?`); `In` is erased here too.
  */
 type AnySingleInvoke = (
   payload: unknown,
   correlationId: string,
   identity?: PayloadOf<typeof Identity>,
 ) => Promise<unknown>;
-type AnyMultiInvoke = (
+type AnyEveryInvoke = (
   correlationId: string,
   log: Log,
   identity?: PayloadOf<typeof Identity>,
@@ -148,25 +142,20 @@ export async function runNetlist(
       }
       result = await (membrane(nodeDef) as AnySingleInvoke)(payload, correlationId, identity);
     } else {
-      const multi = await (membrane(nodeDef) as AnyMultiInvoke)(correlationId, log, identity);
-      if (multi === undefined) return false;
-      result = multi;
+      const every = await (membrane(nodeDef) as AnyEveryInvoke)(correlationId, log, identity);
+      if (every === undefined) return false;
+      result = every;
     }
 
     fired.add(nodeName);
     if (looksLikeFailed(result)) {
       if (nodeDef.input.kind === "single") {
         log.append(failedEdgeName(nodeDef.input.edge.name), correlationId, result);
-      } else if (nodeDef.input.kind === "every") {
+      } else {
         // The synthesized combo edge is flat (elaborate.ts's synthesizeEveryFailedEdges:
         // {A, B, reason}, no `input` wrapper) — spread the bag alongside reason to match.
         const bag = result.input as Record<string, unknown>;
         log.append(failedEveryEdgeName(nodeDef.input.edges), correlationId, { ...bag, reason: result.reason });
-      } else {
-        // any-input Failed<In> is tagged ({edge, payload}); no synthesized edge yet
-        // (elaborate.ts's synthesis covers single-input and every-combos only) —
-        // still collected here.
-        failures.push({ node: nodeName, failed: result });
       }
     } else {
       logOutput(log, nodeDef.output, result, correlationId);
