@@ -40,7 +40,7 @@
         {
           "type": "object",
           "properties": {
-            "oneOf": {
+            "anyOf": {
               "type": "array",
               "items": {
                 "type": "string",
@@ -50,7 +50,7 @@
             }
           },
           "required": [
-            "oneOf"
+            "anyOf"
           ],
           "additionalProperties": false
         }
@@ -227,7 +227,7 @@
           "input": {
             "type": "object",
             "required": [
-              "oneOf"
+              "anyOf"
             ]
           }
         }
