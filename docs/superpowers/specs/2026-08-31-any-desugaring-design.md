@@ -98,9 +98,22 @@ No changes to `hash.ts` or `implementation.ts`. Each desugared shadow is an ordi
 - Added: `elaborate.test.ts` coverage for the desugaring itself (one `.node` file → N `NodeDecl`s, correct naming, correct per-edge example splitting), for `.topology`'s alias expansion (a reference to the original name resolves to all shadows, both as parent and child), and for the corrected semantics (both shadows fire independently when both edges occur in one invocation — a real behavior-change test, not just a renamed one). `runtime.test.ts` coverage proving a desugared shadow actually fires end-to-end through the worklist via an aliased `.topology` reference, and that `Failed<In>` for a desugared shadow routes through the existing single-input mechanism with no new code.
 - `docs/design-history.md` gets a new entry documenting the reversal — what `any` was as a runtime primitive, why it came out, the naming path to `oneOf` (including the rejected candidates and why), and the semantics correction. `docs/open-questions.md`'s "Is `any` actually the right name..." entry gets resolved/removed (the question dissolves along with the primitive it was about naming).
 
+## Also folded in: `every` becomes `allOf`
+
+Completing the symmetry the `oneOf` rename started: `every` (input) and `allOf` (output) already mean the same thing — `allOf`'s own doc comment is literally "every listed edge fires" — they just carry different names by accident of build order (`every` was built first, before `oneOf`/`allOf` existed as output kinds to mirror). `single`↔`single`, `oneOf`↔`oneOf` (this design), and now `allOf`↔`allOf`.
+
+**Unlike the `any`→`oneOf` change, this is a pure rename — no behavior, mechanism, or shape change at all.** `every`'s readiness check (all declared edges must have arrived), its bag payload shape, and the `every`-combo `Failed_A_B` routing built in `c9d3676` are untouched; only identifiers change:
+
+- `types.ts`: `InputSpec`'s `{kind: "every"}` → `{kind: "allOf"}`; `InputPayload`'s matching branch.
+- `define.ts`: the `every(...edges)` helper is **deleted outright, not renamed** — confirmed (not assumed) that `allOf<Es>(...edges): {kind:"allOf"; edges: Es}` already exists as the *output* helper, with the exact structural shape the renamed input kind needs. Input authors reuse the existing `allOf()` directly, the same way `single()` is already shared between input and output today — no new function needed.
+- `membrane.ts`: `EveryInvoke` → `AllOfInvoke` (or similar), the `kind === "every"` branch condition only — its body is unchanged.
+- `elaborate.ts`: `resolveInputSpec`'s `"every" in input` branch → `"allOf" in input`; the pre-scan (`everyCombosByKey`) and `synthesizeEveryFailedEdges`/`failedEveryEdgeName` get renamed to match (`allOfCombosByKey`, `synthesizeAllOfFailedEdges`, `failedAllOfEdgeName`) — same logic, new names.
+- `runtime.ts`: the `kind === "every"` check in `Failed<In>` routing renamed to `"allOf"`.
+- `schema.ts`: `nodeSchema()`'s `every` input conditional and `oneOf`-list entry rename their key to `allOf`.
+- Every real `.node` YAML file using `every:` today — `examples/todo-list/src/nodes/AddTodoToList.node` — updates to `allOf:`.
+
 ## Explicitly out of scope
 
-- Any change to `every`'s routing or shape (untouched by this work).
 - Building the deferred `first`/`each` recurrence-over-time kinds (still gated on cycle/bounded-iteration support, unrelated to this rename-that-became-a-removal). Note `first` is now doubly free of collision risk — not reused here, and not what this construct means.
 - A genuine "exclusive, first-of-several-wins, closes the door" primitive, if one is ever actually needed — this design deliberately does *not* preserve that behavior (see Motivation); building it for real would be new, separate work, not a variant of this one.
 - Any new implementation-sharing mechanism in `hash.ts`/`implementation.ts`.
