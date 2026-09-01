@@ -315,7 +315,7 @@ export interface Wiring {
 /**
  * Resolves a bare node name (as used by a `.topology` file) to the real
  * underlying node name(s) it refers to. Throws if unresolvable. `[name]` for
- * an ordinary node; all shadow names for a oneOf-desugared original.
+ * an ordinary node; all shadow names for a anyOf-desugared original.
  */
 export type NodeNameResolver = (name: string) => string[];
 
@@ -333,7 +333,7 @@ export type NodeNameResolver = (name: string) => string[];
  * legitimate distinct application, not a cycle (docs/design-history.md,
  * "Weir has no loop construct") — the YAML itself is always a finite tree,
  * so nothing can actually recurse forever. A name that resolves to more
- * than one real node (a oneOf-desugared original) expands to references to
+ * than one real node (a anyOf-desugared original) expands to references to
  * all of them, uniformly, whether it appears as a parent or a child —
  * deliberately imprecise rather than smart, since a wasted readiness check
  * on the wrong shadow is free (docs/superpowers/specs/2026-08-31-any-desugaring-design.md).
