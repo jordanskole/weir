@@ -18,12 +18,12 @@ fields:
   description:
     type: utf8
     nullable: true
-    label: A longer explaination of the task
-    description: A description of the task
+    label: Description
+    description: A longer explanation of the task
     validations:
       minLength: 10
       maxLength: 2000
   is_complete:
-    type: bool # bool is the only type that is not nullable, because it defaults to false
+    type: bool # bool is the only type that can't be nullable — see types.ts's FieldDef doc
     label: Is Complete
     description: Whether the task has been completed
