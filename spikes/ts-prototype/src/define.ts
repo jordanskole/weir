@@ -188,6 +188,17 @@ export function every<Es extends AnyEdgeDef[]>(...edges: Es): { kind: "every"; e
   return { kind: "every", edges };
 }
 
+/**
+ * The coproduct-shaped sibling of `every` (docs/design-history.md, "`every`
+ * lands... any, by contrast, is about breadth"): fires once the first of
+ * several distinct declared edges has appeared for the current
+ * correlation_id — same readiness mechanism as `every`, `min` instead of
+ * `max`. Fn receives a `{edge, payload}` tag so it knows which one arrived.
+ */
+export function any<Es extends AnyEdgeDef[]>(...edges: Es): { kind: "any"; edges: Es } {
+  return { kind: "any", edges };
+}
+
 /** Coproduct: exactly one of the listed edges fires, chosen by value. */
 export function oneOf<Es extends AnyEdgeDef[]>(...edges: Es): { kind: "oneOf"; edges: Es } {
   return { kind: "oneOf", edges };

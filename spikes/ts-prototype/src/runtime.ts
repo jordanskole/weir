@@ -19,9 +19,10 @@
  *   mechanism routes it to a downstream node declaring that edge as its
  *   own input, no new mechanism needed (docs/design-history.md, "The
  *   runtime, built narrow on purpose... `Failed<In>` routing"). An
- *   `every`-input node's `Failed<In>` is bag-shaped (`{A: ..., B: ...}`),
- *   has no synthesized edge, and still collects in `failures`, unrouted —
- *   a real, separate next increment, not silently dropped.
+ *   `every`-input node's `Failed<In>` is bag-shaped (`{A: ..., B: ...}`)
+ *   and an `any`-input node's is tagged (`{edge, payload}`) — neither has a
+ *   synthesized edge, and both still collect in `failures`, unrouted — a
+ *   real, separate next increment, not silently dropped.
  * - **Disambiguating a real `Failed<In>` from a genuine `single`-output
  *   success value is a heuristic** (`looksLikeFailed`), not a real
  *   discriminant — the same open, undecided wire-format question. Safe
@@ -55,13 +56,18 @@ import { Identity, failedEdgeName } from "./types.js";
  * has been checked at the value level — a real TS narrowing limitation,
  * not a genuine call-shape ambiguity (checked at runtime by the `kind`
  * branch itself). These two aliases name the cast instead of hiding it.
+ * `AnyMultiInvoke` covers both `every`- and `any`-input nodes — their
+ * `membrane()` call shape is identical (`correlationId, log, identity?`);
+ * only what's inside `In` differs, and that's erased here too. (Named
+ * "Multi" rather than reusing the real `any` InputSpec kind's name, to
+ * avoid the two meanings of "any" colliding in this file.)
  */
 type AnySingleInvoke = (
   payload: unknown,
   correlationId: string,
   identity?: PayloadOf<typeof Identity>,
 ) => Promise<unknown>;
-type AnyEveryInvoke = (
+type AnyMultiInvoke = (
   correlationId: string,
   log: Log,
   identity?: PayloadOf<typeof Identity>,
@@ -138,9 +144,9 @@ export async function runNetlist(
       }
       result = await (membrane(nodeDef) as AnySingleInvoke)(payload, correlationId, identity);
     } else {
-      const every = await (membrane(nodeDef) as AnyEveryInvoke)(correlationId, log, identity);
-      if (every === undefined) return false;
-      result = every;
+      const multi = await (membrane(nodeDef) as AnyMultiInvoke)(correlationId, log, identity);
+      if (multi === undefined) return false;
+      result = multi;
     }
 
     fired.add(nodeName);
@@ -148,8 +154,9 @@ export async function runNetlist(
       if (nodeDef.input.kind === "single") {
         log.append(failedEdgeName(nodeDef.input.edge.name), correlationId, result);
       } else {
-        // every-input Failed<In> is bag-shaped; no synthesized edge exists for it yet
-        // (elaborate.ts's synthesizeFailedEdges is single-input only) — still collected here.
+        // every-input Failed<In> is bag-shaped, any-input's is tagged; neither has a
+        // synthesized edge yet (elaborate.ts's synthesizeFailedEdges is single-input
+        // only) — both still collected here.
         failures.push({ node: nodeName, failed: result });
       }
     } else {
