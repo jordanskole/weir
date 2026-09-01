@@ -10,6 +10,7 @@ const PERSON_BIRTHDAY_SRC = fileURLToPath(
   new URL("../../../examples/person-birthday/src", import.meta.url),
 );
 const TODO_LIST_SRC = fileURLToPath(new URL("../../../examples/todo-list/src", import.meta.url));
+const RECIPE_SRC = fileURLToPath(new URL("../../../examples/recipe/src", import.meta.url));
 
 let dir: string | undefined;
 
@@ -1055,5 +1056,24 @@ failing:
     const result = await elaborate(root);
 
     expect(result.wiring.feeds.failing?.sort()).toEqual(["HandleFailed__Failed_Person", "HandleFailed__Failed_Todo"]);
+  });
+
+  it("loads the real recipe example — a linear pipeline through a many(Ingredient) origin", async () => {
+    const result = await elaborate(RECIPE_SRC);
+
+    expect(Object.keys(result.nodes).sort()).toEqual(["bake", "cool", "gatherIngredients", "mix"]);
+    expect(result.nodes.gatherIngredients!.input).toEqual({ kind: "single", edge: result.edges.Recipe });
+    expect(result.nodes.mix!.output).toEqual({ kind: "single", edge: result.edges.Dough });
+    expect(result.nodes.bake!.output).toEqual({ kind: "single", edge: result.edges.BakedCookies });
+    expect(result.nodes.cool!.output).toEqual({ kind: "single", edge: result.edges.Cookies });
+
+    expect(result.edges.Recipe!.fields.ingredients).toEqual({ many: result.edges.Ingredient });
+
+    expect(result.wiring.origins).toEqual(["gatherIngredients"]);
+    expect(result.wiring.feeds).toEqual({
+      gatherIngredients: ["mix"],
+      mix: ["bake"],
+      bake: ["cool"],
+    });
   });
 });

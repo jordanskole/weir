@@ -1,0 +1,23 @@
+label: Cookies
+description: The finished, cooled cookies — ready to eat
+fields:
+  title:
+    type: utf8
+    label: Title
+    description: The name of the dish
+    nullable: false
+    validations:
+      minLength: 3
+      maxLength: 200
+  servings:
+    type: uint8
+    label: Servings
+    description: How many servings this batch makes
+    nullable: false
+    validations:
+      min: 1
+      max: 100
+  done:
+    type: bool
+    label: Done
+    description: Whether the cookies have cooled enough to eat

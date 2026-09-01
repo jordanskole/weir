@@ -1,0 +1,33 @@
+label: Gather Ingredients
+description: Confirms every ingredient is on hand before cooking begins
+input: Recipe
+output: Recipe
+examples:
+  - given:
+      Recipe:
+        title: "Chocolate Chip Cookies"
+        servings: 24
+        ingredients:
+          butter:
+            name: "Butter, softened"
+            amount: "1 cup"
+          flour:
+            name: "All-purpose flour"
+            amount: "2 1/4 cups"
+          chocolate_chips:
+            name: "Chocolate chips"
+            amount: "2 cups"
+    expect:
+      Recipe:
+        title: "Chocolate Chip Cookies"
+        servings: 24
+        ingredients:
+          butter:
+            name: "Butter, softened"
+            amount: "1 cup"
+          flour:
+            name: "All-purpose flour"
+            amount: "2 1/4 cups"
+          chocolate_chips:
+            name: "Chocolate chips"
+            amount: "2 cups"

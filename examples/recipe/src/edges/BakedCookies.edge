@@ -1,0 +1,19 @@
+label: Baked Cookies
+description: The dough, baked — still too hot to eat
+fields:
+  title:
+    type: utf8
+    label: Title
+    description: The name of the dish being made
+    nullable: false
+    validations:
+      minLength: 3
+      maxLength: 200
+  servings:
+    type: uint8
+    label: Servings
+    description: How many servings this batch makes
+    nullable: false
+    validations:
+      min: 1
+      max: 100

@@ -1,0 +1,14 @@
+label: Cool
+description: Cools the baked cookies until they're ready to eat
+input: BakedCookies
+output: Cookies
+examples:
+  - given:
+      BakedCookies:
+        title: "Chocolate Chip Cookies"
+        servings: 24
+    expect:
+      Cookies:
+        title: "Chocolate Chip Cookies"
+        servings: 24
+        done: true
