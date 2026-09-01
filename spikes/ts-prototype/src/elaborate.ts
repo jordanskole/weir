@@ -42,7 +42,8 @@ function requireIndex(edge: AnyEdgeDef, context: string): void {
  * with `runtime.ts` via `failedEdgeName`). Iterates a snapshot of `edges`
  * taken before synthesis starts, so a synthesized `Failed_*` edge never
  * itself grows a `Failed_Failed_*` counterpart. Single-input nodes only —
- * `every`-input `Failed<In>`'s bag shape has no synthesized edge yet
+ * `every`-input `Failed<In>`'s bag shape and `any`-input `Failed<In>`'s
+ * tagged-union shape both have no natural single synthesized edge name yet
  * (`runtime.ts` still collects those in `failures`, unrouted).
  */
 function synthesizeFailedEdges(edges: Record<string, AnyEdgeDef>): void {
@@ -125,10 +126,10 @@ export type EdgeResolver = (name: string) => AnyEdgeDef;
 
 /**
  * Resolves a `.node` file's `input` value into an `InputSpec`. Handles the
- * two shapes `nodeSchema()` (schema.ts) validates today: a bare edge name
- * (`single`) and `{ every: [...] }` (docs/design-history.md, "`every`
- * lands"). `oneOf`/`allOf`/`many` never appear on `input` — those are
- * output-only fan-out shapes (docs/design-history.md, "Fan-out is three
+ * three shapes `nodeSchema()` (schema.ts) validates today: a bare edge name
+ * (`single`), `{ every: [...] }`, and `{ any: [...] }` (docs/design-history.md,
+ * "`every` lands"). `oneOf`/`allOf`/`many` never appear on `input` — those
+ * are output-only fan-out shapes (docs/design-history.md, "Fan-out is three
  * different things").
  */
 function resolveInputSpec(input: unknown, resolveEdge: EdgeResolver): InputSpec {
@@ -137,6 +138,9 @@ function resolveInputSpec(input: unknown, resolveEdge: EdgeResolver): InputSpec 
   }
   if (input !== null && typeof input === "object" && "every" in input) {
     return { kind: "every", edges: resolveEdgeNameList(input.every, "input.every", resolveEdge) };
+  }
+  if (input !== null && typeof input === "object" && "any" in input) {
+    return { kind: "any", edges: resolveEdgeNameList(input.any, "input.any", resolveEdge) };
   }
   throw new Error(`Unrecognized "input" shape: ${JSON.stringify(input)}.`);
 }

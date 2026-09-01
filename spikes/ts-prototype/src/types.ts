@@ -223,22 +223,30 @@ export interface Envelope {
 
 /**
  * A node's input shape (docs/design.md §5) — a single edge, or several via
- * `every`. `every` is a readiness condition the membrane resolves against a
- * `correlation_id`'s per-edge-type logs, never a synchronous join or an
- * accumulator (docs/design-history.md, "The membrane"). Mirrors OutputSpec's
- * "kind is the discriminant" idiom on purpose — `single` here is the same
- * shape `single()` already produces for OutputSpec, so the same helper
- * serves both.
+ * `every`/`any`. Both are readiness conditions the membrane resolves
+ * against a `correlation_id`'s per-edge-type logs, never a synchronous join
+ * or an accumulator (docs/design-history.md, "The membrane"): `every` is
+ * the product-shaped case (all declared edges must have arrived), `any` is
+ * its coproduct-shaped sibling (the first of several distinct edges to
+ * arrive) — same pulse-arrival mechanism, `min` instead of `max`
+ * (docs/design-history.md, "`every` lands"). Mirrors OutputSpec's "kind is
+ * the discriminant" idiom on purpose — `single` here is the same shape
+ * `single()` already produces for OutputSpec, so the same helper serves
+ * both.
  */
 export type InputSpec =
   | { kind: "single"; edge: AnyEdgeDef }
-  | { kind: "every"; edges: AnyEdgeDef[] };
+  | { kind: "every"; edges: AnyEdgeDef[] }
+  | { kind: "any"; edges: AnyEdgeDef[] };
 
 /**
  * The payload shape Fn receives for a given InputSpec: the edge's own
- * payload for `single`, a bag keyed by edge name for `every` — matching the
+ * payload for `single`; a bag keyed by edge name for `every`, matching the
  * `given`/`expect` name-as-key tagging convention already decided for
- * `.node` examples (docs/design-history.md).
+ * `.node` examples (docs/design-history.md); a `{edge, payload}` tag for
+ * `any` — reusing `oneOf`'s output shape (`Tagged`, below), since only one
+ * of several distinct edges is guaranteed present and Fn needs to know
+ * which.
  */
 export type InputPayload<I extends InputSpec> = I extends {
   kind: "single";
@@ -247,7 +255,9 @@ export type InputPayload<I extends InputSpec> = I extends {
   ? PayloadOf<E>
   : I extends { kind: "every"; edges: infer Es extends AnyEdgeDef[] }
     ? { [K in Es[number]["name"]]: PayloadOf<Extract<Es[number], { name: K }>> }
-    : never;
+    : I extends { kind: "any"; edges: infer Es extends AnyEdgeDef[] }
+      ? { [Idx in keyof Es]: Es[Idx] extends AnyEdgeDef ? Tagged<Es[Idx]> : never }[number]
+      : never;
 
 /**
  * A node's output shape (docs/design.md §3) — the three fan-out modes plus

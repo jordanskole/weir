@@ -269,6 +269,13 @@ export function nodeSchema(): object {
       if: { properties: { input: { type: "object", required: ["every"] } } },
       then: { properties: { examples: { items: { properties: { given: tagged(objectPayload) } } } } },
     },
+    // any: exactly one of several declared edges arrives, tagged by name in
+    // given — mirrors oneOf's expect shape (docs/design-history.md, "`every`
+    // lands... any, by contrast, is about breadth").
+    {
+      if: { properties: { input: { type: "object", required: ["any"] } } },
+      then: { properties: { examples: { items: { properties: { given: taggedOne(objectPayload) } } } } },
+    },
   ];
   const outputShapeConditionals = [
     // single (bare-string output) or oneOf: exactly one tag, payload is an object.
@@ -316,6 +323,12 @@ export function nodeSchema(): object {
             type: "object",
             properties: { every: edgeNameList },
             required: ["every"],
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            properties: { any: edgeNameList },
+            required: ["any"],
             additionalProperties: false,
           },
         ],
