@@ -575,6 +575,104 @@ fields:
     expect(result.edges.Failed_Person!.fields.reason).toMatchObject({ type: "utf8", nullable: true });
   });
 
+  it("synthesizes a Failed_<A>_<B> edge for a declared every: combo, sorted and order-independent", async () => {
+    const root = await writeFixture({
+      "edges/A.edge": `
+description: Edge A
+fields:
+  value:
+    type: utf8
+    label: Value
+    description: d
+    nullable: false
+`,
+      "edges/B.edge": `
+description: Edge B
+fields:
+  value:
+    type: utf8
+    label: Value
+    description: d
+    nullable: false
+`,
+      "nodes/Combine.node": `
+description: Combines A and B
+input:
+  every:
+    - B
+    - A
+output: A
+examples:
+  - given:
+      A: { value: "a" }
+      B: { value: "b" }
+    expect:
+      A: { value: "a" }
+`,
+    });
+
+    const result = await elaborate(root);
+
+    expect(result.edges.Failed_A_B).toBeDefined();
+    expect(result.edges.Failed_A_B!.fields.A).toBe(result.edges.A);
+    expect(result.edges.Failed_A_B!.fields.B).toBe(result.edges.B);
+    expect(result.edges.Failed_A_B!.fields.reason).toMatchObject({ type: "utf8", nullable: true });
+  });
+
+  it("lets a .node file declare input: Failed_<A>_<B>, resolving against the synthesized combo edge", async () => {
+    const root = await writeFixture({
+      "edges/A.edge": `
+description: Edge A
+fields:
+  value:
+    type: utf8
+    label: Value
+    description: d
+    nullable: false
+`,
+      "edges/B.edge": `
+description: Edge B
+fields:
+  value:
+    type: utf8
+    label: Value
+    description: d
+    nullable: false
+`,
+      "nodes/Combine.node": `
+description: Combines A and B
+input:
+  every:
+    - A
+    - B
+output: A
+examples:
+  - given:
+      A: { value: "a" }
+      B: { value: "b" }
+    expect:
+      A: { value: "a" }
+`,
+      "nodes/HandleFailed.node": `
+description: Recovers a failed A+B combo
+input: Failed_A_B
+output: A
+examples:
+  - given:
+      Failed_A_B:
+        A: { value: "a" }
+        B: { value: "b" }
+        reason: "kaboom"
+    expect:
+      A: { value: "a" }
+`,
+    });
+
+    const result = await elaborate(root);
+
+    expect(result.nodes.HandleFailed!.input).toEqual({ kind: "single", edge: result.edges.Failed_A_B });
+  });
+
   it("lets a .node file declare input: Failed_<EdgeName>, resolving against the synthesized edge", async () => {
     const root = await writeFixture({
       "edges/Todo.edge": `
@@ -691,6 +789,7 @@ output: Ghost
       edges: [result.edges.TodoList, result.edges.Todo],
     });
     expect(result.nodes.AddTodoToList!.output).toEqual({ kind: "single", edge: result.edges.TodoList });
+    expect(result.edges.Failed_Todo_TodoList).toBeDefined();
   });
 
   it("loads a .topology file, validating references against declared .node files", async () => {

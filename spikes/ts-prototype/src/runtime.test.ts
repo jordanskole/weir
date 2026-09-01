@@ -248,7 +248,7 @@ describe("runNetlist", () => {
     expect(log.latest("Start", "thread-1")).toEqual({ value: "a" });
   });
 
-  it("still collects an every-input node's failure in `failures` — bag-shaped Failed<In> isn't routed yet", async () => {
+  it("routes an every-input node's failure to the sorted-name combo edge, order-independent", async () => {
     const A = defineEdge({
       name: "A",
       label: "A",
@@ -263,7 +263,7 @@ describe("runNetlist", () => {
     });
     const failingJoin = defineNode({
       name: "failingJoin",
-      input: every(A, B),
+      input: every(B, A), // declared out of alphabetical order — the synthesized name should sort anyway
       output: single(Start),
       fn: () => {
         throw new Error("kaboom");
@@ -281,10 +281,12 @@ describe("runNetlist", () => {
 
     const result = await runNetlist(program, log, "thread-1", {});
 
-    expect(result.failures).toEqual([
-      { node: "failingJoin", failed: { input: { A: { value: "a" }, B: { value: "b" } }, reason: "kaboom" } },
-    ]);
-    expect(log.latest("Failed_A", "thread-1")).toBeUndefined();
+    expect(result.failures).toEqual([]);
+    expect(log.latest("Failed_A_B", "thread-1")).toEqual({
+      A: { value: "a" },
+      B: { value: "b" },
+      reason: "kaboom",
+    });
   });
 
   it("fires an any-input node once any one of its declared edges appears, not waiting for all", async () => {
@@ -529,7 +531,7 @@ describe("runNetlist", () => {
     }
   });
 
-  it("real: AddTodoToList fails on a malformed Todo — every-input Failed<In> lands in `failures`, unrouted", async () => {
+  it("real: AddTodoToList fails on a malformed Todo — every-input Failed<In> routes to Failed_Todo_TodoList", async () => {
     const dir = await mkdtemp(join(tmpdir(), "weir-runtime-"));
     try {
       const raw = await elaborate(TODO_LIST_SRC);
@@ -560,15 +562,12 @@ describe("runNetlist", () => {
         {},
       );
 
-      expect(result.failures).toEqual([
-        {
-          node: "AddTodoToList",
-          failed: {
-            input: { TodoList: validTodoList, Todo: malformedTodo },
-            reason: expect.stringMatching(/title/),
-          },
-        },
-      ]);
+      expect(result.failures).toEqual([]);
+      expect(log.latest("Failed_Todo_TodoList", "thread-1")).toEqual({
+        TodoList: validTodoList,
+        Todo: malformedTodo,
+        reason: expect.stringMatching(/title/),
+      });
       expect(log.latest("TodoList", "thread-1")).toEqual(validTodoList);
       expect(log.latest("Failed_Todo", "thread-1")).toBeUndefined();
       expect(log.latest("Failed_TodoList", "thread-1")).toBeUndefined();
