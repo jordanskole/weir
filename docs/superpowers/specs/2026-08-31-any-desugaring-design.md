@@ -110,6 +110,7 @@ Completing the symmetry the `oneOf` rename started: `every` (input) and `allOf` 
 - `elaborate.ts`: `resolveInputSpec`'s `"every" in input` branch → `"allOf" in input`; the pre-scan (`everyCombosByKey`) and `synthesizeEveryFailedEdges`/`failedEveryEdgeName` get renamed to match (`allOfCombosByKey`, `synthesizeAllOfFailedEdges`, `failedAllOfEdgeName`) — same logic, new names.
 - `runtime.ts`: the `kind === "every"` check in `Failed<In>` routing renamed to `"allOf"`.
 - `schema.ts`: `nodeSchema()`'s `every` input conditional and `oneOf`-list entry rename their key to `allOf`.
+- `hash.ts`: `InputSpecFingerprint`'s `{kind: "every"}` branch and `fingerprintInput`'s matching return both rename to `allOf` — missed in the first pass of this doc, worth calling out since `hash.ts` was otherwise declared "no changes needed" for the `oneOf` half of this work and it'd be easy to assume that covers `every`/`allOf` too.
 - Every real `.node` YAML file using `every:` today — `examples/todo-list/src/nodes/AddTodoToList.node` — updates to `allOf:`.
 
 ## Explicitly out of scope
