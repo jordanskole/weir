@@ -317,6 +317,24 @@ export function failedEdgeName(inputEdgeName: string): string {
 }
 
 /**
+ * The naming convention an `every`-input node's `Failed<In>` routes
+ * through — one synthesized edge per distinct declared combination of
+ * edges, shared by every node whose `every: [...]` names that same set
+ * (docs/design-history.md, "`any` built... every-input Failed<In> still
+ * collects in failures"). Names are sorted before joining so the
+ * synthesized edge is order-independent: `every(A, B)` and `every(B, A)`
+ * resolve to the same `Failed_A_B`, matching `every`'s own readiness check
+ * (a set of required edges, not an ordered sequence). `elaborate()`
+ * synthesizes one of these per distinct combo actually declared; `runtime.ts`
+ * logs a failure under this same name — one convention, named once, used
+ * by both, mirroring `failedEdgeName`.
+ */
+export function failedEveryEdgeName(edges: AnyEdgeDef[]): string {
+  const sortedNames = edges.map((edge) => edge.name).sort();
+  return `Failed_${sortedNames.join("_")}`;
+}
+
+/**
  * A node's implementation. Context-free by default; a second `env`
  * parameter opts a node into seeing the envelope (docs/design.md §1). Not
  * a string reference — see spikes/ts-prototype/README.md for why a spike

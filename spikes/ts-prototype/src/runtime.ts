@@ -12,17 +12,21 @@
  * number them.
  *
  * Deliberately narrow, stated here rather than left implicit:
- * - **`Failed<In>` routing exists for `single`-input nodes only.** A
- *   `single`-input node's failure logs under `failedEdgeName(inputEdge)`
- *   (`Failed_Todo` for a `Todo`-input node, synthesized automatically by
- *   `elaborate()`'s `synthesizeFailedEdges`) — the same readiness
- *   mechanism routes it to a downstream node declaring that edge as its
- *   own input, no new mechanism needed (docs/design-history.md, "The
- *   runtime, built narrow on purpose... `Failed<In>` routing"). An
- *   `every`-input node's `Failed<In>` is bag-shaped (`{A: ..., B: ...}`)
- *   and an `any`-input node's is tagged (`{edge, payload}`) — neither has a
- *   synthesized edge, and both still collect in `failures`, unrouted — a
- *   real, separate next increment, not silently dropped.
+ * - **`Failed<In>` routing exists for `single`- and `every`-input nodes;
+ *   `any`-input nodes still don't.** A `single`-input node's failure logs
+ *   under `failedEdgeName(inputEdge)` (`Failed_Todo` for a `Todo`-input
+ *   node, synthesized automatically by `elaborate()`'s
+ *   `synthesizeFailedEdges`); an `every`-input node's bag-shaped failure
+ *   (`{A: ..., B: ...}`) logs under `failedEveryEdgeName(edges)`
+ *   (`Failed_A_B`, sorted and order-independent, synthesized by
+ *   `synthesizeEveryFailedEdges` for whichever combos are actually
+ *   declared) — both cases route through the same readiness mechanism a
+ *   downstream node declaring that edge as its own input already uses, no
+ *   new mechanism needed (docs/design-history.md, "The runtime, built
+ *   narrow on purpose... `Failed<In>` routing"). An `any`-input node's
+ *   `Failed<In>` is tagged (`{edge, payload}`) instead — no synthesized
+ *   edge exists for that shape, and it still collects in `failures`,
+ *   unrouted — a real, separate next increment, not silently dropped.
  * - **Disambiguating a real `Failed<In>` from a genuine `single`-output
  *   success value is a heuristic** (`looksLikeFailed`), not a real
  *   discriminant — the same open, undecided wire-format question. Safe
@@ -46,7 +50,7 @@ import { membrane } from "./membrane.js";
 import type { Log } from "./membrane.js";
 import type { Program } from "./implementation.js";
 import type { Failed, InputSpec, OutputSpec, PayloadOf } from "./types.js";
-import { Identity, failedEdgeName } from "./types.js";
+import { Identity, failedEdgeName, failedEveryEdgeName } from "./types.js";
 
 /**
  * `program.nodes` stores heterogeneous NodeDefs in one `Record<string,
@@ -153,10 +157,15 @@ export async function runNetlist(
     if (looksLikeFailed(result)) {
       if (nodeDef.input.kind === "single") {
         log.append(failedEdgeName(nodeDef.input.edge.name), correlationId, result);
+      } else if (nodeDef.input.kind === "every") {
+        // The synthesized combo edge is flat (elaborate.ts's synthesizeEveryFailedEdges:
+        // {A, B, reason}, no `input` wrapper) — spread the bag alongside reason to match.
+        const bag = result.input as Record<string, unknown>;
+        log.append(failedEveryEdgeName(nodeDef.input.edges), correlationId, { ...bag, reason: result.reason });
       } else {
-        // every-input Failed<In> is bag-shaped, any-input's is tagged; neither has a
-        // synthesized edge yet (elaborate.ts's synthesizeFailedEdges is single-input
-        // only) — both still collected here.
+        // any-input Failed<In> is tagged ({edge, payload}); no synthesized edge yet
+        // (elaborate.ts's synthesis covers single-input and every-combos only) —
+        // still collected here.
         failures.push({ node: nodeName, failed: result });
       }
     } else {
