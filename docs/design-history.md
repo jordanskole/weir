@@ -572,4 +572,22 @@ Built in `6d2558c`, `any` gave `Fn` a `{edge, payload}` tag and a real `AnyInvok
 
 **Two other rename candidates were tried and rejected for colliding with weir's own vocabulary, not just external ones.** `spread` is already load-bearing for `.edge` field-map composition (design.md §2) and already the candidate name for a different open question (`open-questions.md`, "partial input, partial node-pinned default") — reusing it a third way would have been worse than the collision it was meant to avoid. `poly` collides softer, with weir's existing parametric-generics "polymorphism" (`Animal<T>`) — a different kind of polymorphism than "several unrelated concrete types."
 
+## Input `oneOf` corrected to `anyOf`, same day as the rename that introduced it
+
+Spot-checked independently — a second conversation, working from the same repo state, reached the same conclusion without seeing this file. Output `oneOf` (`types.ts`'s `OutputSpec`, untouched by any of today's work) is a real coproduct: `OutputResult` for that kind is a union type, `Fn` returns one value, so the type system guarantees exactly one branch every call — matching JSON Schema's own `oneOf` keyword ("exactly one subschema validates"), which `schema.ts` already uses natively elsewhere in the same file. Input `oneOf` (built earlier today, "`any` comes back out," this file) does not carry that guarantee: it desugars into N independent single-input nodes with no cross-shadow exclusivity, by deliberate design — if two listed edges both occur in one invocation, both shadows fire. The group produces zero, one, or up to N firings, never a guaranteed one. That's JSON Schema's `anyOf` ("one or more validate"), not its `oneOf`.
+
+**Traced to one sentence in that entry's own reasoning:** "`oneOf` won: it's `oneOf`'s own dual on the input side (a coproduct — exactly one of several concrete types is relevant per firing)." "Per firing" is true of any individual shadow in isolation — each shadow's own input genuinely is exactly one edge type — but the analogy was drawn at the wrong grain: it doesn't hold for the group across firings, which is the property that actually matters for the word "coproduct" to apply.
+
+**Resolved naming matrix**, settled directly:
+
+| | input | output |
+|---|---|---|
+| `allOf` | all must be present | all fire |
+| `anyOf` | one or more may fire, independently | — |
+| `oneOf` | — | exactly one fires |
+
+`allOf` stays genuinely dual, same as `single` — one word, one meaning, either position. `anyOf` and `oneOf` are not: each is single-position only after this correction, and deliberately so — there is no coherent "output anyOf" (`Fn` returns exactly one value per call, so "zero or more of these may fire" has no output-side meaning the way it does for independent input-side node firings), so none was built.
+
+**Pure rename, smaller in scope than `every`→`allOf` or the `any`→`oneOf` desugaring itself** — full spec at `docs/superpowers/specs/2026-08-31-oneof-input-becomes-anyof.md`. `parseOneOfNodeFile`→`parseAnyOfNodeFile`, `defineOneOfNodes`→`defineAnyOfNodes`, `oneOfAliases`→`anyOfAliases`, `schema.ts`'s input-position conditional/property key. Never touched `types.ts`, `membrane.ts`, `runtime.ts`, or `hash.ts` — input `oneOf` never became a runtime `InputSpec` kind in the first place, so none of them ever knew its name to begin with.
+
 Full design at `docs/superpowers/specs/2026-08-31-any-desugaring-design.md`.
