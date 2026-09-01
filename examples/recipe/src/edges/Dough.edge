@@ -1,0 +1,19 @@
+label: Dough
+description: The recipe's ingredients, combined and ready to bake — the same dish as Recipe, one real stage further along (see README)
+fields:
+  title:
+    type: utf8
+    label: Title
+    description: The name of the dish being made
+    nullable: false
+    validations:
+      minLength: 3
+      maxLength: 200
+  servings:
+    type: uint8
+    label: Servings
+    description: How many servings this batch makes
+    nullable: false
+    validations:
+      min: 1
+      max: 100

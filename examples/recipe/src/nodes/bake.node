@@ -1,0 +1,13 @@
+label: Bake
+description: Bakes the dough into cookies
+input: Dough
+output: BakedCookies
+examples:
+  - given:
+      Dough:
+        title: "Chocolate Chip Cookies"
+        servings: 24
+    expect:
+      BakedCookies:
+        title: "Chocolate Chip Cookies"
+        servings: 24
