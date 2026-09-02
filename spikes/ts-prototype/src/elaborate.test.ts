@@ -1058,22 +1058,33 @@ failing:
     expect(result.wiring.feeds.failing?.sort()).toEqual(["HandleFailed__Failed_Person", "HandleFailed__Failed_Todo"]);
   });
 
-  it("loads the real recipe example — a linear pipeline through a many(Ingredient) origin", async () => {
+  it("loads the real recipe example — a many(Ingredient) origin fanning out into a mix/preheat allOf join at bake", async () => {
     const result = await elaborate(RECIPE_SRC);
 
-    expect(Object.keys(result.nodes).sort()).toEqual(["bake", "cool", "gatherIngredients", "mix"]);
+    expect(Object.keys(result.nodes).sort()).toEqual([
+      "bake",
+      "cool",
+      "gatherIngredients",
+      "mix",
+      "preheatOven",
+    ]);
     expect(result.nodes.gatherIngredients!.input).toEqual({ kind: "single", edge: result.edges.Recipe });
     expect(result.nodes.mix!.output).toEqual({ kind: "single", edge: result.edges.Dough });
+    expect(result.nodes.preheatOven!.output).toEqual({ kind: "single", edge: result.edges.Oven });
+    expect(result.nodes.bake!.input).toEqual({
+      kind: "allOf",
+      edges: [result.edges.Dough, result.edges.Oven],
+    });
     expect(result.nodes.bake!.output).toEqual({ kind: "single", edge: result.edges.BakedCookies });
     expect(result.nodes.cool!.output).toEqual({ kind: "single", edge: result.edges.Cookies });
 
     expect(result.edges.Recipe!.fields.ingredients).toEqual({ many: result.edges.Ingredient });
+    expect(result.edges.Failed_Dough_Oven).toBeDefined();
 
     expect(result.wiring.origins).toEqual(["gatherIngredients"]);
-    expect(result.wiring.feeds).toEqual({
-      gatherIngredients: ["mix"],
-      mix: ["bake"],
-      bake: ["cool"],
-    });
+    expect(result.wiring.feeds.gatherIngredients?.sort()).toEqual(["mix", "preheatOven"]);
+    expect(result.wiring.feeds.mix).toEqual(["bake"]);
+    expect(result.wiring.feeds.preheatOven).toEqual(["bake"]);
+    expect(result.wiring.feeds.bake).toEqual(["cool"]);
   });
 });

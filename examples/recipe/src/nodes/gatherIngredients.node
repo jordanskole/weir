@@ -7,27 +7,29 @@ examples:
       Recipe:
         title: "Chocolate Chip Cookies"
         servings: 24
+        temperature: 375
         ingredients:
-          butter:
-            name: "Butter, softened"
-            amount: "1 cup"
-          flour:
-            name: "All-purpose flour"
+          Butter:
+            name: "Butter"
+            amount: "1 cup, softened"
+          Flour:
+            name: "Flour"
             amount: "2 1/4 cups"
-          chocolate_chips:
-            name: "Chocolate chips"
+          Chocolate Chips:
+            name: "Chocolate Chips"
             amount: "2 cups"
     expect:
       Recipe:
         title: "Chocolate Chip Cookies"
         servings: 24
+        temperature: 375
         ingredients:
-          butter:
-            name: "Butter, softened"
-            amount: "1 cup"
-          flour:
-            name: "All-purpose flour"
+          Butter:
+            name: "Butter"
+            amount: "1 cup, softened"
+          Flour:
+            name: "Flour"
             amount: "2 1/4 cups"
-          chocolate_chips:
-            name: "Chocolate chips"
+          Chocolate Chips:
+            name: "Chocolate Chips"
             amount: "2 cups"

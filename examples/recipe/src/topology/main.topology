@@ -5,3 +5,6 @@ gatherIngredients:
         bake:
           then:
             cool: {}
+    preheatOven:
+      then:
+        bake: {}
