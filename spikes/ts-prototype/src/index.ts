@@ -22,3 +22,14 @@ export { defineField, defineEdge, defineNode, single, oneOf, allOf, many } from 
 
 export { hashEdge, hashEdges, assertEdgeHash } from "./hash.js";
 export type { SchemaHash } from "./hash.js";
+
+export { serializeNetlist } from "./netlist.js";
+export type {
+  Netlist,
+  NetlistEdge,
+  NetlistField,
+  NetlistInputSpec,
+  NetlistNode,
+  NetlistOutputSpec,
+  NetlistTopology,
+} from "./netlist.js";
