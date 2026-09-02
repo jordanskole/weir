@@ -24,99 +24,101 @@ The name comes from a fish weir: rather than watching the whole ocean, you build
 Edges are files. Here is one:
 
 ```yaml
-# declarations/Todo.edge
-label: Todo
-description: A task a person needs to do, or has done
-index: id
+# declarations/Ingredient.edge
+label: Ingredient
+description: A single ingredient in a recipe, with how much of it is needed
+index: name
 fields:
-  id:
+  name:
     type: utf8
-    label: ID
-    description: A stable identifier for this task, unique within its list
+    label: Name
+    description: The ingredient's name
     nullable: false
-  title:
+  amount:
     type: utf8
-    label: Title
+    label: Amount
+    description: How much is needed, as it would appear on the recipe (e.g. "2 cups")
     nullable: false
-    validations:
-      minLength: 10
-      maxLength: 200
-  is_complete:
-    type: bool
-    label: Is Complete
 ```
 
-There is no `name:` field. The filename is the name — one place to write it down means it cannot drift out of sync with itself.
+There is no `name:` field at the top level. The filename is the name — one place to write it down means it cannot drift out of sync with itself.
 
-Edges compose by reference, not inheritance. A bare name in a field position resolves against whatever file declares it, so `many: Todo` embeds the `Todo` edge and `email: email` reuses a `.field` declared once:
+Edges compose by reference, not inheritance. A bare name in a field position resolves against whatever file declares it, so `many: Ingredient` embeds the `Ingredient` edge and `email: email` reuses a `.field` declared once:
 
 ```yaml
-# declarations/TodoList.edge
-label: Todo List
+# declarations/Recipe.edge
+label: Recipe
 fields:
   title:
     type: utf8
     nullable: false
-  tasks:
-    many: Todo
+  ingredients:
+    many: Ingredient
 ```
 
-Because `Todo` declares `index: id`, `many: Todo` materializes as a map keyed by that field, not a list.
+Because `Ingredient` declares `index: name`, `many: Ingredient` materializes as a map keyed by that field, not a list.
 
 No node takes or returns a bare array. A node's input and output are always edges, and an edge is a named schema — an array has no schema-level identity for its elements, so there is nothing to wire, key, or address. Inside a payload, order is just data; at the boundary it would be structure the graph cannot see.
 
 A node declares a contract and nothing else — no body:
 
 ```yaml
-# declarations/AddTodoToList.node
-label: Add Todo To List
-description: Adds a task to a todo list
+# declarations/bake.node
+label: Bake
+description: Bakes the dough into cookies, once the oven has preheated
 input:
   allOf:
-    - TodoList
-    - Todo
-output: TodoList
+    - Dough
+    - Oven
+output: BakedCookies
 examples:
   - given:
-      TodoList: { title: "Grocery List", tasks: {} }
-      Todo:     { id: "todo-1", title: "Buy milk and eggs", is_complete: false }
+      Dough: { title: "Chocolate Chip Cookies", servings: 24 }
+      Oven:  { temperature: 375, preheated: true }
     expect:
-      TodoList:
-        title: "Grocery List"
-        tasks:
-          todo-1: { id: "todo-1", title: "Buy milk and eggs", is_complete: false }
+      BakedCookies:
+        title: "Chocolate Chip Cookies"
+        servings: 24
 ```
 
-`input: allOf:` is a readiness condition, not a wire. The runtime calls the function once both a `TodoList` and a `Todo` exist for this correlation id, however many invocations separate their arrival. No join, no accumulator, no ordering requirement.
+`input: allOf:` is a readiness condition, not a wire. The runtime calls the function once both a `Dough` and an `Oven` exist for this correlation id, however many invocations separate their arrival — here, whichever of mixing and preheating finishes second. No join, no accumulator, no ordering requirement.
 
 The wiring is its own file:
 
 ```yaml
 # declarations/main.topology
-CreateTodo:
+gatherIngredients:
   then:
-    AddTodoToList: {}
-    CompleteTodo: {}
+    mix:
+      then:
+        bake:
+          then:
+            cool: {}
+    preheatOven:
+      then:
+        bake: {}
 ```
 
-That is the whole program. The implementation of `AddTodoToList` lives in a different tree, resolved by name and contract hash, and is regenerable build output rather than something you maintain.
+`mix` and `preheatOven` both run off `gatherIngredients`'s output, independently — the dough gets mixed while the oven heats, and `bake` names as its own child under *both*. That is the whole program. The implementation of `bake` lives in a different tree, resolved by name and contract hash, and is regenerable build output rather than something you maintain.
 
-**A topology is a node.** A subgraph with one input edge and one output edge is indistinguishable from a single node at its boundary, so this file can be dropped into a larger graph wherever a `Todo -> TodoList` node is expected, and nothing upstream can tell the difference. Graphs nest without limit and bottom out at a **primitive** — a node whose body is host code rather than more graph. There is no separate module system, because the composition rule already is one.
+**A topology is a node.** A subgraph with one input edge and one output edge is indistinguishable from a single node at its boundary, so this file can be dropped into a larger graph wherever a `Recipe -> Cookies` node is expected, and nothing upstream can tell the difference. Graphs nest without limit and bottom out at a **primitive** — a node whose body is host code rather than more graph. There is no separate module system, because the composition rule already is one.
 
 ## What a run leaves behind
 
-Elaboration turns those files into a netlist — concrete nodes, concrete edges, no type variables. Execution appends to a log. For the smallest possible program, `Person { age: 41 } | birthday | expect Person { age: 42 }`, the log is:
+Elaboration turns those files into a netlist — concrete nodes, concrete edges, no type variables. Execution appends to a log. For this recipe, the log opens like this:
 
 ```json
-{ "instance": "origin#1",   "edge": "Person", "payload": { "age": 41 },
+{ "instance": "gatherIngredients#1", "edge": "Recipe", "payload": { "title": "Chocolate Chip Cookies", "servings": 24 },
   "envelope": { "id": "env-1", "correlationId": "run-1", "causationId": null,    "step": 0 } }
 
-{ "instance": "birthday#1", "edge": "Person", "payload": { "age": 42 },
+{ "instance": "mix#1",               "edge": "Dough",  "payload": { "title": "Chocolate Chip Cookies", "servings": 24 },
   "envelope": { "id": "env-2", "correlationId": "run-1", "causationId": "env-1", "step": 1 } }
 
-{ "instance": "expect#1",   "edge": "Pass",   "payload": {},
-  "envelope": { "id": "env-3", "correlationId": "run-1", "causationId": "env-2", "step": 2 } }
+{ "instance": "preheatOven#1",       "edge": "Oven",   "payload": { "temperature": 375, "preheated": true },
+  "envelope": { "id": "env-3", "correlationId": "run-1", "causationId": "env-1", "step": 1 } }
 ```
+
+Two entries at `step: 1`, both caused by the same `env-1` — `mix` and `preheatOven` are independent, concurrent applications of the same origin, not a sequence. `bake` waits for both before it can append its own entry.
 
 That log is the source of truth. Node state is a fold over prior edges keyed by correlation id. The tables an application shows you are materialized views over it. Both the tables and any node's implementation can be deleted and rebuilt from it; the only durable artifacts are edge definitions and topology.
 
@@ -127,11 +129,11 @@ This holds because **effects are data**. A node does not call a database — it 
 **A decision becomes a type.** A node that classifies does not hand back what it was given:
 
 ```yaml
-input: Todo
+input: BakedCookies
 output:
   oneOf:
-    - ActiveTodo
-    - CompletedTodo
+    - Cookies
+    - Underbaked
 ```
 
 The consumer's input type *is* the proof the decision was made, so it is never re-derived and never re-derived differently. Branches must be genuinely exclusive — exactly one fires.
@@ -146,13 +148,13 @@ Nothing a node can read is invisible in its contract. No instance fields, no mod
 
 The obvious objection is iteration. Every loop most people write has an accumulator — a slot you re-enter and mutate — and that slot is ambient state by definition.
 
-It turns out the array ban already closed that door. There is nothing to push onto. A collection is keyed, so the thing a loop would have built up incrementally is instead addressed directly: `many Todo` fans out into N independent invocations, each producing an edge keyed by the same id, and reassembly is a lookup rather than an append. Order stops being load-bearing, which is also why arrival order doesn't matter to `every:`.
+It turns out the array ban already closed that door. There is nothing to push onto. A collection is keyed, so the thing a loop would have built up incrementally is instead addressed directly: `many Ingredient` fans out into N independent invocations, each producing an edge keyed by the same id, and reassembly is a lookup rather than an append. Order stops being load-bearing, which is also why arrival order doesn't matter to `every:`.
 
 And a cycle in the wiring is not a loop. A node has no instance to re-enter, so `C` feeding back into `A` is a fresh application of the same function to new data, indistinguishable from any other forward step. What a `while` loop needs — a mutable slot, re-entered in place — has nowhere to live here. The log already holds every intermediate value a loop would have accumulated, so the accumulator was redundant with the log the whole time.
 
-**Tests live in the contract.** You have already seen them: the `examples` block in `AddTodoToList.node` is written in the same composition syntax used to wire nodes together, and `expect` is an ordinary node with `oneOf: [Pass, Fail]`. A test run is a graph execution on production machinery, so a production log entry can be promoted to a test case directly.
+**Tests live in the contract.** You have already seen them: the `examples` block in `bake.node` is written in the same composition syntax used to wire nodes together, and `expect` is an ordinary node with `oneOf: [Pass, Fail]`. A test run is a graph execution on production machinery, so a production log entry can be promoted to a test case directly.
 
-Examples are the weaker half. Because a node's input is fully typed, that type doubles as a generator — `age: uint8` supplies a domain, `validations.min`/`max` narrow it, `enumValues` enumerates it — so a property like *birthday always adds exactly one year* costs about as much to write as one example and rules out far more. There is nothing to mock, because there are no impure dependencies to isolate.
+Examples are the weaker half. Because a node's input is fully typed, that type doubles as a generator — `age: uint8` supplies a domain, `validations.min`/`max` narrow it, `enumValues` enumerates it — so a property like *mix never changes a recipe's title or serving count* costs about as much to write as one example and rules out far more. There is nothing to mock, because there are no impure dependencies to isolate.
 
 ## Authoring when you don't write the bodies
 
