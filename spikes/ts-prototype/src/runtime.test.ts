@@ -16,6 +16,7 @@ const PERSON_BIRTHDAY_SRC = fileURLToPath(
   new URL("../../../examples/person-birthday/src", import.meta.url),
 );
 const TODO_LIST_SRC = fileURLToPath(new URL("../../../examples/todo-list/src", import.meta.url));
+const RECIPE_SRC = fileURLToPath(new URL("../../../examples/recipe/src", import.meta.url));
 
 const Start = defineEdge({
   name: "Start",
@@ -484,6 +485,60 @@ describe("runNetlist", () => {
       expect(log.latest("TodoList", "thread-1")).toEqual(validTodoList);
       expect(log.latest("Failed_Todo", "thread-1")).toBeUndefined();
       expect(log.latest("Failed_TodoList", "thread-1")).toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs the real recipe topology end-to-end — bake waits for both mix and preheatOven before firing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "weir-runtime-"));
+    try {
+      const raw = await elaborate(RECIPE_SRC);
+
+      for (const [name, fn] of [
+        ["gatherIngredients", `export default function gatherIngredients(payload) { return payload; }`],
+        [
+          "mix",
+          `export default function mix(payload) { return { title: payload.title, servings: payload.servings }; }`,
+        ],
+        [
+          "preheatOven",
+          `export default function preheatOven(payload) { return { temperature: payload.temperature, preheated: true }; }`,
+        ],
+        [
+          "bake",
+          `export default function bake(payload) { return { title: payload.Dough.title, servings: payload.Dough.servings }; }`,
+        ],
+        ["cool", `export default function cool(payload) { return { ...payload, done: true }; }`],
+      ] as const) {
+        const hash = (await hashNode(raw.nodes[name]!)).short;
+        await mkdir(join(dir, name), { recursive: true });
+        await writeFile(join(dir, name, `${hash}.ts`), `${fn}\n`, "utf8");
+      }
+
+      const program = await elaborateWithImplementations(RECIPE_SRC, dir);
+      const log = new InMemoryLog();
+      const recipe = {
+        title: "Chocolate Chip Cookies",
+        servings: 24,
+        temperature: 375,
+        ingredients: { Butter: { name: "Butter", amount: "1 cup, softened" } },
+      };
+
+      const result = await runNetlist(program, log, "thread-1", { gatherIngredients: recipe });
+
+      expect(log.latest("Dough", "thread-1")).toEqual({ title: recipe.title, servings: recipe.servings });
+      expect(log.latest("Oven", "thread-1")).toEqual({ temperature: recipe.temperature, preheated: true });
+      expect(log.latest("BakedCookies", "thread-1")).toEqual({
+        title: recipe.title,
+        servings: recipe.servings,
+      });
+      expect(log.latest("Cookies", "thread-1")).toEqual({
+        title: recipe.title,
+        servings: recipe.servings,
+        done: true,
+      });
+      expect(result.failures).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

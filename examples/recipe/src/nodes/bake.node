@@ -1,12 +1,18 @@
 label: Bake
-description: Bakes the dough into cookies
-input: Dough
+description: Bakes the dough into cookies, once the oven has preheated
+input:
+  allOf:
+    - Dough
+    - Oven
 output: BakedCookies
 examples:
   - given:
       Dough:
         title: "Chocolate Chip Cookies"
         servings: 24
+      Oven:
+        temperature: 375
+        preheated: true
     expect:
       BakedCookies:
         title: "Chocolate Chip Cookies"

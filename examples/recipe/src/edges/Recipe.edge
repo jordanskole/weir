@@ -17,5 +17,13 @@ fields:
     validations:
       min: 1
       max: 100
+  temperature:
+    type: uint16
+    label: Temperature
+    description: The oven temperature this recipe calls for, in Fahrenheit
+    nullable: false
+    validations:
+      min: 200
+      max: 500
   ingredients:
     many: Ingredient

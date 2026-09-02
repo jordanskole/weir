@@ -1,0 +1,15 @@
+label: Oven
+description: The oven, heating to the recipe's target temperature
+fields:
+  temperature:
+    type: uint16
+    label: Temperature
+    description: The oven's target temperature, in Fahrenheit
+    nullable: false
+    validations:
+      min: 200
+      max: 500
+  preheated:
+    type: bool
+    label: Preheated
+    description: Whether the oven has reached its target temperature

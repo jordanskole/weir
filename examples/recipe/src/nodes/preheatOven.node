@@ -1,7 +1,7 @@
-label: Mix
-description: Combines the ingredients into a workable dough
+label: Preheat Oven
+description: Starts heating the oven to the recipe's target temperature, while the dough gets mixed
 input: Recipe
-output: Dough
+output: Oven
 examples:
   - given:
       Recipe:
@@ -19,6 +19,6 @@ examples:
             name: "Chocolate Chips"
             amount: "2 cups"
     expect:
-      Dough:
-        title: "Chocolate Chip Cookies"
-        servings: 24
+      Oven:
+        temperature: 375
+        preheated: true
