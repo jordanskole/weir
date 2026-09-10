@@ -57,4 +57,8 @@ describe("computeImplementationMetadata", () => {
 `;
     expect(computeImplementationMetadata(source).lines).toBe(3);
   });
+
+  it("throws rather than reporting plausible-looking numbers for unparseable source", () => {
+    expect(() => computeImplementationMetadata("function ( { { {")).toThrow(/parse error/);
+  });
 });

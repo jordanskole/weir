@@ -7,15 +7,19 @@ export type {
   FieldDef,
   LiteralFieldDef,
   EdgeDef,
+  AnyEdgeDef,
   ScalarTsType,
   Payload,
   PayloadOf,
   Envelope,
+  InputSpec,
   OutputSpec,
   OutputResult,
+  Failed,
   Fn,
   Example,
   NodeDef,
+  NodeDecl,
 } from "./types.js";
 export { Unit } from "./types.js";
 
@@ -36,7 +40,13 @@ export type {
 } from "./netlist.js";
 
 export { exportContract } from "./contract.js";
-export type { ContractEdgeShape, ContractInputSpec, ContractOutputSpec, SealedContract } from "./contract.js";
+export type {
+  ContractEdgeShape,
+  ContractField,
+  ContractInputSpec,
+  ContractOutputSpec,
+  SealedContract,
+} from "./contract.js";
 
 export { computeImplementationMetadata } from "./metadata.js";
 export type { ImplementationMetadata } from "./metadata.js";

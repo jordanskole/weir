@@ -43,9 +43,24 @@ function countDecisionPoints(node: ts.Node): number {
   return count;
 }
 
+/**
+ * `ts.createSourceFile` never throws — it error-recovers and stashes any
+ * parse diagnostics on the returned `SourceFile`. Without this guard,
+ * malformed source yields a plausible-looking number indistinguishable
+ * from a clean straight-line function, so refuse instead of reporting one.
+ */
+function assertParsed(sourceFile: ts.SourceFile): void {
+  // `parseDiagnostics` is internal to the compiler API, not on the public type.
+  const diagnostics = (sourceFile as unknown as { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics;
+  if (diagnostics !== undefined && diagnostics.length > 0) {
+    throw new Error(`Cannot compute metadata: source has ${diagnostics.length} parse error(s).`);
+  }
+}
+
 export function computeImplementationMetadata(source: string): ImplementationMetadata {
   const lines = source.trim().split("\n").length;
   const sourceFile = ts.createSourceFile("implementation.ts", source, ts.ScriptTarget.Latest, true);
+  assertParsed(sourceFile);
   const complexity = 1 + countDecisionPoints(sourceFile);
   return { lines, complexity };
 }
