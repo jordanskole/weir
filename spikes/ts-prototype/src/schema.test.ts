@@ -316,6 +316,40 @@ describe("edgeSchema", () => {
     expect(valid).toBe(false);
   });
 
+  it("accepts a spread key with a null value", () => {
+    const validate = validatorFor(edgeSchema());
+    const valid = validate({
+      label: "Baked Cookies",
+      description: "d",
+      fields: {
+        "...Dough": null,
+        done: { type: "bool", label: "Done", description: "d" },
+      },
+    });
+    expect(validate.errors).toBeNull();
+    expect(valid).toBe(true);
+  });
+
+  it("rejects a spread key with a non-null value", () => {
+    const validate = validatorFor(edgeSchema());
+    const valid = validate({
+      label: "Baked Cookies",
+      description: "d",
+      fields: { "...Dough": "Dough" },
+    });
+    expect(valid).toBe(false);
+  });
+
+  it("rejects a bare ... spread key naming no source", () => {
+    const validate = validatorFor(edgeSchema());
+    const valid = validate({
+      label: "Baked Cookies",
+      description: "d",
+      fields: { "...": null },
+    });
+    expect(valid).toBe(false);
+  });
+
   it("rejects an edge missing required top-level properties", () => {
     const validate = validatorFor(edgeSchema());
     const valid = validate({ fields: {} });

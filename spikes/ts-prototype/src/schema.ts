@@ -203,6 +203,9 @@ export function edgeSchema(): object {
       index: { type: "string" },
       fields: {
         type: "object",
+        patternProperties: {
+          "^\\.\\.\\..+$": { type: "null" },
+        },
         additionalProperties: {
           oneOf: [
             { type: "string", minLength: 1 },

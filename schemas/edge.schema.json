@@ -19,6 +19,11 @@
     },
     "fields": {
       "type": "object",
+      "patternProperties": {
+        "^\\.\\.\\..+$": {
+          "type": "null"
+        }
+      },
       "additionalProperties": {
         "oneOf": [
           {
