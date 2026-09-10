@@ -325,11 +325,11 @@ everything else; deferred, not designed away.
 `.edge` and `.topology` are pure data — every field maps directly onto existing types,
 nothing missing. `.node` is not: `Fn` is host code, which a data format can't and
 shouldn't hold (§5, "implementations are build output"). A `.node` file declares the
-contract only — name, input, output, examples, closure — never the body.
+contract only — name, input, output, examples, fixed — never the body.
 
 **The seam.** Contract and implementation are two artifacts, connected by convention and
 kept in sync by tooling, not memory — the elaborator (§4) scaffolds and wires the
-pairing the same way it already resolves closures and monomorphizes generics. The
+pairing the same way it already resolves fixed values and monomorphizes generics. The
 separation is structural, not just two extensions in one folder: declarations
 (`.edge`/`.node`/`.topology`) and implementations live in genuinely different trees, a
 real package boundary — my earlier project's `packages/schemas` (declarative)
