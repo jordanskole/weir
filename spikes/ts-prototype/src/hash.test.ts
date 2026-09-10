@@ -293,6 +293,22 @@ describe("hashEdge", () => {
     };
     expect((await hashEdge(bare)).hash).not.toBe((await hashEdge(base)).hash);
   });
+
+  it("fingerprints a literal field as { literal }, not a scalar type", async () => {
+    const edgeWithLiteral: AnyEdgeDef = {
+      name: "CompletedTodo",
+      label: "CompletedTodo",
+      description: "d",
+      fields: { is_complete: { literal: true } },
+    };
+    const { hash } = await hashEdge(edgeWithLiteral);
+    expect(hash).toBeTruthy();
+    const edgeWithDifferentLiteral: AnyEdgeDef = {
+      ...edgeWithLiteral,
+      fields: { is_complete: { literal: false } },
+    };
+    expect((await hashEdge(edgeWithDifferentLiteral)).hash).not.toBe(hash);
+  });
 });
 
 describe("hashEdges", () => {

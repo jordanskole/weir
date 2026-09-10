@@ -242,6 +242,39 @@ fields:
     const titleField = { type: "utf8" as const, label: "Title", description: "d", nullable: false as const };
     expect(() => parseEdgeFile(yaml, "TaskList", () => titleField)).toThrow(/many/i);
   });
+
+  it("resolves a bare-boolean field value into a LiteralFieldDef", () => {
+    const yaml = `
+label: CompletedTodo
+description: A todo that's been completed
+fields:
+  is_complete: true
+`;
+    const edge = parseEdgeFile(yaml, "CompletedTodo", () => {
+      throw new Error("resolver should not be called — no references in this file");
+    });
+    expect(edge.fields.is_complete).toEqual({ literal: true });
+  });
+
+  it("resolves an explicit { literal } field value, label and description included", () => {
+    const yaml = `
+label: CompletedTodo
+description: A todo that's been completed
+fields:
+  is_complete:
+    literal: true
+    label: Is Complete
+    description: Always true on a CompletedTodo
+`;
+    const edge = parseEdgeFile(yaml, "CompletedTodo", () => {
+      throw new Error("resolver should not be called — no references in this file");
+    });
+    expect(edge.fields.is_complete).toEqual({
+      literal: true,
+      label: "Is Complete",
+      description: "Always true on a CompletedTodo",
+    });
+  });
 });
 
 describe("parseNodeFile", () => {

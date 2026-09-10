@@ -80,6 +80,17 @@ describe("serializeNetlist — edges", () => {
 
     expect(netlist.edges.Household!.fields.pets).toEqual({ many: "Pet" });
   });
+
+  it("serializes a literal field verbatim, same shape it was declared with", async () => {
+    const CompletedTodo = defineEdge({
+      name: "CompletedTodo",
+      label: "CompletedTodo",
+      description: "d",
+      fields: { is_complete: { literal: true } },
+    });
+    const netlist = await serializeNetlist(elaborated({ edges: { CompletedTodo } }));
+    expect(netlist.edges.CompletedTodo!.fields.is_complete).toEqual({ literal: true });
+  });
 });
 
 describe("serializeNetlist — nodes", () => {

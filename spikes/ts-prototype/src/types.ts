@@ -70,6 +70,19 @@ export type FieldDef<T extends ScalarType = ScalarType, N extends boolean = bool
   ? FieldDefBase<T>
   : FieldDefBase<T> & { nullable: N };
 
+/**
+ * A field pinned to a single boolean constant, never caller-suppliable —
+ * for spread-with-override (`edge CompletedTodo { ...Todo, is_complete: true }`,
+ * docs/superpowers/specs/2026-09-09-edge-spread.md). A distinct field kind, not
+ * a `bool` with a value attached: no `nullable`, no `validations`, both
+ * meaningless on a fixed constant.
+ */
+export interface LiteralFieldDef {
+  literal: boolean;
+  label?: string;
+  description?: string;
+}
+
 type NumberValidation = { 
   min?: number;
   max?: number;
@@ -98,7 +111,7 @@ type Validation<T extends ScalarType> = T extends "uint8" | "uint16" | "uint32" 
  * expected to match its map key.
  */
 export interface EdgeDef<
-  F extends Record<string, FieldDef | AnyEdgeDef | ManyEdgeDef> = Record<string, FieldDef>,
+  F extends Record<string, FieldDef | LiteralFieldDef | AnyEdgeDef | ManyEdgeDef> = Record<string, FieldDef>,
 > {
   name: string;
   label: string;
@@ -128,7 +141,7 @@ export interface ManyEdgeDef<E extends AnyEdgeDef = AnyEdgeDef> {
  * anywhere a generic bound needs to admit a compound or many field, it must
  * say so with this alias rather than writing `EdgeDef` bare.
  */
-export type AnyEdgeDef = EdgeDef<Record<string, FieldDef | AnyEdgeDef | ManyEdgeDef>>;
+export type AnyEdgeDef = EdgeDef<Record<string, FieldDef | LiteralFieldDef | AnyEdgeDef | ManyEdgeDef>>;
 
 /**
  * The unit edge — the only special edge (docs/design.md §5). An origin
@@ -162,16 +175,18 @@ export type ScalarTsType<T extends ScalarType> = T extends "utf8" | "datetime"
  * an array"). One edge instance, one collection payload; never N separate
  * instances of the referenced edge.
  */
-export type Payload<F extends Record<string, FieldDef | AnyEdgeDef | ManyEdgeDef>> = {
+export type Payload<F extends Record<string, FieldDef | LiteralFieldDef | AnyEdgeDef | ManyEdgeDef>> = {
   [K in keyof F]: F[K] extends FieldDef<infer T, infer N>
     ? N extends true
       ? ScalarTsType<T> | null
       : ScalarTsType<T>
-    : F[K] extends ManyEdgeDef<infer E>
-      ? Record<string, PayloadOf<E>>
-      : F[K] extends AnyEdgeDef
-        ? PayloadOf<F[K]>
-        : never;
+    : F[K] extends LiteralFieldDef
+      ? boolean
+      : F[K] extends ManyEdgeDef<infer E>
+        ? Record<string, PayloadOf<E>>
+        : F[K] extends AnyEdgeDef
+          ? PayloadOf<F[K]>
+          : never;
 };
 
 /** The runtime payload shape of an edge definition. */

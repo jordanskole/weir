@@ -14,6 +14,7 @@ import type {
   Envelope,
   FieldDef,
   InputSpec,
+  LiteralFieldDef,
   ManyEdgeDef,
   NodeDef,
   OutputResult,
@@ -161,8 +162,13 @@ export function defineField<T extends ScalarType, N extends boolean = false>(
   return field;
 }
 
+/** Define a single literal-pinned field. Returns the input unchanged — no runtime validation needed, LiteralFieldDef's TS type already excludes nullable/validations entirely. */
+export function defineLiteral(field: LiteralFieldDef): LiteralFieldDef {
+  return field;
+}
+
 /** Define an edge with typed fields. Returns the input unchanged. */
-export function defineEdge<F extends Record<string, FieldDef | AnyEdgeDef | ManyEdgeDef>>(
+export function defineEdge<F extends Record<string, FieldDef | LiteralFieldDef | AnyEdgeDef | ManyEdgeDef>>(
   edge: EdgeDef<F>,
 ): EdgeDef<F> {
   return edge;

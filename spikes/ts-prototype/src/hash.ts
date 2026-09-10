@@ -21,7 +21,7 @@
  * (>=20) and modern browsers.
  */
 
-import type { AnyEdgeDef, FieldDef, InputSpec, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
+import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
 
 interface ScalarFieldFingerprint {
   type: string;
@@ -44,7 +44,11 @@ interface ScalarFieldFingerprint {
  * recursively; a many-of-compound field fingerprints the same way, tagged
  * separately so "one Task" and "many Task" never collide.
  */
-type FieldFingerprint = ScalarFieldFingerprint | { edge: EdgeFingerprint } | { many: EdgeFingerprint };
+type FieldFingerprint =
+  | ScalarFieldFingerprint
+  | { edge: EdgeFingerprint }
+  | { many: EdgeFingerprint }
+  | { literal: boolean };
 
 interface EdgeFingerprint {
   name: string;
@@ -56,7 +60,7 @@ function fingerprint(edge: AnyEdgeDef): EdgeFingerprint {
   const fields: Record<string, FieldFingerprint> = {};
 
   for (const key of Object.keys(edge.fields).sort()) {
-    const value = edge.fields[key] as FieldDef | AnyEdgeDef | ManyEdgeDef;
+    const value = edge.fields[key] as FieldDef | LiteralFieldDef | AnyEdgeDef | ManyEdgeDef;
 
     if ("many" in value) {
       fields[key] = { many: fingerprint(value.many) };
@@ -65,6 +69,11 @@ function fingerprint(edge: AnyEdgeDef): EdgeFingerprint {
 
     if ("fields" in value) {
       fields[key] = { edge: fingerprint(value) };
+      continue;
+    }
+
+    if ("literal" in value) {
+      fields[key] = { literal: value.literal };
       continue;
     }
 

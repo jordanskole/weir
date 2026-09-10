@@ -16,9 +16,9 @@
 
 import type { Elaborated, Wiring } from "./elaborate.js";
 import { hashEdge } from "./hash.js";
-import type { AnyEdgeDef, FieldDef, InputSpec, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
+import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
 
-export type NetlistField = FieldDef | { edge: string } | { many: string };
+export type NetlistField = FieldDef | LiteralFieldDef | { edge: string } | { many: string };
 
 export interface NetlistEdge {
   fields: Record<string, NetlistField>;
@@ -58,7 +58,7 @@ export interface Netlist {
  * any `Elaborated` it produces, but a hand-built one that omits a referenced
  * edge would produce a dangling reference here.
  */
-function serializeField(value: FieldDef | AnyEdgeDef | ManyEdgeDef): NetlistField {
+function serializeField(value: FieldDef | LiteralFieldDef | AnyEdgeDef | ManyEdgeDef): NetlistField {
   if ("many" in value) return { many: value.many.name };
   if ("fields" in value) return { edge: value.name };
   return value;

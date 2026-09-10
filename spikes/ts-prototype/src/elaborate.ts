@@ -20,7 +20,7 @@ import { basename } from "node:path";
 import { parse } from "yaml";
 import { defineEdge, defineField } from "./define.js";
 import { failedEdgeName, failedAllOfEdgeName } from "./types.js";
-import type { AnyEdgeDef, FieldDef, InputSpec, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
+import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
 
 /**
  * `many` is a collection keyed by the referenced edge's own declared
@@ -131,10 +131,12 @@ export function parseEdgeFile(yamlText: string, name: string, resolveField: Fiel
     fields?: Record<string, unknown>;
   };
 
-  const resolvedFields: Record<string, FieldDef | AnyEdgeDef | ManyEdgeDef> = {};
+  const resolvedFields: Record<string, FieldDef | LiteralFieldDef | AnyEdgeDef | ManyEdgeDef> = {};
   for (const [key, value] of Object.entries(fields ?? {})) {
     if (typeof value === "string") {
       resolvedFields[key] = resolveField(value);
+    } else if (typeof value === "boolean") {
+      resolvedFields[key] = { literal: value };
     } else if (value !== null && typeof value === "object" && "many" in value) {
       const ref = (value as { many: unknown }).many;
       if (typeof ref !== "string" || ref.length === 0) {
@@ -146,6 +148,8 @@ export function parseEdgeFile(yamlText: string, name: string, resolveField: Fiel
       }
       requireIndex(resolved, `"${key}.many"`);
       resolvedFields[key] = { many: resolved };
+    } else if (value !== null && typeof value === "object" && "literal" in value) {
+      resolvedFields[key] = value as LiteralFieldDef;
     } else {
       resolvedFields[key] = value as FieldDef;
     }
