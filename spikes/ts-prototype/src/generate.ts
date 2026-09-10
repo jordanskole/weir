@@ -137,7 +137,7 @@ function generateManyValue(edge: AnyEdgeDef, rng: Rng, caseIndex: number): Recor
   const count = randomInt(rng, 0, 3);
   const collection: Record<string, unknown> = {};
   for (let i = 0; i < count; i++) {
-    const entry = generatePayload(edge, rng, caseIndex);
+    const entry = generatePayload(edge, rng, caseIndex + i);
     const key = String(entry[edge.index]);
     collection[key] = entry;
   }

@@ -205,6 +205,25 @@ const TodoList: AnyEdgeDef = {
   },
 };
 
+const Tag: AnyEdgeDef = {
+  name: "Tag",
+  label: "Tag",
+  description: "A tag with an enum index",
+  index: "priority",
+  fields: {
+    priority: { type: "utf8", label: "Priority", description: "Priority level", nullable: false, enumValues: ["high", "medium", "low"] },
+  },
+};
+
+const TagCollection: AnyEdgeDef = {
+  name: "TagCollection",
+  label: "Tag Collection",
+  description: "A collection of tags",
+  fields: {
+    tags: { many: Tag },
+  },
+};
+
 describe("generatePayload", () => {
   it("generates a payload that passes assertPayload against its own edge", () => {
     const rng = createRng(10);
@@ -221,6 +240,20 @@ describe("generatePayload", () => {
     for (const [key, todo] of Object.entries(payload.todos)) {
       expect(todo.id).toBe(key);
     }
+  });
+
+  it("diversifies caseIndex for each entry in a many field to avoid collisions on enum-indexed edges", () => {
+    // Generate many payloads at caseIndex 0, where enumValues would collapse all entries to the same
+    // enum value without diversifying caseIndex. We expect to see multiple unique keys across samples.
+    const uniqueKeys = new Set<string>();
+    for (let seed = 0; seed < 20; seed++) {
+      const rng = createRng(seed);
+      const payload = generatePayload(TagCollection, rng, 0) as { tags: Record<string, { priority: string }> };
+      expect(() => assertPayload(TagCollection, payload)).not.toThrow();
+      Object.keys(payload.tags).forEach((key) => uniqueKeys.add(key));
+    }
+    // With diversified caseIndex, we should see at least 2 different enum values across 20 samples
+    expect(uniqueKeys.size).toBeGreaterThan(1);
   });
 });
 
