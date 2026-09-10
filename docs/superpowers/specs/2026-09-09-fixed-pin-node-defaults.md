@@ -1,6 +1,6 @@
 # `closure` renamed to `fixed`; a third shape, `pin`, for node-pinned input defaults
 
-Status: approved design, not yet implemented.
+Status: approved design, **paused before implementation** — same-day reconsideration chose to try spread-built edge variants first (`docs/design-history.md`, "`pin` reconsidered, same day"; `docs/open-questions.md`, "Partial input, partial node-pinned default"). This design stays valid as a fallback if that path doesn't reach every case; do not implement without re-confirming it's still wanted.
 
 ## Motivation
 

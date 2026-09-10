@@ -1,5 +1,7 @@
 # `fixed`/`pin` Implementation Plan
 
+> **PAUSED — do not execute without re-confirming first.** Same-day reconsideration chose to try spread-built edge variants for `CreateTodo` first (`docs/design-history.md`, "`pin` reconsidered, same day"). This plan (and its spec, `docs/superpowers/specs/2026-09-09-fixed-pin-node-defaults.md`) stays as a fallback design, not the current direction.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Rename `.node`'s `closure` key to `fixed` (pure rename, no behavior change to its existing `expected`/`literal` shapes), then add a third `fixed` shape, `pin`, that lets a node declare some of its input edge's fields as node-supplied rather than caller-supplied — closing the "partial input, partial node-pinned default" open question and letting `CreateTodo.node` stop requiring its caller to pass `is_complete`.
