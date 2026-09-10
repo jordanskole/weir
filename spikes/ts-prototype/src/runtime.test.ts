@@ -507,7 +507,7 @@ describe("runNetlist", () => {
         ],
         [
           "bake",
-          `export default function bake(payload) { return { title: payload.Dough.title, servings: payload.Dough.servings }; }`,
+          `export default function bake(payload) { return { title: payload.Dough.title, servings: payload.Dough.servings, done: false }; }`,
         ],
         ["cool", `export default function cool(payload) { return { ...payload, done: true }; }`],
       ] as const) {
@@ -532,6 +532,7 @@ describe("runNetlist", () => {
       expect(log.latest("BakedCookies", "thread-1")).toEqual({
         title: recipe.title,
         servings: recipe.servings,
+        done: false,
       });
       expect(log.latest("Cookies", "thread-1")).toEqual({
         title: recipe.title,

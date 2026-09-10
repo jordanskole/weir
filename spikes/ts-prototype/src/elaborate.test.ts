@@ -1216,6 +1216,16 @@ failing:
     expect(result.edges.Recipe!.fields.ingredients).toEqual({ many: result.edges.Ingredient });
     expect(result.edges.Failed_Dough_Oven).toBeDefined();
 
+    expect(result.edges.BakedCookies!.fields.title).toEqual(result.edges.Dough!.fields.title);
+    expect(result.edges.BakedCookies!.fields.servings).toEqual(result.edges.Dough!.fields.servings);
+    expect(result.edges.BakedCookies!.fields.done).toEqual({
+      type: "bool",
+      label: "Done",
+      description: "Whether the cookies have cooled enough to eat",
+    });
+    expect(result.edges.Cookies!.fields.title).toEqual(result.edges.Dough!.fields.title);
+    expect(result.edges.Cookies!.fields.done).toEqual({ literal: true });
+
     expect(result.wiring.origins).toEqual(["gatherIngredients"]);
     expect(result.wiring.feeds.gatherIngredients?.sort()).toEqual(["mix", "preheatOven"]);
     expect(result.wiring.feeds.mix).toEqual(["bake"]);
