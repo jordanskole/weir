@@ -81,7 +81,7 @@ export interface RunResult {
  * discriminant. `Failed<In>` is always exactly `{ input }` or
  * `{ input, reason }`; nothing else in this repo's edges collides.
  */
-function looksLikeFailed(result: unknown): result is Failed<InputSpec> {
+export function looksLikeFailed(result: unknown): result is Failed<InputSpec> {
   if (typeof result !== "object" || result === null || Array.isArray(result)) return false;
   const keys = Object.keys(result);
   if (!keys.includes("input")) return false;
