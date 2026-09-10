@@ -1,6 +1,6 @@
 # Sealed contract export, and black-box implementation metadata
 
-Status: approved design, not yet implemented.
+Status: implemented.
 
 ## Motivation
 
@@ -19,12 +19,15 @@ A pure function producing exactly what crosses the isolation boundary to an impl
 ```ts
 // spikes/ts-prototype/src/contract.ts
 
+/** A compound / many-of-compound field embeds the nested edge in full, never a bare name. */
+export type ContractField = NetlistField | ContractEdgeShape | { many: ContractEdgeShape };
+
 export interface ContractEdgeShape {
   name: string;
   label: string;
   description: string;
   index?: string;
-  fields: Record<string, NetlistField>;
+  fields: Record<string, ContractField>;
 }
 
 export type ContractInputSpec =
@@ -44,6 +47,8 @@ export interface SealedContract {
   description?: string;
   examples?: NodeDecl["examples"];
   closure?: NodeDecl["closure"];
+  /** Present iff the node declares one — its presence means Fn takes `(payload, env)`. */
+  scope?: NodeDecl["scope"];
   /** Fn may always return this instead of `output` — Failed<In>'s real shape, docs/design.md §3. */
   failure: { input: ContractInputSpec; reason?: string };
 }
@@ -53,7 +58,11 @@ export function exportContract(node: NodeDecl): SealedContract;
 
 Mirrors `netlist.ts`'s existing `NetlistInputSpec`/`NetlistOutputSpec` tagging convention (bare / `{allOf}` / `{oneOf}` / `{many}`, presence-of-key as discriminant, same idiom used everywhere else in this codebase) — except edges are embedded in full (`ContractEdgeShape`, real field definitions) rather than referenced by bare name, since an isolated agent has no other file to resolve a name against. `ContractInputSpec` deliberately has no `anyOf` branch: checked directly against `types.ts`, `InputSpec`'s real runtime type is only `{kind:"single"} | {kind:"allOf"}` — `anyOf` is pure `.node`-file authoring sugar, fully desugared into separate single-input `NodeDecl`s before elaboration ever produces a real one (`elaborate.ts`'s `parseAnyOfNodeFile`), so a `NodeDecl` passed to `exportContract` can never carry it. Including an unreachable branch here would be the same category of defect flagged earlier this session (a shape nothing can ever produce), not a completeness gesture.
 
-**Reuses `netlist.ts`'s field-serialization logic rather than duplicating it.** `netlist.ts`'s private `serializeField` (the `many`/compound-edge/literal/scalar discriminant) is exported and reused directly; `contract.ts` adds its own small `edgeShape(edge: AnyEdgeDef): ContractEdgeShape` that calls it per-field and assembles the wrapper — deliberately not `NetlistEdge` (which requires a `schemaHash`, irrelevant here: staleness tracking has nothing to do with what an isolated agent needs to write correct code).
+**Embedding is recursive, all the way down.** `contract.ts`'s own small `edgeShape(edge: AnyEdgeDef): ContractEdgeShape` walks each field and, on the same presence-of-key discriminant `netlist.ts` and `hash.ts` already use, calls *itself* for a compound field (`"fields" in value`) and for a `many`-of-compound field (`"many" in value` → `{ many: edgeShape(value.many) }`), so a nested edge appears in full at every depth. It is **not** enough to embed only the top-level edge: `netlist.ts` flattens a compound/`many` field to a bare name (`{ edge: "Ingredient" }` / `{ many: "Ingredient" }`) precisely because it also emits a top-level `Netlist.edges` registry to resolve that name against — `SealedContract` has no such registry, so the same flattening would hand an isolated agent a dangling reference, defeating the whole point. For a `many` field it's worse still: `types.ts`'s `Payload` makes such a field's payload `Record<string, PayloadOf<E>>` *keyed by the referenced edge's own declared `index`*, so without that edge's fields the agent cannot even construct the right keys. Like `hash.ts`'s `fingerprint`, which recurses through nested edges the identical way, `edgeShape` assumes edge definitions are acyclic and carries no cycle guard.
+
+**Reuses `netlist.ts`'s field-serialization logic rather than duplicating it — for the leaf case.** `netlist.ts`'s private `serializeField` is exported and reused directly, but only where it is still the right answer: the genuinely scalar/literal field, which passes through unchanged. Compound and `many` fields recurse into `edgeShape` instead of delegating. `edgeShape` assembles a `ContractEdgeShape` wrapper — deliberately not `NetlistEdge` (which requires a `schemaHash`, irrelevant here: staleness tracking has nothing to do with what an isolated agent needs to write correct code).
+
+`scope` (`NodeDecl`/`NetlistNode`'s `scope?: string[]`, e.g. `"read:Identity:sub"`) rides along when declared: its presence is exactly what tells an isolated agent that this node's `Fn` takes a second `env` parameter and reads narrowed `Envelope.identity` claims from it, rather than the one-argument `Fn(payload)`. Omitted entirely when absent, same as `description`/`examples`/`closure`.
 
 `failure`'s `input` reuses the same edge-shape computation as the contract's own `input` — `Failed<In>`'s real type (`types.ts`) is `{ input: InputPayload<In>; reason?: string }`, so this is the same shape, not a new concept, just made explicit in the JSON an agent actually receives rather than left to prose.
 
@@ -73,6 +82,7 @@ export function computeImplementationMetadata(source: string): ImplementationMet
 ```
 
 - `lines`: `source.trim().split("\n").length`.
+- Unparseable source is refused, not scored: `ts.createSourceFile` never throws — it error-recovers and stashes parse diagnostics on the returned `SourceFile` — so a guard checks those and throws `Cannot compute metadata: source has N parse error(s).` rather than returning a number indistinguishable from a clean straight-line function's.
 - `complexity`: McCabe cyclomatic complexity — starts at 1, walks the parsed AST (`ts.createSourceFile`), increments once per decision point: `IfStatement`, `ForStatement`/`ForInStatement`/`ForOfStatement`, `WhileStatement`/`DoStatement`, each non-default `CaseClause`, `CatchClause`, `ConditionalExpression` (ternary), and each `&&`/`||` `BinaryExpression`. Standard, same definition the CRAP post's own CC ceiling and most JS/TS complexity linters use.
 
 **Deliberately not a CRAP-style composite score.** CRAP's own formula needs a coverage term (`(1 − coverage)³`); nothing in this spike instruments coverage, and computing a composite against an assumed-zero coverage would make every function score as if untested and complex — worse than useless, actively misleading. Raw facts only. A composite score is real, but separate, follow-on work once coverage data actually exists — not something to fake now to look more finished.
@@ -83,7 +93,7 @@ export function computeImplementationMetadata(source: string): ImplementationMet
 
 ### Both exported from `index.ts`
 
-`exportContract`, `SealedContract` and friends, `computeImplementationMetadata`, `ImplementationMetadata` — matching the precedent already corrected once this session (`LiteralFieldDef`/`defineLiteral` needed adding to `index.ts` to match their exported siblings `FieldDef`/`defineField`). These are meant to be real public API for whatever dispatches an isolated agent eventually, not internal-only helpers.
+`exportContract`, `SealedContract` and friends, `computeImplementationMetadata`, `ImplementationMetadata` — matching the precedent already corrected once this session (`LiteralFieldDef`/`defineLiteral` needed adding to `index.ts` to match their exported siblings `FieldDef`/`defineField`). These are meant to be real public API for whatever dispatches an isolated agent eventually, not internal-only helpers. Same reasoning extends to `exportContract`'s own parameter type: `NodeDecl` — plus `InputSpec`, `AnyEdgeDef` and `Failed`, which the contract's shape refers to — are re-exported from `index.ts` too, so a consumer can name the type of what it passes in and what comes back.
 
 ## Explicitly out of scope
 
