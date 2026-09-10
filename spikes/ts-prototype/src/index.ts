@@ -50,3 +50,8 @@ export type {
 
 export { computeImplementationMetadata } from "./metadata.js";
 export type { ImplementationMetadata } from "./metadata.js";
+
+export { generateInputCases, generatePayload } from "./generate.js";
+
+export { fuzzNode } from "./fuzz.js";
+export type { FuzzReport } from "./fuzz.js";
