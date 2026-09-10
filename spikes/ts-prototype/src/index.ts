@@ -34,3 +34,9 @@ export type {
   NetlistOutputSpec,
   NetlistTopology,
 } from "./netlist.js";
+
+export { exportContract } from "./contract.js";
+export type { ContractEdgeShape, ContractInputSpec, ContractOutputSpec, SealedContract } from "./contract.js";
+
+export { computeImplementationMetadata } from "./metadata.js";
+export type { ImplementationMetadata } from "./metadata.js";
