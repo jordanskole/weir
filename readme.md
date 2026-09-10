@@ -79,6 +79,7 @@ examples:
       BakedCookies:
         title: "Chocolate Chip Cookies"
         servings: 24
+        done: false
 ```
 
 `input: allOf:` is a readiness condition, not a wire. The runtime calls the function once both a `Dough` and an `Oven` exist for this correlation id, however many invocations separate their arrival — here, whichever of mixing and preheating finishes second. No join, no accumulator, no ordering requirement.

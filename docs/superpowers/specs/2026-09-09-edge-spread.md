@@ -1,6 +1,6 @@
 # Edge spread: `...Name` inside a `.edge`'s `fields:`
 
-Status: approved design, not yet implemented.
+Status: implemented.
 
 ## Motivation
 

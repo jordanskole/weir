@@ -34,13 +34,24 @@ start) that happens not to transform the payload, the same shape `todo-list`'s `
 established as legitimate.
 
 Every stage past that gets its own edge name — `Dough`, `Oven`, then `BakedCookies`, then `Cookies`
-— rather than reusing `Recipe` throughout. `title`/`servings` carry forward unchanged through the
-`mix` branch; only the name changes. That's deliberate: it's the same dish, but a different
+— rather than reusing `Recipe` throughout. That's deliberate: it's the same dish, but a different
 real-world state, and `types.ts`'s own header comment names exactly this case — "two edges with
 identical shape but distinct meaning... a name exists so that refinement... can be expressed when a
 decision needs to survive into the next node's type." `ingredients` is dropped after `mix` on
 purpose — once the dough is mixed, the individual ingredients aren't distinguishable or useful
 anymore.
+
+`Dough → BakedCookies → Cookies` is a real spread chain, not three hand-typed edges that happen to
+agree (`docs/superpowers/specs/2026-09-09-edge-spread.md`). `Dough.edge` declares `title`/`servings`
+once; `BakedCookies.edge` carries them forward with `fields: { "...Dough":, done: {type: bool, ...} }`
+— `...Dough:` (the empty-value spread key) copies `Dough`'s fields in whole, and `done` is added as a
+new, real, mutable bool nothing upstream had. `Cookies.edge` spreads `BakedCookies` the same way and
+pins `done` to `true` (`fields: { "...BakedCookies":, done: true }`) — this stage is finished, by
+definition, so `done` stops being a bool a node could set incorrectly and becomes a `literal` field:
+`cool.node`'s output is asserted against `done: true` exactly, never a `false` that slipped through.
+`title`/`servings` never get retyped or re-declared past `Dough` — spread is what makes "carries
+forward unchanged" actually mean *the same field definition*, not two definitions that happen to
+match today and could silently drift apart later.
 
 `ingredients: many(Ingredient)` on `Recipe` is the one place this example uses `many` — not chosen to
 demonstrate the mechanic, it's just the honest way to model a recipe's ingredient list, the same as
