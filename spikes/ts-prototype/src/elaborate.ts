@@ -118,6 +118,9 @@ export function parseFieldFile(yamlText: string): FieldDef {
  */
 export type FieldResolver = (name: string) => FieldDef | AnyEdgeDef;
 
+/** Matches a `.edge` file's `...Name` spread key (docs/superpowers/specs/2026-09-09-edge-spread.md), capturing the source edge's name. */
+const SPREAD_KEY = /^\.\.\.(.+)$/;
+
 /** Parse an `.edge` file's YAML text (and its filename-derived name) into a validated EdgeDef. */
 export function parseEdgeFile(yamlText: string, name: string, resolveField: FieldResolver): AnyEdgeDef {
   const raw = parse(yamlText) as Record<string, unknown>;
@@ -131,8 +134,29 @@ export function parseEdgeFile(yamlText: string, name: string, resolveField: Fiel
     fields?: Record<string, unknown>;
   };
 
+  const fieldEntries = Object.entries(fields ?? {});
+  const spreadEntries = fieldEntries.filter(([key]) => SPREAD_KEY.test(key));
+  if (spreadEntries.length > 1) {
+    throw new Error(
+      `"fields" may spread from at most one source, found ${spreadEntries.length}: ${spreadEntries.map(([key]) => key).join(", ")}.`,
+    );
+  }
+
   const resolvedFields: Record<string, FieldDef | LiteralFieldDef | AnyEdgeDef | ManyEdgeDef> = {};
-  for (const [key, value] of Object.entries(fields ?? {})) {
+  let spreadIndex: string | undefined;
+  if (spreadEntries.length === 1) {
+    const [spreadKey] = spreadEntries[0]!;
+    const sourceName = spreadKey.match(SPREAD_KEY)![1]!;
+    const source = resolveField(sourceName);
+    if (!("fields" in source)) {
+      throw new Error(`"...${sourceName}" references a field, not an edge — spread is for edges only.`);
+    }
+    Object.assign(resolvedFields, source.fields);
+    spreadIndex = source.index;
+  }
+
+  for (const [key, value] of fieldEntries) {
+    if (SPREAD_KEY.test(key)) continue;
     if (typeof value === "string") {
       resolvedFields[key] = resolveField(value);
     } else if (typeof value === "boolean") {
@@ -159,7 +183,7 @@ export function parseEdgeFile(yamlText: string, name: string, resolveField: Fiel
     name,
     label: label as string,
     description: description as string,
-    ...(typeof index === "string" && { index }),
+    ...(typeof index === "string" ? { index } : spreadIndex !== undefined && { index: spreadIndex }),
     fields: resolvedFields,
   });
 }

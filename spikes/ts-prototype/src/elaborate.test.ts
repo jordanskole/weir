@@ -275,6 +275,108 @@ fields:
       description: "Always true on a CompletedTodo",
     });
   });
+
+  it("spreads a source edge's fields, then applies local overrides", () => {
+    const yaml = `
+label: Baked Cookies
+description: The dough, baked
+fields:
+  "...Dough":
+  done:
+    type: bool
+    label: Done
+    description: Whether the cookies have cooled enough to eat
+`;
+    const doughEdge: AnyEdgeDef = {
+      name: "Dough",
+      label: "Dough",
+      description: "d",
+      fields: {
+        title: { type: "utf8", label: "Title", description: "d", nullable: false },
+        servings: { type: "uint8", label: "Servings", description: "d", nullable: false },
+      },
+    };
+    const edge = parseEdgeFile(yaml, "BakedCookies", (referencedName) => {
+      expect(referencedName).toBe("Dough");
+      return doughEdge;
+    });
+    expect(edge.fields.title).toEqual(doughEdge.fields.title);
+    expect(edge.fields.servings).toEqual(doughEdge.fields.servings);
+    expect(edge.fields.done).toEqual({
+      type: "bool",
+      label: "Done",
+      description: "Whether the cookies have cooled enough to eat",
+    });
+  });
+
+  it("lets a local field override a spread-sourced field of the same name, whole-value replacement", () => {
+    const yaml = `
+label: Cookies
+description: The finished, cooled cookies
+fields:
+  "...BakedCookies":
+  done: true
+`;
+    const bakedCookiesEdge: AnyEdgeDef = {
+      name: "BakedCookies",
+      label: "Baked Cookies",
+      description: "d",
+      fields: {
+        title: { type: "utf8", label: "Title", description: "d", nullable: false },
+        done: { type: "bool", label: "Done", description: "d" },
+      },
+    };
+    const edge = parseEdgeFile(yaml, "Cookies", () => bakedCookiesEdge);
+    expect(edge.fields.title).toEqual(bakedCookiesEdge.fields.title);
+    expect(edge.fields.done).toEqual({ literal: true });
+  });
+
+  it("inherits index from the spread source when not locally declared", () => {
+    const yaml = `
+label: CompletedTodo
+description: A todo that's been completed
+fields:
+  "...Todo":
+  is_complete: true
+`;
+    const todoEdge: AnyEdgeDef = {
+      name: "Todo",
+      label: "Todo",
+      description: "d",
+      index: "id",
+      fields: {
+        id: { type: "utf8", label: "ID", description: "d", nullable: false },
+      },
+    };
+    const edge = parseEdgeFile(yaml, "CompletedTodo", () => todoEdge);
+    expect(edge.index).toBe("id");
+  });
+
+  it("rejects more than one spread key in the same fields map", () => {
+    const yaml = `
+label: X
+description: d
+fields:
+  "...A":
+  "...B":
+`;
+    expect(() =>
+      parseEdgeFile(yaml, "X", () => {
+        throw new Error("unreachable");
+      }),
+    ).toThrow(/at most one/i);
+  });
+
+  it("rejects a spread source that resolves to a field, not an edge", () => {
+    const yaml = `
+label: X
+description: d
+fields:
+  "...title":
+`;
+    const titleField = { type: "utf8" as const, label: "Title", description: "d", nullable: false as const };
+    expect(() => parseEdgeFile(yaml, "X", () => titleField)).toThrow(/spread is for edges only/i);
+  });
 });
 
 describe("parseNodeFile", () => {
