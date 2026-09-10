@@ -1,10 +1,10 @@
 label: Create Todo
 description: Creates a new task
-input: Todo
+input: NewTodo
 output: Todo
 examples:
   - given:
-      Todo:
+      NewTodo:
         id: "todo-1"
         title: "Buy milk and eggs"
         description: "Get 2% milk from the store"

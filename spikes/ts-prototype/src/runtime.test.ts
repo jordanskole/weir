@@ -445,6 +445,38 @@ describe("runNetlist", () => {
     }
   });
 
+  it("real: CreateTodo rejects a caller trying to set is_complete — NewTodo's literal pin is enforced at invocation", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "weir-runtime-"));
+    try {
+      const raw = await elaborate(TODO_LIST_SRC);
+
+      for (const [name, fn] of [
+        ["CreateTodo", `export default function CreateTodo(payload) { return payload; }`],
+        ["CompleteTodo", `export default function CompleteTodo(payload) { return { ...payload, is_complete: true }; }`],
+        ["AddTodoToList", `export default function AddTodoToList(payload) { return payload.TodoList; }`],
+      ] as const) {
+        const hash = (await hashNode(raw.nodes[name]!)).short;
+        await mkdir(join(dir, name), { recursive: true });
+        await writeFile(join(dir, name, `${hash}.ts`), `${fn}\n`, "utf8");
+      }
+
+      const program = await elaborateWithImplementations(TODO_LIST_SRC, dir);
+      const log = new InMemoryLog();
+      const attempt = { id: "todo-1", title: "Buy milk and eggs", description: null, is_complete: true };
+
+      const result = await runNetlist(program, log, "thread-1", { CreateTodo: attempt });
+
+      expect(result.failures).toEqual([]);
+      expect(log.latest("Failed_NewTodo", "thread-1")).toEqual({
+        input: attempt,
+        reason: expect.stringMatching(/is_complete is pinned to false, got boolean/),
+      });
+      expect(log.latest("Todo", "thread-1")).toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("real: AddTodoToList fails on a malformed Todo — allOf-input Failed<In> routes to Failed_Todo_TodoList", async () => {
     const dir = await mkdtemp(join(tmpdir(), "weir-runtime-"));
     try {

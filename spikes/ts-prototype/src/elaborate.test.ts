@@ -1070,6 +1070,12 @@ output: Ghost
     });
     expect(result.nodes.AddTodoToList!.output).toEqual({ kind: "single", edge: result.edges.TodoList });
     expect(result.edges.Failed_Todo_TodoList).toBeDefined();
+
+    expect(result.nodes.CreateTodo!.input).toEqual({ kind: "single", edge: result.edges.NewTodo });
+    expect(result.edges.NewTodo!.fields.id).toEqual(result.edges.Todo!.fields.id);
+    expect(result.edges.NewTodo!.fields.title).toEqual(result.edges.Todo!.fields.title);
+    expect(result.edges.NewTodo!.fields.description).toEqual(result.edges.Todo!.fields.description);
+    expect(result.edges.NewTodo!.fields.is_complete).toEqual({ literal: false });
   });
 
   it("loads a .topology file, validating references against declared .node files", async () => {
