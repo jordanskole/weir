@@ -1,6 +1,6 @@
 # Input `oneOf` becomes `anyOf`
 
-Status: approved design, not yet implemented.
+Status: implemented.
 Follows: `docs/superpowers/specs/2026-08-31-any-desugaring-design.md`, which built input `oneOf` (as `any`'s replacement) earlier the same day. This spec corrects that naming, not the mechanism.
 
 ## Motivation

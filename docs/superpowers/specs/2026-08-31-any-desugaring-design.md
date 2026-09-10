@@ -1,6 +1,6 @@
 # `any` becomes `oneOf`: authoring sugar over single-input nodes, not a runtime primitive
 
-Status: approved design, not yet implemented.
+Status: implemented.
 Supersedes: parts of `6d2558c` ("Build any as InputSpec's coproduct-shaped sibling to every"), which built `any` as a real runtime `InputSpec` kind.
 
 ## Motivation
