@@ -7,7 +7,7 @@
  */
 
 import { INTEGER_RANGES } from "./define.js";
-import type { FieldDef, LiteralFieldDef, ScalarType } from "./types.js";
+import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ScalarType } from "./types.js";
 
 export type Rng = () => number;
 
@@ -128,4 +128,64 @@ export function generateFieldValue(
   if (field.type === "utf8") return generateStringValue(fieldKey, field, rng, caseIndex);
 
   return generateNumericValue(field, rng, caseIndex);
+}
+
+function generateManyValue(edge: AnyEdgeDef, rng: Rng, caseIndex: number): Record<string, unknown> {
+  if (edge.index === undefined) {
+    throw new Error(`generate: "${edge.name}" is used as a many-collection but declares no index.`);
+  }
+  const count = randomInt(rng, 0, 3);
+  const collection: Record<string, unknown> = {};
+  for (let i = 0; i < count; i++) {
+    const entry = generatePayload(edge, rng, caseIndex);
+    const key = String(entry[edge.index]);
+    collection[key] = entry;
+  }
+  return collection;
+}
+
+/**
+ * Generates one full payload for `edge`, recursing into compound (nested
+ * AnyEdgeDef) and many fields — the same three-way discriminant
+ * assertPayload/hash.ts's fingerprint() already use ("many" in field /
+ * "fields" in field / scalar-or-literal), applied here to generate rather
+ * than validate.
+ */
+export function generatePayload(edge: AnyEdgeDef, rng: Rng, caseIndex: number): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, fieldDef] of Object.entries(edge.fields)) {
+    if ("many" in fieldDef) {
+      result[key] = generateManyValue(fieldDef.many, rng, caseIndex);
+      continue;
+    }
+    if ("fields" in fieldDef) {
+      result[key] = generatePayload(fieldDef, rng, caseIndex);
+      continue;
+    }
+    result[key] = generateFieldValue(key, fieldDef, rng, caseIndex);
+  }
+  return result;
+}
+
+/**
+ * The entry point a fuzz harness calls: `count` generated cases for a
+ * node's declared InputSpec. `single` generates a payload per case;
+ * `allOf` generates a bag keyed by edge name per case, matching
+ * InputPayload's own allOf shape (types.ts).
+ */
+export function generateInputCases(input: InputSpec, seed: number, count: number): unknown[] {
+  const rng = createRng(seed);
+  const cases: unknown[] = [];
+  for (let i = 0; i < count; i++) {
+    if (input.kind === "single") {
+      cases.push(generatePayload(input.edge, rng, i));
+    } else {
+      const bag: Record<string, unknown> = {};
+      for (const edge of input.edges) {
+        bag[edge.name] = generatePayload(edge, rng, i);
+      }
+      cases.push(bag);
+    }
+  }
+  return cases;
 }

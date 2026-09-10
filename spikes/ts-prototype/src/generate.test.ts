@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { createRng, generateFieldValue } from "./generate.js";
-import type { FieldDef, LiteralFieldDef } from "./types.js";
+import { createRng, generateFieldValue, generateInputCases, generatePayload } from "./generate.js";
+import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef } from "./types.js";
+import { assertPayload } from "./membrane.js";
 
 const ageField: FieldDef<"uint8", false> = {
   type: "uint8",
@@ -170,5 +171,82 @@ describe("generateFieldValue", () => {
       expect(value).toBeGreaterThanOrEqual(5);
       expect(value).toBeLessThanOrEqual(6);
     }
+  });
+});
+
+const Person: AnyEdgeDef = {
+  name: "Person",
+  label: "Person",
+  description: "A person",
+  fields: {
+    age: ageField,
+    name: nameField,
+  },
+};
+
+const Todo: AnyEdgeDef = {
+  name: "Todo",
+  label: "Todo",
+  description: "A task",
+  index: "id",
+  fields: {
+    id: { type: "utf8", label: "ID", description: "d", nullable: false, validations: { minLength: 1, maxLength: 8 } },
+    is_complete: doneField,
+  },
+};
+
+const TodoList: AnyEdgeDef = {
+  name: "TodoList",
+  label: "Todo List",
+  description: "A list of todos",
+  fields: {
+    title: nameField,
+    todos: { many: Todo },
+  },
+};
+
+describe("generatePayload", () => {
+  it("generates a payload that passes assertPayload against its own edge", () => {
+    const rng = createRng(10);
+    for (let i = 0; i < 20; i++) {
+      const payload = generatePayload(Person, rng, i);
+      expect(() => assertPayload(Person, payload)).not.toThrow();
+    }
+  });
+
+  it("recurses into a many field, producing a collection keyed by the referenced edge's index", () => {
+    const rng = createRng(11);
+    const payload = generatePayload(TodoList, rng, 5) as { todos: Record<string, { id: string }> };
+    expect(() => assertPayload(TodoList, payload)).not.toThrow();
+    for (const [key, todo] of Object.entries(payload.todos)) {
+      expect(todo.id).toBe(key);
+    }
+  });
+});
+
+describe("generateInputCases", () => {
+  it("generates `count` valid payloads for a single-kind InputSpec", () => {
+    const input: InputSpec = { kind: "single", edge: Person };
+    const cases = generateInputCases(input, 20, 15);
+    expect(cases).toHaveLength(15);
+    for (const c of cases) {
+      expect(() => assertPayload(Person, c)).not.toThrow();
+    }
+  });
+
+  it("generates `count` bags keyed by edge name for an allOf-kind InputSpec", () => {
+    const input: InputSpec = { kind: "allOf", edges: [TodoList, Todo] };
+    const cases = generateInputCases(input, 21, 10) as Record<string, unknown>[];
+    expect(cases).toHaveLength(10);
+    for (const bag of cases) {
+      expect(Object.keys(bag).sort()).toEqual(["Todo", "TodoList"]);
+      expect(() => assertPayload(TodoList, bag.TodoList)).not.toThrow();
+      expect(() => assertPayload(Todo, bag.Todo)).not.toThrow();
+    }
+  });
+
+  it("is deterministic: the same seed produces the same cases", () => {
+    const input: InputSpec = { kind: "single", edge: Person };
+    expect(generateInputCases(input, 99, 5)).toEqual(generateInputCases(input, 99, 5));
   });
 });
