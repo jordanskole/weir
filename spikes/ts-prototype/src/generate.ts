@@ -50,9 +50,13 @@ function generateNumericValue(field: FieldDef, rng: Rng, caseIndex: number): num
   const [min, max] = numericBounds(field);
   const boundaries = Array.from(
     new Set(
-      [min, max, min + 1, max - 1, min <= 0 && 0 <= max ? 0 : undefined].filter(
-        (v): v is number => v !== undefined,
-      ),
+      [
+        min,
+        max,
+        min + 1 <= max ? min + 1 : undefined,
+        max - 1 >= min ? max - 1 : undefined,
+        min <= 0 && 0 <= max ? 0 : undefined,
+      ].filter((v): v is number => v !== undefined),
     ),
   );
   if (caseIndex < boundaries.length) return boundaries[caseIndex];
@@ -111,7 +115,15 @@ export function generateFieldValue(
 
   if (field.type === "bool") return caseIndex % 2 === 0;
 
-  if (field.type === "datetime") return generateDatetimeValue(rng, caseIndex);
+  if (field.type === "datetime") {
+    const v = field.validations as { pattern?: string } | undefined;
+    if (v?.pattern !== undefined) {
+      throw new Error(
+        `generate: field "${fieldKey}" declares a pattern — generating strings that satisfy an arbitrary regex isn't supported (docs/superpowers/specs/2026-09-10-generator-and-fuzz-harness.md).`,
+      );
+    }
+    return generateDatetimeValue(rng, caseIndex);
+  }
 
   if (field.type === "utf8") return generateStringValue(fieldKey, field, rng, caseIndex);
 

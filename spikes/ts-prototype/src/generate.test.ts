@@ -49,6 +49,30 @@ const codeField: FieldDef<"utf8", false> = {
   validations: { pattern: "^[A-Z]{3}$" },
 };
 
+const dateWithPatternField: FieldDef<"datetime", false> = {
+  type: "datetime",
+  label: "Timestamp",
+  description: "A timestamp with pattern",
+  nullable: false,
+  validations: { pattern: "^2024" },
+};
+
+const tightRangeField: FieldDef<"uint8", false> = {
+  type: "uint8",
+  label: "Tight",
+  description: "A tight range",
+  nullable: false,
+  validations: { min: 5, max: 5 },
+};
+
+const narrowRangeField: FieldDef<"uint8", false> = {
+  type: "uint8",
+  label: "Narrow",
+  description: "A narrow range",
+  nullable: false,
+  validations: { min: 5, max: 6 },
+};
+
 describe("createRng", () => {
   it("is deterministic: the same seed produces the same sequence", () => {
     const a = createRng(7);
@@ -123,5 +147,28 @@ describe("generateFieldValue", () => {
   it("throws, naming the field, for a field declaring a pattern", () => {
     const rng = createRng(6);
     expect(() => generateFieldValue("code", codeField, rng, 0)).toThrow(/code/);
+  });
+
+  it("throws, naming the field, for a datetime field declaring a pattern", () => {
+    const rng = createRng(7);
+    expect(() => generateFieldValue("timestamp", dateWithPatternField, rng, 0)).toThrow(/timestamp/);
+  });
+
+  it("never generates values outside [min, max] when min === max", () => {
+    const rng = createRng(8);
+    for (let i = 0; i < 20; i++) {
+      const value = generateFieldValue("tight", tightRangeField, rng, i) as number;
+      expect(value).toBeGreaterThanOrEqual(5);
+      expect(value).toBeLessThanOrEqual(5);
+    }
+  });
+
+  it("never generates values outside [min, max] when min + 1 === max", () => {
+    const rng = createRng(9);
+    for (let i = 0; i < 20; i++) {
+      const value = generateFieldValue("narrow", narrowRangeField, rng, i) as number;
+      expect(value).toBeGreaterThanOrEqual(5);
+      expect(value).toBeLessThanOrEqual(6);
+    }
   });
 });
