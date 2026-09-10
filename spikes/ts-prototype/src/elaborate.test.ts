@@ -367,6 +367,21 @@ fields:
     ).toThrow(/at most one/i);
   });
 
+  it("rejects a spread key carrying a non-null value", () => {
+    const yaml = `
+label: Baked Cookies
+description: The dough, baked
+fields:
+  "...Dough": garbage
+  done: true
+`;
+    expect(() =>
+      parseEdgeFile(yaml, "BakedCookies", () => {
+        throw new Error("unreachable");
+      }),
+    ).toThrow(/must have no value \(null\)/i);
+  });
+
   it("rejects a spread source that resolves to a field, not an edge", () => {
     const yaml = `
 label: X

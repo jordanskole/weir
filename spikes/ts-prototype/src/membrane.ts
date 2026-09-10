@@ -48,6 +48,7 @@ import type {
   FieldDef,
   InputPayload,
   InputSpec,
+  LiteralFieldDef,
   NodeDecl,
   NodeDef,
   OutputResult,
@@ -116,14 +117,16 @@ function validationErrors(key: string, field: FieldDef, value: string | number |
  * Asserts an unknown value against an edge's declared fields — scalar
  * (type, nullability, and now `enumValues`/`validations` too — see
  * `validationErrors`), compound (a nested edge, asserted recursively
- * against its own fields), or many-of-compound (a collection, keyed by
+ * against its own fields), many-of-compound (a collection, keyed by
  * the referenced edge's own declared `index` field — never a bare array;
  * docs/design-history.md, "`many` is a collection, keyed by index, not an
- * array") — collecting every violation rather than stopping at the first,
- * so a caller sees the whole shape of what's wrong at once. Same
- * recursive discriminant ("many" in value / "fields" in value / else
- * scalar) as hash.ts's `fingerprint()`, one layer down from schema to
- * data. Throws immediately, not collected as a data error, if the
+ * array"), or literal (pinned to one exact constant, `LiteralFieldDef` —
+ * a payload value either matches it or doesn't, nothing else to check) —
+ * collecting every violation rather than stopping at the first, so a
+ * caller sees the whole shape of what's wrong at once. Same recursive
+ * discriminant ("many" in value / "fields" in value / "literal" in value
+ * / else scalar) as hash.ts's `fingerprint()`, one layer down from schema
+ * to data. Throws immediately, not collected as a data error, if the
  * referenced edge declares no `index` at all — that's a declaration bug,
  * not bad input data.
  */
@@ -174,6 +177,14 @@ export function assertPayload<E extends AnyEdgeDef>(edge: E, payload: unknown): 
         assertPayload(fieldDef, value);
       } catch (cause) {
         errors.push(`${key}: ${(cause as Error).message}`);
+      }
+      continue;
+    }
+
+    if ("literal" in fieldDef) {
+      const literalField = fieldDef as LiteralFieldDef;
+      if (value !== literalField.literal) {
+        errors.push(`${key} is pinned to ${literalField.literal}, got ${describeType(value)}`);
       }
       continue;
     }

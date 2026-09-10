@@ -225,6 +225,27 @@ describe("assertPayload — many fields", () => {
   });
 });
 
+describe("assertPayload — literal fields", () => {
+  const CompletedTodo = defineEdge({
+    name: "CompletedTodo",
+    label: "CompletedTodo",
+    description: "A todo that's been completed",
+    fields: {
+      is_complete: { literal: true },
+    },
+  });
+
+  it("accepts a payload matching the pinned literal value", () => {
+    expect(assertPayload(CompletedTodo, { is_complete: true })).toEqual({ is_complete: true });
+  });
+
+  it("rejects a payload whose value differs from the pinned literal, with a clear pinned-value error", () => {
+    expect(() => assertPayload(CompletedTodo, { is_complete: false })).toThrow(
+      /is_complete is pinned to true, got boolean/,
+    );
+  });
+});
+
 describe("assertPayload — validations", () => {
   const Todo = defineEdge({
     name: "Todo",

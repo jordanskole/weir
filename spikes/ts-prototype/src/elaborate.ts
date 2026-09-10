@@ -145,7 +145,10 @@ export function parseEdgeFile(yamlText: string, name: string, resolveField: Fiel
   const resolvedFields: Record<string, FieldDef | LiteralFieldDef | AnyEdgeDef | ManyEdgeDef> = {};
   let spreadIndex: string | undefined;
   if (spreadEntries.length === 1) {
-    const [spreadKey] = spreadEntries[0]!;
+    const [spreadKey, spreadValue] = spreadEntries[0]!;
+    if (spreadValue !== null && spreadValue !== undefined) {
+      throw new Error(`"${spreadKey}" must have no value (null), got ${typeof spreadValue}.`);
+    }
     const sourceName = spreadKey.match(SPREAD_KEY)![1]!;
     const source = resolveField(sourceName);
     if (!("fields" in source)) {
