@@ -67,7 +67,19 @@ function generateNumericValue(field: FieldDef, rng: Rng, caseIndex: number): num
 const MIN_DATETIME = Date.parse("2000-01-01T00:00:00.000Z");
 const MAX_DATETIME = Date.parse("2030-01-01T00:00:00.000Z");
 
-function generateDatetimeValue(rng: Rng, caseIndex: number): string {
+/** Every value `toISOString()` ever produces is exactly this many characters. */
+const ISO_8601_LENGTH = "2000-01-01T00:00:00.000Z".length;
+
+function generateDatetimeValue(fieldKey: string, field: FieldDef, rng: Rng, caseIndex: number): string {
+  const v = field.validations as { minLength?: number; maxLength?: number } | undefined;
+  if (
+    (v?.minLength !== undefined && v.minLength > ISO_8601_LENGTH) ||
+    (v?.maxLength !== undefined && v.maxLength < ISO_8601_LENGTH)
+  ) {
+    throw new Error(
+      `generate: field "${fieldKey}" declares minLength/maxLength that a ${ISO_8601_LENGTH}-character ISO-8601 datetime can never satisfy (docs/superpowers/specs/2026-09-10-generator-and-fuzz-harness.md).`,
+    );
+  }
   const boundaries = [MIN_DATETIME, MAX_DATETIME];
   const millis = caseIndex < boundaries.length ? boundaries[caseIndex] : randomInt(rng, MIN_DATETIME, MAX_DATETIME);
   return new Date(millis).toISOString();
@@ -122,7 +134,7 @@ export function generateFieldValue(
         `generate: field "${fieldKey}" declares a pattern — generating strings that satisfy an arbitrary regex isn't supported (docs/superpowers/specs/2026-09-10-generator-and-fuzz-harness.md).`,
       );
     }
-    return generateDatetimeValue(rng, caseIndex);
+    return generateDatetimeValue(fieldKey, field, rng, caseIndex);
   }
 
   if (field.type === "utf8") return generateStringValue(fieldKey, field, rng, caseIndex);

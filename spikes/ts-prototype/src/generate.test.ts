@@ -58,6 +58,14 @@ const dateWithPatternField: FieldDef<"datetime", false> = {
   validations: { pattern: "^2024" },
 };
 
+const dateWithUnsatisfiableLengthField: FieldDef<"datetime", false> = {
+  type: "datetime",
+  label: "Timestamp",
+  description: "A timestamp with an unsatisfiable maxLength",
+  nullable: false,
+  validations: { maxLength: 10 },
+};
+
 const tightRangeField: FieldDef<"uint8", false> = {
   type: "uint8",
   label: "Tight",
@@ -153,6 +161,11 @@ describe("generateFieldValue", () => {
   it("throws, naming the field, for a datetime field declaring a pattern", () => {
     const rng = createRng(7);
     expect(() => generateFieldValue("timestamp", dateWithPatternField, rng, 0)).toThrow(/timestamp/);
+  });
+
+  it("throws, naming the field, for a datetime field declaring a minLength/maxLength a 24-char ISO string can't satisfy", () => {
+    const rng = createRng(7);
+    expect(() => generateFieldValue("timestamp", dateWithUnsatisfiableLengthField, rng, 0)).toThrow(/timestamp/);
   });
 
   it("never generates values outside [min, max] when min === max", () => {

@@ -1,7 +1,20 @@
-import { describe, expect, it } from "vitest";
-import { allOf, defineEdge, defineField, defineNode, single } from "./define.js";
+import { describe, expect, it, vi } from "vitest";
+import { allOf, defineEdge, defineField, defineNode, many, single } from "./define.js";
 import { fuzzNode, isAcceptableResult, resultMatchesOutput } from "./fuzz.js";
+import * as generateModule from "./generate.js";
 import type { OutputSpec } from "./types.js";
+
+/**
+ * fuzzNode calls generateInputCases internally — to test the "generator
+ * produced an invalid input" defect path (Finding 1) without relying on a
+ * live generator bug (which Finding 2's fix closes off), this mocks
+ * generateInputCases for one test at a time via mockReturnValueOnce, always
+ * falling back to the real implementation otherwise.
+ */
+vi.mock("./generate.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./generate.js")>();
+  return { ...actual, generateInputCases: vi.fn(actual.generateInputCases) };
+});
 
 /**
  * Built with defineEdge/defineField, not a raw `: AnyEdgeDef`-annotated
@@ -158,5 +171,55 @@ describe("fuzzNode", () => {
     });
     const report = await fuzzNode(alwaysPasses);
     expect(report.total).toBe(100);
+  });
+
+  it("throws — rather than silently counting a pass — when a generated case is not valid input for the declared edge", async () => {
+    // The empirically-demonstrated false green (Finding 1): a broken Fn,
+    // fuzzed against generator output that never satisfies the declared
+    // input, must not report passed === total. generateInputCases is
+    // mocked here specifically because Finding 2's fix closes off the
+    // live trigger — this locks the defense-in-depth check in fuzzNode
+    // itself, independent of whether the generator currently has a bug.
+    const brokenFn = defineNode({
+      name: "brokenFn",
+      input: single(Person),
+      output: single(Person),
+      fn: () => ({ totally: "wrong" }) as unknown as { age: number },
+    });
+    vi.mocked(generateModule.generateInputCases).mockReturnValueOnce([{ age: "not a number" }]);
+    // Without Finding 1's fix, this would resolve with { total: 1, passed: 1, failures: [] } —
+    // membrane() rejecting the invalid generated payload at its own input boundary, silently
+    // counted as a pass, even though brokenFn's Fn never actually ran.
+    await expect(fuzzNode(brokenFn, { count: 1 })).rejects.toThrow(/generated case 0.*Person/s);
+  });
+
+  it("throws naming the edge, before running any case, when a many output's edge declares no index", async () => {
+    const NoIndexEdge = defineEdge({ name: "NoIndex", label: "NoIndex", description: "no index declared", fields: {} });
+    const badMany = defineNode({
+      name: "badMany",
+      input: single(Person),
+      output: many(NoIndexEdge),
+      fn: () => ({}),
+    });
+    await expect(fuzzNode(badMany, { count: 5 })).rejects.toThrow(/NoIndex/);
+  });
+
+  it("records an ordinary failure, rather than crashing, when Fn returns a circular result", async () => {
+    const circularFn = defineNode({
+      name: "circularFn",
+      input: single(Person),
+      output: single(Person),
+      fn: () => {
+        const garbage: Record<string, unknown> = { totally: "wrong" };
+        garbage.self = garbage;
+        return garbage as unknown as { age: number };
+      },
+    });
+    const report = await fuzzNode(circularFn, { count: 3 });
+    expect(report.passed).toBe(0);
+    expect(report.failures).toHaveLength(3);
+    for (const failure of report.failures) {
+      expect(typeof failure.error).toBe("string");
+    }
   });
 });

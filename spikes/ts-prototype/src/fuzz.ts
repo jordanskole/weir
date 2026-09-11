@@ -11,7 +11,7 @@ import { assertPayload, InMemoryLog, membrane } from "./membrane.js";
 import { generateInputCases } from "./generate.js";
 import { looksLikeFailed } from "./runtime.js";
 import type { Log } from "./membrane.js";
-import type { AnyEdgeDef, NodeDef, OutputSpec } from "./types.js";
+import type { AnyEdgeDef, InputSpec, NodeDef, OutputSpec } from "./types.js";
 
 /**
  * A bare `many`-output result is a keyed collection standing alone
@@ -86,6 +86,20 @@ function checkOutput(output: OutputSpec, result: unknown): void {
   }
 }
 
+/**
+ * `JSON.stringify` falls back to `String(value)` when it can't render `value`
+ * (a self-referential object from a broken Fn is the live case) — a harness
+ * whose job is "did this come back garbage" shouldn't itself be defeated by
+ * one class of garbage.
+ */
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 /** Whether `result` structurally satisfies `output`'s declared shape — never throws. */
 export function resultMatchesOutput(output: OutputSpec, result: unknown): boolean {
   try {
@@ -129,18 +143,70 @@ type AnySingleInvoke = (payload: unknown, correlationId: string) => Promise<unkn
 type AnyAllOfInvoke = (correlationId: string, log: Log) => Promise<unknown>;
 
 /**
+ * Validates one already-generated case against the declared InputSpec —
+ * the same check membrane() itself runs at its own input boundary
+ * (assertPayload, reused rather than reimplemented) — *before* handing the
+ * case to membrane(). A failure here is a generator defect, not a node
+ * outcome: it means generateInputCases produced a payload that doesn't
+ * even satisfy the contract it was generated from, which should never
+ * happen if the generator is correct. That's categorically different from
+ * Fn coming back with a bad result (a node problem, recorded in
+ * `failures`) — silently letting membrane() reject it at its own boundary
+ * would just count the rejection as a "pass" (Finding 1: a broken
+ * generator hiding a broken Fn behind a perfect-looking report), so this
+ * throws loudly instead, naming the case and the validation that failed.
+ */
+function assertGeneratedCase(input: InputSpec, generatedCase: unknown, caseIndex: number): void {
+  if (input.kind === "single") {
+    try {
+      assertPayload(input.edge, generatedCase);
+    } catch (cause) {
+      throw new Error(
+        `fuzzNode: generated case ${caseIndex} is not valid input for "${input.edge.name}" — this is a generator defect, not a node outcome: ${(cause as Error).message}`,
+      );
+    }
+    return;
+  }
+  const bag = generatedCase as Record<string, unknown>;
+  for (const edge of input.edges) {
+    try {
+      assertPayload(edge, bag[edge.name]);
+    } catch (cause) {
+      throw new Error(
+        `fuzzNode: generated case ${caseIndex} is not valid input for "${edge.name}" — this is a generator defect, not a node outcome: ${(cause as Error).message}`,
+      );
+    }
+  }
+}
+
+/**
  * Runs `count` generated inputs through `nodeDef`'s real Fn, via
  * membrane() — the same boundary a node actually runs behind in the
  * runtime, reused rather than reimplemented. A generated case's result is
  * a failure only if it matches neither the declared OutputSpec nor
  * Failed<In> (isAcceptableResult); a deliberate Failed<In> return, or a
  * caught Fn throw (membrane() converts every throw to Failed<In> — never
- * lets one escape), are both legitimate, never reported as failures.
+ * lets one escape), are both legitimate, never reported as failures. A
+ * generated case that membrane()'s own assertPayload would reject at the
+ * input boundary is not a legitimate outcome to count either way (see
+ * assertGeneratedCase) — it's thrown as a hard error instead, so it can
+ * never masquerade as a `passed` case Fn was never actually exercised for.
+ * Likewise a declared `many` output missing its edge's `index` is a
+ * declaration bug (assertManyOutput would throw on every single case
+ * otherwise, swallowed one-by-one into `failures`) — checked once, up
+ * front, the same "throw immediately, don't collect as data error"
+ * convention assertPayload already uses for the equivalent situation.
  */
 export async function fuzzNode(
   nodeDef: NodeDef,
   opts?: { seed?: number; count?: number },
 ): Promise<FuzzReport> {
+  if (nodeDef.output.kind === "many" && nodeDef.output.edge.index === undefined) {
+    throw new Error(
+      `fuzzNode: output edge "${nodeDef.output.edge.name}" declares no index — a many output needs a real key.`,
+    );
+  }
+
   const seed = opts?.seed ?? DEFAULT_SEED;
   const count = opts?.count ?? DEFAULT_COUNT;
   const cases = generateInputCases(nodeDef.input, seed, count);
@@ -151,16 +217,18 @@ export async function fuzzNode(
   if (nodeDef.input.kind === "single") {
     const invoke = membrane(nodeDef) as AnySingleInvoke;
     for (const [i, input] of cases.entries()) {
+      assertGeneratedCase(nodeDef.input, input, i);
       const result = await invoke(input, `fuzz-${i}`);
       if (isAcceptableResult(nodeDef.output, result)) {
         passed += 1;
       } else {
-        failures.push({ input, error: `result matched neither the declared output nor Failed<In>: ${JSON.stringify(result)}` });
+        failures.push({ input, error: `result matched neither the declared output nor Failed<In>: ${safeStringify(result)}` });
       }
     }
   } else {
     const invoke = membrane(nodeDef) as AnyAllOfInvoke;
     for (const [i, bagCase] of cases.entries()) {
+      assertGeneratedCase(nodeDef.input, bagCase, i);
       const correlationId = `fuzz-${i}`;
       const log = new InMemoryLog();
       const bag = bagCase as Record<string, unknown>;
@@ -171,7 +239,7 @@ export async function fuzzNode(
       if (isAcceptableResult(nodeDef.output, result)) {
         passed += 1;
       } else {
-        failures.push({ input: bagCase, error: `result matched neither the declared output nor Failed<In>: ${JSON.stringify(result)}` });
+        failures.push({ input: bagCase, error: `result matched neither the declared output nor Failed<In>: ${safeStringify(result)}` });
       }
     }
   }
