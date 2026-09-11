@@ -1,6 +1,6 @@
 # Property-test generation and a structural fuzz harness
 
-Status: designed.
+Status: implemented.
 
 ## Motivation
 
