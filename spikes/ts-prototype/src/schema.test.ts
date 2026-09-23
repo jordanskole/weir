@@ -771,17 +771,31 @@ describe("nodeSchema — properties", () => {
 });
 
 describe("generated schema artifacts stay in sync", () => {
-  // schemas/node.schema.json (repo root) is a *generated* file — the one
+  // schemas/*.json (repo root) are *generated* files — the ones
   // .vscode/settings.json actually points VS Code's YAML validator at.
-  // nodeSchema() can drift from it silently (nothing else in the suite
-  // reads the committed file), which is exactly what happened once already
-  // (docs/design-history.md, "the schema went stale" — properties/$defs
-  // landed in nodeSchema() without a re-run of `npm run generate:schemas`).
-  // This is the guard: it fails the moment the committed artifact stops
-  // matching its generator, so drift is caught here instead of silently in
-  // the editor.
-  it("schemas/node.schema.json matches nodeSchema()'s current output", () => {
-    const committed = JSON.parse(readFileSync(new URL("../../../schemas/node.schema.json", import.meta.url), "utf8"));
-    expect(committed).toEqual(nodeSchema());
-  });
+  // Each can drift from its generator silently, because nothing else in
+  // the suite reads the committed files; the editor is the only consumer,
+  // so staleness shows up as a false red squiggle rather than a test
+  // failure. That has now happened twice (docs/design-history.md), both
+  // times to node.schema.json.
+  //
+  // One case per artifact, driven off the same list scripts/generate-schemas.ts
+  // writes — so adding a fifth schema there without a matching entry here
+  // is the only way to reintroduce the gap, rather than it being the
+  // default for three of the four.
+  const artifacts: [name: string, generator: () => object][] = [
+    ["field", fieldSchema],
+    ["edge", edgeSchema],
+    ["node", nodeSchema],
+    ["topology", topologySchema],
+  ];
+
+  for (const [name, generator] of artifacts) {
+    it(`schemas/${name}.schema.json matches its generator's current output`, () => {
+      const committed = JSON.parse(
+        readFileSync(new URL(`../../../schemas/${name}.schema.json`, import.meta.url), "utf8"),
+      );
+      expect(committed).toEqual(generator());
+    });
+  }
 });
