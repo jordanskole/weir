@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { edgeSchema, fieldSchema, nodeSchema, topologySchema } from "./schema.js";
@@ -766,5 +767,21 @@ describe("nodeSchema — properties", () => {
 
   it("rejects an expression object carrying two operators at once", () => {
     expect(validate(validNode([{ ...increments, expr: { lit: 1, get: "input.age" } }]))).toBe(false);
+  });
+});
+
+describe("generated schema artifacts stay in sync", () => {
+  // schemas/node.schema.json (repo root) is a *generated* file — the one
+  // .vscode/settings.json actually points VS Code's YAML validator at.
+  // nodeSchema() can drift from it silently (nothing else in the suite
+  // reads the committed file), which is exactly what happened once already
+  // (docs/design-history.md, "the schema went stale" — properties/$defs
+  // landed in nodeSchema() without a re-run of `npm run generate:schemas`).
+  // This is the guard: it fails the moment the committed artifact stops
+  // matching its generator, so drift is caught here instead of silently in
+  // the editor.
+  it("schemas/node.schema.json matches nodeSchema()'s current output", () => {
+    const committed = JSON.parse(readFileSync(new URL("../../../schemas/node.schema.json", import.meta.url), "utf8"));
+    expect(committed).toEqual(nodeSchema());
   });
 });

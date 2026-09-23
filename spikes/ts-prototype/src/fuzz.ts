@@ -19,7 +19,7 @@
 import { generateInputCases } from "./generate.js";
 import { invokeWithInput } from "./invoke.js";
 import { assertPayload } from "./membrane.js";
-import { checkProperty } from "./property.js";
+import { checkProperty, PropertyPathError } from "./property.js";
 import { looksLikeFailed } from "./runtime.js";
 import type { AnyEdgeDef, InputSpec, NodeDef, OutputSpec } from "./types.js";
 
@@ -142,7 +142,16 @@ export interface FuzzReport {
    * guard exists to catch.
    */
   realOutputs: number;
-  propertyFailures: { property: string; input: unknown; output: unknown }[];
+  /**
+   * `error` is populated when the failure came from a `PropertyPathError`
+   * rooted at `output` — e.g. a `oneOf` branch whose payload doesn't carry
+   * the field a property references (Finding 3, final whole-branch review):
+   * that's candidate-controlled data disagreeing with the property's claim,
+   * so it's reported here rather than thrown. It's absent for an ordinary
+   * boolean-false violation, where the property evaluated cleanly and simply
+   * didn't hold.
+   */
+  propertyFailures: { property: string; input: unknown; output: unknown; error?: string }[];
 }
 
 const DEFAULT_SEED = 42;
@@ -238,8 +247,27 @@ export async function fuzzNode(
     if (resultMatchesOutput(nodeDef.output, result)) {
       realOutputs += 1;
       for (const property of properties) {
-        if (!checkProperty(property, { input, output: result })) {
-          propertyFailures.push({ property: property.name, input, output: result });
+        try {
+          if (!checkProperty(property, { input, output: result })) {
+            propertyFailures.push({ property: property.name, input, output: result });
+          }
+        } catch (cause) {
+          // An input-rooted PropertyPathError (or any other checkProperty
+          // throw) is still a declaration bug — the contract's own input
+          // shape doesn't back the path it names, so it stays a hard
+          // failure of fuzzNode itself, same as every other throw path here.
+          // An output-rooted one is different: `result` is candidate-
+          // controlled data (this is true even for a `single` output — see
+          // property.ts's header), so a path that doesn't resolve there
+          // means the candidate produced a shape the property's claim is
+          // false of. That's a violation to report, not a declaration to
+          // blame — reported here exactly like an ordinary boolean-false
+          // property failure, just with `error` naming why.
+          if (cause instanceof PropertyPathError && cause.root === "output") {
+            propertyFailures.push({ property: property.name, input, output: result, error: cause.message });
+            continue;
+          }
+          throw cause;
         }
       }
     }

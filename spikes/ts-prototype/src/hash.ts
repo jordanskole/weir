@@ -199,6 +199,29 @@ function fingerprintOutput(output: OutputSpec): OutputSpecFingerprint {
 }
 
 /**
+ * A duplicate property name makes two things ambiguous at once: this
+ * module's own sort (see `fingerprintProperties` below) and a violation
+ * report, which identifies a property by name alone. Exported so any other
+ * entry point that hands a node's properties to an outside consumer — today
+ * that's `contract.ts`'s `exportContract`, a separate public entry point
+ * `acceptImplementation` never reaches (it hashes first, so this guard
+ * already runs) but that can otherwise produce a `SealedContract` carrying
+ * the same unreadable duplicate — can reuse the identical check rather than
+ * re-implementing it.
+ */
+export function assertUniquePropertyNames(properties: PropertyDecl[]): void {
+  const seen = new Set<string>();
+  for (const property of properties) {
+    if (seen.has(property.name)) {
+      throw new Error(
+        `Duplicate property name "${property.name}" — property names must be unique within a node.`,
+      );
+    }
+    seen.add(property.name);
+  }
+}
+
+/**
  * Properties are sorted by name before fingerprinting: two nodes declaring
  * the same properties in a different order assert the same contract, so
  * reordering a list in a `.node` file must not invalidate a perfectly good
@@ -211,15 +234,7 @@ function fingerprintOutput(output: OutputSpec): OutputSpecFingerprint {
  * fingerprint it computes.
  */
 function fingerprintProperties(properties: PropertyDecl[]): { name: string; expr: PropertyExpr }[] {
-  const seen = new Set<string>();
-  for (const property of properties) {
-    if (seen.has(property.name)) {
-      throw new Error(
-        `Duplicate property name "${property.name}" — property names must be unique within a node.`,
-      );
-    }
-    seen.add(property.name);
-  }
+  assertUniquePropertyNames(properties);
 
   return [...properties]
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))

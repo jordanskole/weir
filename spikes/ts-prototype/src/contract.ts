@@ -1,10 +1,10 @@
 /**
  * The sealed contract an isolated implementing agent receives for one node
  * — everything Fn must structurally satisfy (full input/output edge
- * shapes, description, examples, closure, and the Failed<In> shape it may
- * always return instead of output), and nothing else: no topology, no
- * sibling nodes, no design rationale for why the ontology is shaped this
- * way (docs/superpowers/specs/2026-09-10-sealed-contract-and-implementation-metadata.md).
+ * shapes, description, examples, closure, properties, and the Failed<In>
+ * shape it may always return instead of output), and nothing else: no
+ * topology, no sibling nodes, no design rationale for why the ontology is
+ * shaped this way (docs/superpowers/specs/2026-09-10-sealed-contract-and-implementation-metadata.md).
  *
  * `scope`'s presence is what tells an isolated agent to write `Fn(payload,
  * env)` rather than `Fn(payload)` — a node declaring `scope` expects the
@@ -12,6 +12,7 @@
  * its scope names from it.
  */
 
+import { assertUniquePropertyNames } from "./hash.js";
 import { serializeField, type NetlistField } from "./netlist.js";
 import type { AnyEdgeDef, NodeDecl } from "./types.js";
 
@@ -100,7 +101,17 @@ function contractOutputSpec(output: NodeDecl["output"]): ContractOutputSpec {
   return { allOf: output.edges.map(edgeShape) };
 }
 
+/**
+ * `acceptImplementation` never reaches `exportContract` with a duplicate —
+ * it hashes the node first, and `hashNode` already refuses one — but this
+ * is a separate public entry point, callable directly on a `NodeDecl` that
+ * was never hashed. Reuses `hash.ts`'s own guard (the same check, not a
+ * re-implementation of it) rather than letting a sealed contract carry the
+ * exact unreadable-duplicate shape that guard exists to prevent.
+ */
 export function exportContract(node: NodeDecl): SealedContract {
+  if (node.properties !== undefined) assertUniquePropertyNames(node.properties);
+
   return {
     node: node.name,
     input: contractInputSpec(node.input),

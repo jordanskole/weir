@@ -161,6 +161,29 @@
           "additionalProperties": false
         }
       ]
+    },
+    "properties": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "expr"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "expr": {
+            "$ref": "#/$defs/propertyExpr"
+          }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "additionalProperties": false,
@@ -370,5 +393,224 @@
         }
       }
     }
-  ]
+  ],
+  "$defs": {
+    "propertyExpr": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": [
+            "lit"
+          ],
+          "properties": {
+            "lit": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "get"
+          ],
+          "properties": {
+            "get": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "eq"
+          ],
+          "properties": {
+            "eq": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/propertyExpr"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "ne"
+          ],
+          "properties": {
+            "ne": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/propertyExpr"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "lt"
+          ],
+          "properties": {
+            "lt": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/propertyExpr"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "lte"
+          ],
+          "properties": {
+            "lte": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/propertyExpr"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "gt"
+          ],
+          "properties": {
+            "gt": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/propertyExpr"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "gte"
+          ],
+          "properties": {
+            "gte": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/propertyExpr"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "add"
+          ],
+          "properties": {
+            "add": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/propertyExpr"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "sub"
+          ],
+          "properties": {
+            "sub": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/propertyExpr"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "implies"
+          ],
+          "properties": {
+            "implies": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/propertyExpr"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "and"
+          ],
+          "properties": {
+            "and": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/propertyExpr"
+              },
+              "minItems": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "or"
+          ],
+          "properties": {
+            "or": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/propertyExpr"
+              },
+              "minItems": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "not"
+          ],
+          "properties": {
+            "not": {
+              "$ref": "#/$defs/propertyExpr"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
 }

@@ -18,7 +18,7 @@
  */
 
 import { INTEGER_RANGES, UNSIGNED_TYPES } from "./define.js";
-import type { ScalarType } from "./types.js";
+import type { PropertyExpr, ScalarType } from "./types.js";
 
 const SCALAR_TYPES: ScalarType[] = [
   "utf8",
@@ -234,8 +234,35 @@ const EXPR_REF = { $ref: "#/$defs/propertyExpr" } as const;
 // Kept in lockstep with types.ts's PropertyExpr union member-by-member — see
 // this task's grammar-agreement note. Binary: exactly two operands. Variadic:
 // one or more. `lit`, `get`, and `not` each get their own shape below.
-const BINARY_OPS = ["eq", "ne", "lt", "lte", "gt", "gte", "add", "sub", "implies"];
-const VARIADIC_OPS = ["and", "or"];
+const BINARY_OPS = ["eq", "ne", "lt", "lte", "gt", "gte", "add", "sub", "implies"] as const;
+const VARIADIC_OPS = ["and", "or"] as const;
+
+/**
+ * A compile-time drift detector for the claim the comment above makes.
+ * `PropertyExpr` (types.ts) and this file's own operator lists are two
+ * independently-maintained descriptions of the same grammar — and unlike
+ * every other schema this file generates, nothing at runtime ever checks
+ * `nodeSchema()`'s output against real `.node` data (`elaborate.ts` never
+ * validates against it; this schema is editor tooling only). So drift
+ * between the two lists would otherwise be invisible until a human noticed
+ * the editor accepting or rejecting the wrong thing. This turns that into a
+ * type error `npm run typecheck` catches instead: `PropertyOp` is every key
+ * any `PropertyExpr` member actually has; `ALL_OPS` is every key this file
+ * declares; if either side names something the other doesn't, `_NoneMissing`
+ * or `_NoneExtra` stops being `never`, and the `_drift` assignment below
+ * fails to typecheck (`true` is no longer assignable to the resulting type).
+ */
+type PropertyOp = PropertyExpr extends infer T ? (T extends object ? keyof T : never) : never;
+const ALL_OPS = [...BINARY_OPS, ...VARIADIC_OPS, "lit", "get", "not"] as const;
+type _NoneMissing = Exclude<PropertyOp, (typeof ALL_OPS)[number]>;
+type _NoneExtra = Exclude<(typeof ALL_OPS)[number], PropertyOp>;
+// Not read at runtime — its only job is to exist and typecheck; see the
+// comment above. `[_NoneMissing, _NoneExtra] extends [never, never]` is
+// exactly the exhaustiveness claim this guard makes. `void`d rather than
+// left as a bare unused binding, in case a future lint config's
+// no-unused-vars would otherwise flag a leading-underscore const anyway.
+const _drift: [_NoneMissing, _NoneExtra] extends [never, never] ? true : never = true;
+void _drift;
 
 /**
  * A single node in the property-expression grammar (docs/design.md §6,
@@ -284,7 +311,7 @@ function taggedOne(valueSchema: object): object {
 
 /**
  * Generates a JSON Schema for a `.node` file — the contract only, per §10:
- * no `fn`, name/input/output/examples/closure. `input`/`output` reference
+ * no `fn`, name/input/output/examples/closure/properties. `input`/`output` reference
  * edges by bare name, resolved elsewhere (by the elaborator, not this
  * schema). `examples` is required and non-empty — per §6, examples are the
  * only thing that gives a same-shape-in-same-shape-out node (a "straight

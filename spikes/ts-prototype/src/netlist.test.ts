@@ -159,7 +159,7 @@ describe("serializeNetlist — nodes", () => {
     expect(netlist.nodes.spawnPets!.output).toEqual({ many: "Pet" });
   });
 
-  it("includes label/description/closure/examples/scope only when present", async () => {
+  it("includes label/description/closure/examples/scope/properties only when present", async () => {
     const bare = defineNode({ name: "bare", input: single(Person), output: single(Person), fn: (p) => p });
     const rich = defineNode({
       name: "rich",
@@ -170,6 +170,9 @@ describe("serializeNetlist — nodes", () => {
       closure: { literal: { age: 41 } },
       examples: [{ given: { age: 1 }, expect: { age: 1 } }],
       scope: ["read:Identity:sub"],
+      properties: [
+        { name: "age is non-negative", description: "Age never goes negative.", expr: { gte: [{ get: "output.age" }, { lit: 0 }] } },
+      ],
       fn: (p) => p,
     });
 
@@ -186,6 +189,9 @@ describe("serializeNetlist — nodes", () => {
       closure: { literal: { age: 41 } },
       examples: [{ given: { age: 1 }, expect: { age: 1 } }],
       scope: ["read:Identity:sub"],
+      properties: [
+        { name: "age is non-negative", description: "Age never goes negative.", expr: { gte: [{ get: "output.age" }, { lit: 0 }] } },
+      ],
     });
   });
 });

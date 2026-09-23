@@ -2,9 +2,9 @@
  * The elaborator: turns hand-authored `.field`/`.edge`/`.node`/`.topology`
  * YAML into validated `FieldDef`/`EdgeDef`/`NodeDecl`/`Wiring` objects
  * (docs/design.md §10). `.node` loading only resolves the contract —
- * `input`, `output`, `examples`, `closure` — never `fn`, which a data
- * format can't hold (§10) and stays the implementation tree's job, not
- * this one's.
+ * `input`, `output`, `examples`, `closure`, `properties` — never `fn`, which
+ * a data format can't hold (§10) and stays the implementation tree's job,
+ * not this one's.
  *
  * `.field`/`.edge`/`.node` files don't declare their own `name` — the
  * filename *is* the name (a standalone file has no parent map to be a key

@@ -163,6 +163,7 @@ properties:
 - **Properties referencing the envelope** (`env`), or identity, or anything outside `{input, output}`.
 - **Topology-level properties.** `design-history.md` notes that "a property test at a subgraph's boundary is already a topology test," which makes topology validation a downstream consumer of this mechanism. Genuinely promising, entirely separate work.
 - **Closing the `examples`-not-in-hash hole.** Named in §5 and recorded in `open-questions.md`; deserves its own decision.
+- **Raising the vacuity guard's threshold above one.** §6's guard only distinguishes zero real outputs from at least one — a candidate that produces a real output for exactly one generated case and `Failed<In>` for the rest still scores a clean sweep. `FuzzReport.realOutputs` is exposed precisely so a caller wanting a harder bar can gate on it without a change here; no fixed fraction is built into `accept.ts` itself, since any fraction would reject a legitimately selective node.
 
 ## Testing
 

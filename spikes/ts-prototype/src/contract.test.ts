@@ -343,4 +343,24 @@ describe("exportContract — properties", () => {
 
     expect(exportContract(node)).not.toHaveProperty("properties");
   });
+
+  it("throws on a duplicate property name (Finding 8) — the same unreadable-report shape hash.ts's guard already refuses", () => {
+    // exportContract is a separate public entry point from
+    // acceptImplementation, which hashes first and so never reaches this
+    // with a duplicate — called directly, it had no guard of its own.
+    const duplicated = {
+      name: "same name twice",
+      description: "d",
+      expr: { lit: true },
+    } as const;
+
+    const node: NodeDecl = {
+      name: "birthday",
+      input: { kind: "single", edge: Person },
+      output: { kind: "single", edge: Person },
+      properties: [duplicated, duplicated],
+    };
+
+    expect(() => exportContract(node)).toThrow(/Duplicate property name "same name twice"/);
+  });
 });

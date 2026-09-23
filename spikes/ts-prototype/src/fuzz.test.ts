@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { allOf, defineEdge, defineField, defineNode, many, single } from "./define.js";
+import { allOf, defineEdge, defineField, defineNode, many, oneOf, single } from "./define.js";
 import { fuzzNode, isAcceptableResult, resultMatchesOutput } from "./fuzz.js";
 import * as generateModule from "./generate.js";
 import type { OutputSpec } from "./types.js";
@@ -285,15 +285,120 @@ describe("fuzzNode — properties", () => {
     expect(report.passed).toBe(20);
   });
 
-  it("propagates a broken property expression as a declaration bug, not a violation", async () => {
+  // A broken property expression rooted at input (still a throw) and rooted
+  // at output (now a reported failure, not a throw) both moved to the
+  // "input vs. output" describe block below (Finding 3, final whole-branch
+  // review) — that split is exactly what this suite didn't cover before.
+});
+
+describe("fuzzNode — output-rooted property paths report, input-rooted still throw (Finding 3)", () => {
+  it("still throws when a property references an input path that doesn't resolve", async () => {
     const broken = defineNode({
       name: "broken",
       input: single(Person),
       output: single(Person),
-      properties: [{ name: "typo", description: "references a field that isn't there", expr: { get: "output.nope" } }],
+      properties: [{ name: "typo", description: "references an input field that isn't there", expr: { get: "input.nope" } }],
       fn: (payload) => ({ age: payload.age + 1 }),
     });
 
     await expect(fuzzNode(broken, { count: 5 })).rejects.toThrow(/typo/);
+  });
+
+  it("reports a property failure, not a throw, when a candidate's oneOf branch legitimately lacks the field an output-rooted property references", async () => {
+    // The exact probe that found Finding 3: a oneOf(Adult, Minor) node with
+    // a property that assumes every branch carries "age" — Minor doesn't.
+    // A reasonable candidate (Adult for adults, Minor for minors) used to
+    // crash acceptImplementation outright on the first Minor case instead of
+    // producing the checks-failed report an agent iterating toward
+    // acceptance needs.
+    const Adult = defineEdge({
+      name: "Adult",
+      label: "Adult",
+      description: "An adult classification",
+      fields: { age: defineField({ type: "uint8", label: "Age", description: "d", nullable: false }) },
+    });
+    const Minor = defineEdge({
+      name: "Minor",
+      label: "Minor",
+      description: "A minor classification — carries a guardian, not an age",
+      fields: { guardian: defineField({ type: "utf8", label: "Guardian", description: "d", nullable: false }) },
+    });
+
+    const classify = defineNode({
+      name: "classify",
+      input: single(Person),
+      output: oneOf(Adult, Minor),
+      properties: [
+        {
+          name: "adult age sane",
+          description: "An adult's age is non-negative.",
+          expr: { gte: [{ get: "output.payload.age" }, { lit: 0 }] },
+        },
+      ],
+      fn: (payload) =>
+        payload.age >= 18
+          ? { edge: "Adult" as const, payload: { age: payload.age } }
+          : { edge: "Minor" as const, payload: { guardian: "a guardian" } },
+    });
+
+    const report = await fuzzNode(classify, { count: 50 });
+
+    const unresolved = report.propertyFailures.filter((f) => f.error !== undefined);
+    expect(unresolved.length).toBeGreaterThan(0);
+    expect(unresolved[0]!.property).toBe("adult age sane");
+    expect(unresolved[0]!.error).toMatch(/does not resolve/);
+    expect(unresolved[0]!.error).toMatch(/"age"/);
+  });
+});
+
+describe("fuzzNode — integration seams for property paths (Finding 10)", () => {
+  it("evaluates a property referencing input.<EdgeName>.<field> on an allOf-input node", async () => {
+    const Pet = defineEdge({
+      name: "PetForAllOfPropertyTest",
+      label: "Pet",
+      description: "A second, unrelated edge for a real allOf combination",
+      fields: {
+        age: defineField({ type: "uint8", label: "Age", description: "d", nullable: false }),
+      },
+    });
+    const combine = defineNode({
+      name: "combineAges",
+      input: allOf(Person, Pet),
+      output: single(Person),
+      properties: [
+        {
+          name: "person's age from the bag is non-negative",
+          description: "input.Person.age resolves and is always sane.",
+          expr: { gte: [{ get: "input.Person.age" }, { lit: 0 }] },
+        },
+      ],
+      fn: () => ({ age: 1 }),
+    });
+
+    const report = await fuzzNode(combine, { count: 10 });
+    expect(report.propertyFailures).toEqual([]);
+    expect(report.realOutputs).toBe(10);
+  });
+
+  it("evaluates a property referencing output.edge — the oneOf tag itself — on a oneOf-output node", async () => {
+    const tagCheck = defineNode({
+      name: "tagCheck",
+      input: single(Person),
+      output: oneOf(Pass, Fail),
+      properties: [
+        {
+          name: "output is always tagged Pass or Fail",
+          description: "output.edge names one of the declared branches.",
+          expr: {
+            or: [{ eq: [{ get: "output.edge" }, { lit: "Pass" }] }, { eq: [{ get: "output.edge" }, { lit: "Fail" }] }],
+          },
+        },
+      ],
+      fn: () => ({ edge: "Pass" as const, payload: {} }),
+    });
+
+    const report = await fuzzNode(tagCheck, { count: 10 });
+    expect(report.propertyFailures).toEqual([]);
+    expect(report.realOutputs).toBe(10);
   });
 });

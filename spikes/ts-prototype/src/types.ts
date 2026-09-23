@@ -386,8 +386,13 @@ export type PropertyExpr =
   | { gte: [PropertyExpr, PropertyExpr] }
   | { add: [PropertyExpr, PropertyExpr] }
   | { sub: [PropertyExpr, PropertyExpr] }
-  | { and: PropertyExpr[] }
-  | { or: PropertyExpr[] }
+  // Non-empty by construction — `{ and: [] }`/`{ or: [] }` would be
+  // vacuously true/false, a property that asserts nothing while always
+  // passing. The generated JSON Schema already requires minItems: 1
+  // (schema.ts); this is the same rule at the type level, for code-defined
+  // nodes the schema never sees.
+  | { and: [PropertyExpr, ...PropertyExpr[]] }
+  | { or: [PropertyExpr, ...PropertyExpr[]] }
   | { not: PropertyExpr }
   | { implies: [PropertyExpr, PropertyExpr] };
 

@@ -16,7 +16,7 @@
 
 import type { Elaborated, Wiring } from "./elaborate.js";
 import { hashEdge } from "./hash.js";
-import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
+import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ManyEdgeDef, NodeDecl, OutputSpec, PropertyDecl } from "./types.js";
 
 export type NetlistField = FieldDef | LiteralFieldDef | { edge: string } | { many: string };
 
@@ -36,6 +36,7 @@ export interface NetlistNode {
   closure?: unknown;
   examples?: unknown;
   scope?: string[];
+  properties?: PropertyDecl[];
 }
 
 export interface NetlistTopology {
@@ -103,6 +104,7 @@ function serializeNode(node: NodeDecl): NetlistNode {
     ...(node.closure !== undefined && { closure: node.closure }),
     ...(node.examples !== undefined && { examples: node.examples }),
     ...(node.scope !== undefined && { scope: node.scope }),
+    ...(node.properties !== undefined && { properties: node.properties }),
   };
 }
 
