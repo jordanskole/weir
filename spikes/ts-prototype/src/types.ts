@@ -233,7 +233,24 @@ export interface Envelope {
   timestamp: string;
   step: number;
   identity: Partial<PayloadOf<typeof Identity>>;
-  schemaHash: string;
+  /**
+   * The node this invocation ran. Half of the version pin: with
+   * `contractHash` it names exactly one accepted implementation file
+   * (`{node}/{short(contractHash)}.ts`), because docs/design.md §10
+   * guarantees one accepted implementation per contract state and never
+   * overwrites. docs/design-history.md left "the version-pin field's exact
+   * name/shape" open — it turns out to be an identity that was never
+   * recorded, not a hash that needed adding.
+   */
+  node: string;
+  /**
+   * The node *contract's* hash — the value `schemaHash` held all along,
+   * under a name that says what it is. Deliberately not the edge's schema
+   * hash (docs/design.md §5): that is a property of an emitted instance,
+   * varies per emitted edge within one invocation, and lives on
+   * `InstanceEnvelope` instead (see the Log, membrane.ts).
+   */
+  contractHash: string;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { defineEdge, defineField, defineNode, allOf, single } from "./define.js";
 import { InMemoryLog, assertPayload, membrane } from "./membrane.js";
+import { hashNode } from "./hash.js";
 
 const Person = defineEdge({
   name: "Person",
@@ -452,8 +453,23 @@ describe("membrane — envelope", () => {
     expect(received?.causationId).toBeNull();
     expect(typeof received?.timestamp).toBe("string");
     expect(new Date(received?.timestamp as string).toString()).not.toBe("Invalid Date");
-    expect(typeof received?.schemaHash).toBe("string");
+    expect(typeof received?.contractHash).toBe("string");
     expect(received?.identity).toEqual({});
+  });
+
+  it("pins the envelope to (node name, contract hash) — the version pin replay needs", async () => {
+    let received: Record<string, unknown> | undefined;
+    const node = defineNode({
+      ...birthday,
+      fn: (person, env) => {
+        received = env as unknown as Record<string, unknown>;
+        return person;
+      },
+    });
+    await membrane(node)({ age: 41, nickname: null }, "thread-1");
+
+    expect(received?.node).toBe(birthday.name);
+    expect(received?.contractHash).toBe((await hashNode(birthday)).hash);
   });
 
   it("gives allOf-input nodes a real Envelope the same way", async () => {

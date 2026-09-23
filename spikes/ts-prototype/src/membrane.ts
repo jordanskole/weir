@@ -321,7 +321,8 @@ async function buildEnvelope(
     timestamp: new Date().toISOString(),
     step: 0,
     identity: narrowIdentity(nodeDef.scope, identity),
-    schemaHash: (await hashNode(nodeDef)).hash,
+    node: nodeDef.name,
+    contractHash: (await hashNode(nodeDef)).hash,
   };
 }
 
