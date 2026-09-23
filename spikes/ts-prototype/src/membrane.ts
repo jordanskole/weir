@@ -239,6 +239,22 @@ export class InMemoryLog implements Log {
 }
 
 /**
+ * What one pass through the membrane produced: the node's result, and the
+ * envelope built for it. `envelope` is present **iff `Fn` was actually
+ * invoked** — a rejected input assert or a failure inside `buildEnvelope`
+ * resolves to `Failed<In>` before any envelope exists, and inventing one
+ * for those paths would mean recording an invocation that never happened.
+ *
+ * The envelope is returned rather than a recording sink being passed in,
+ * because `membrane(nodeDef)` takes nothing but the declaration (see this
+ * file's header) — what it hands back may grow; what configures it may not.
+ */
+export interface Invocation<In extends InputSpec, O extends OutputSpec> {
+  result: OutputResult<O> | Failed<In>;
+  envelope?: Envelope;
+}
+
+/**
  * What `membrane()` returns for a `single`-input node: hand it a payload,
  * the invocation's correlationId, and (optionally) the caller's identity —
  * defaults to a documented system identity when omitted (file header).
@@ -247,20 +263,21 @@ type SingleInvoke<In extends InputSpec, O extends OutputSpec> = (
   payload: unknown,
   correlationId: string,
   identity?: PayloadOf<typeof Identity>,
-) => Promise<OutputResult<O> | Failed<In>>;
+) => Promise<Invocation<In, O>>;
 
 /**
  * What `membrane()` returns for an `allOf`-input node: a readiness check
  * against a correlation_id's logs, not a direct payload. Resolves to
  * `undefined` — not an error — when the edges it declared needing haven't
  * all appeared yet; a caller (a scheduler, not built here) decides when to
- * try again.
+ * try again. That bare `undefined` is a readiness signal, distinct from an
+ * `Invocation` whose `envelope` happens to be absent.
  */
 type AllOfInvoke<In extends InputSpec, O extends OutputSpec> = (
   correlationId: string,
   log: Log,
   identity?: PayloadOf<typeof Identity>,
-) => Promise<OutputResult<O> | Failed<In> | undefined>;
+) => Promise<Invocation<In, O> | undefined>;
 
 type MembraneInvoke<In extends InputSpec, O extends OutputSpec> = In extends { kind: "single" }
   ? SingleInvoke<In, O>
@@ -359,18 +376,18 @@ export function membrane<In extends InputSpec, O extends OutputSpec>(
       try {
         validated = assertPayload(edge, payload) as InputPayload<In>;
       } catch (cause) {
-        return { input: payload as InputPayload<In>, reason: reasonOf(cause) };
+        return { result: { input: payload as InputPayload<In>, reason: reasonOf(cause) } };
       }
       let envelope: Envelope;
       try {
         envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY);
       } catch (cause) {
-        return { input: validated, reason: reasonOf(cause) };
+        return { result: { input: validated, reason: reasonOf(cause) } };
       }
       try {
-        return await callFn(nodeDef, validated, envelope);
+        return { result: await callFn(nodeDef, validated, envelope), envelope };
       } catch (cause) {
-        return { input: validated, reason: reasonOf(cause) };
+        return { result: { input: validated, reason: reasonOf(cause) }, envelope };
       }
     };
     return invoke as MembraneInvoke<In, O>;
@@ -396,19 +413,19 @@ export function membrane<In extends InputSpec, O extends OutputSpec>(
         }
       }
       if (errors.length > 0) {
-        return { input: rawBag as InputPayload<In>, reason: errors.join("; ") };
+        return { result: { input: rawBag as InputPayload<In>, reason: errors.join("; ") } };
       }
 
       let envelope: Envelope;
       try {
         envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY);
       } catch (cause) {
-        return { input: bag as InputPayload<In>, reason: reasonOf(cause) };
+        return { result: { input: bag as InputPayload<In>, reason: reasonOf(cause) } };
       }
       try {
-        return await callFn(nodeDef, bag as InputPayload<In>, envelope);
+        return { result: await callFn(nodeDef, bag as InputPayload<In>, envelope), envelope };
       } catch (cause) {
-        return { input: bag as InputPayload<In>, reason: reasonOf(cause) };
+        return { result: { input: bag as InputPayload<In>, reason: reasonOf(cause) }, envelope };
       }
     };
     return invoke as MembraneInvoke<In, O>;

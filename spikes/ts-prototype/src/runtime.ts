@@ -46,7 +46,7 @@
 import { membrane } from "./membrane.js";
 import type { Log } from "./membrane.js";
 import type { Program } from "./implementation.js";
-import type { Failed, InputSpec, OutputSpec, PayloadOf } from "./types.js";
+import type { Envelope, Failed, InputSpec, OutputSpec, PayloadOf } from "./types.js";
 import { Identity, failedEdgeName, failedAllOfEdgeName } from "./types.js";
 
 /**
@@ -64,12 +64,12 @@ type AnySingleInvoke = (
   payload: unknown,
   correlationId: string,
   identity?: PayloadOf<typeof Identity>,
-) => Promise<unknown>;
+) => Promise<{ result: unknown; envelope?: Envelope }>;
 type AnyAllOfInvoke = (
   correlationId: string,
   log: Log,
   identity?: PayloadOf<typeof Identity>,
-) => Promise<unknown>;
+) => Promise<{ result: unknown; envelope?: Envelope } | undefined>;
 
 export interface RunResult {
   /** Currently always empty — the only InputSpec kind whose failures ever landed here (the removed `any` kind) no longer exists. Retained rather than removed, since deleting it would be a separate public-API change. */
@@ -141,11 +141,12 @@ export async function runNetlist(
         payload = log.latest(nodeDef.input.edge.name, correlationId);
         if (payload === undefined) return false;
       }
-      result = await (membrane(nodeDef) as AnySingleInvoke)(payload, correlationId, identity);
+      const invocation = await (membrane(nodeDef) as AnySingleInvoke)(payload, correlationId, identity);
+      result = invocation.result;
     } else {
-      const allOf = await (membrane(nodeDef) as AnyAllOfInvoke)(correlationId, log, identity);
-      if (allOf === undefined) return false;
-      result = allOf;
+      const invocation = await (membrane(nodeDef) as AnyAllOfInvoke)(correlationId, log, identity);
+      if (invocation === undefined) return false;
+      result = invocation.result;
     }
 
     fired.add(nodeName);

@@ -88,7 +88,7 @@ async function exists(path: string): Promise<boolean> {
 async function checkExamples(nodeDef: NodeDef): Promise<ExampleFailure[]> {
   const failures: ExampleFailure[] = [];
   for (const [i, example] of (nodeDef.examples ?? []).entries()) {
-    const actual = await invokeWithInput(nodeDef, example.given, `accept-example-${i}`);
+    const { result: actual } = await invokeWithInput(nodeDef, example.given, `accept-example-${i}`);
     if (!isDeepStrictEqual(actual, example.expect)) {
       failures.push({ given: example.given, expected: example.expect, actual });
     }
