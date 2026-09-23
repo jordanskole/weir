@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ts-prototype:
+    name: ts-prototype (typecheck + tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: spikes/ts-prototype
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # node-version-file follows spikes/ts-prototype/.nvmrc rather than
+      # pinning a version here, so the runner can't drift from what the
+      # spike actually develops against. The floor matters: accept.ts and
+      # implementation.ts both dynamically import() .ts files at runtime,
+      # which needs Node's native type-stripping (23.6+, on by default).
+      # The path is repo-root-relative — `defaults.run.working-directory`
+      # applies to `run` steps only, not to `uses`.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: spikes/ts-prototype/.nvmrc
+          cache: npm
+          cache-dependency-path: spikes/ts-prototype/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      # Covers the generated-schema drift guard (schema.test.ts) along with
+      # everything else — schemas/*.json are committed artifacts nothing
+      # else in the suite reads, and they have gone stale twice
+      # (docs/design-history.md).
+      - run: npm test
