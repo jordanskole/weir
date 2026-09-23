@@ -50,8 +50,13 @@ export interface LoggedInstance {
   envelope?: Envelope & { schemaHash: string };
 }
 
+export interface InstanceEnvelope extends Envelope {
+  /** This edge definition's hash (§5) — knowable only once we know which edge was emitted. */
+  schemaHash: string;
+}
+
 export interface Log {
-  append(edgeName: string, correlationId: string, payload: unknown, envelope?: Envelope): void;
+  append(edgeName: string, correlationId: string, payload: unknown, envelope?: InstanceEnvelope): void;
   latest(edgeName: string, correlationId: string): unknown | undefined;
   /** The same entry with its provenance — so what §2 writes is actually readable. */
   latestInstance(edgeName: string, correlationId: string): LoggedInstance | undefined;
@@ -60,7 +65,9 @@ export interface Log {
 
 `latestInstance` exists because provenance nobody can read is provenance not worth storing — the same objection that ruled out pinning on a transient envelope. `latest` stays as-is so every current reader is untouched, and becomes a convenience over `latestInstance`.
 
-When the runtime logs an emitted instance it passes the invocation's envelope; `append` stores `{ ...envelope, schemaHash: await hashEdge(edge) }` for *that* edge. One invocation emitting three `allOf` branches produces three records sharing invocation ids and carrying three different edge hashes — which is exactly what §5 describes, and is only expressible at this grain.
+**The caller hashes, not the Log.** `append` receives an edge *name*, never the edge definition, and is synchronous — while `hashEdge` needs the definition and is async. So the Log cannot compute the hash even in principle. The runtime's `logOutput` does have the edge (it is right there in `output.edge`/`output.edges`), so it computes `hashEdge(edge)` and passes a complete `InstanceEnvelope`; `logOutput` becomes async, which costs nothing since its only caller is already async. This keeps the Log a store rather than making it a hasher, which is the better split regardless.
+
+One invocation emitting three `allOf` branches therefore produces three records sharing invocation ids and carrying three different edge hashes — exactly what §5 describes, and only expressible at this grain.
 
 **Why the envelope is optional, named rather than hidden.** `Log.append` is currently doing two jobs: recording what a node emitted (`runtime.ts`'s `logOutput`) and *staging inputs* so an `allOf` node's readiness check has something to find (`invoke.ts`, and several tests). A staged input is not an emission and has no invocation behind it, so it has no envelope to carry. Making the parameter optional keeps those callers working and gives absence a real meaning — but it does mean `Log` is two things wearing one interface. Recorded in `open-questions.md` rather than papered over; splitting it is a separate decision.
 
