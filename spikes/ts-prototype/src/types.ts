@@ -363,6 +363,47 @@ export interface Example<In extends InputSpec, O extends OutputSpec> {
 }
 
 /**
+ * One node of a property assertion's expression tree (docs/design.md §6;
+ * docs/superpowers/specs/2026-09-23-property-assertions.md). Data, never
+ * host code — §10 keeps `Fn` out of a declaration for exactly the reason a
+ * property has to stay out too: a `.node` file is a data format, and a
+ * predicate written in TypeScript could be neither authored in YAML,
+ * fingerprinted structurally, nor carried across a change of host language.
+ *
+ * Key-as-discriminant, the same idiom `OutputSpec`'s `oneOf`/`allOf`/`many`
+ * and `ManyEdgeDef`'s `many` already use. `implies` is a primitive rather
+ * than sugar for `or(not(a), b)`: these are human-authored contracts, and
+ * the conditional should read the way it was meant.
+ */
+export type PropertyExpr =
+  | { lit: string | number | boolean | null }
+  | { get: string }
+  | { eq: [PropertyExpr, PropertyExpr] }
+  | { ne: [PropertyExpr, PropertyExpr] }
+  | { lt: [PropertyExpr, PropertyExpr] }
+  | { lte: [PropertyExpr, PropertyExpr] }
+  | { gt: [PropertyExpr, PropertyExpr] }
+  | { gte: [PropertyExpr, PropertyExpr] }
+  | { add: [PropertyExpr, PropertyExpr] }
+  | { sub: [PropertyExpr, PropertyExpr] }
+  | { and: PropertyExpr[] }
+  | { or: PropertyExpr[] }
+  | { not: PropertyExpr }
+  | { implies: [PropertyExpr, PropertyExpr] };
+
+/**
+ * One named invariant a node's `Fn` must satisfy for every input
+ * (docs/design.md §6). `description` is required for the same reason
+ * `FieldDef` and `EdgeDef` require theirs — a property legible only by
+ * reading its AST is precisely what that convention exists to prevent.
+ */
+export interface PropertyDecl {
+  name: string;
+  description: string;
+  expr: PropertyExpr;
+}
+
+/**
  * A node declaration: name, input shape, output shape, Fn, and examples
  * (docs/getting-started.md step 2). Primitives only — a composite node's
  * body is a subgraph, which has no representation yet (topology/elaborator
@@ -376,6 +417,14 @@ export interface NodeDef<In extends InputSpec = InputSpec, O extends OutputSpec 
   output: O;
   fn: Fn<In, O>;
   examples?: Example<In, O>[];
+  /**
+   * Invariants checked against generated inputs (docs/design.md §6).
+   * Optional, unlike `examples` (which `schema.ts` requires and
+   * `acceptImplementation` refuses a node without): a contract fully
+   * pinned by its examples is a legitimate thing to declare, and a
+   * mandatory property would produce ceremony rather than coverage.
+   */
+  properties?: PropertyDecl[];
   /**
    * Parameters baked in at elaboration time, e.g. an origin's literal or
    * expect's expected value (docs/design-history.md, "Generics: elaboration
