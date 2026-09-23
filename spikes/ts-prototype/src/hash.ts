@@ -21,7 +21,17 @@
  * (>=20) and modern browsers.
  */
 
-import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
+import type {
+  AnyEdgeDef,
+  FieldDef,
+  InputSpec,
+  LiteralFieldDef,
+  ManyEdgeDef,
+  NodeDecl,
+  OutputSpec,
+  PropertyDecl,
+  PropertyExpr,
+} from "./types.js";
 
 interface ScalarFieldFingerprint {
   type: string;
@@ -159,6 +169,7 @@ interface NodeFingerprint {
   input: InputSpecFingerprint;
   output: OutputSpecFingerprint;
   closure?: unknown;
+  properties?: { name: string; expr: PropertyExpr }[];
 }
 
 type InputSpecFingerprint =
@@ -187,12 +198,42 @@ function fingerprintOutput(output: OutputSpec): OutputSpecFingerprint {
   return { kind: output.kind, edges: fingerprintEdgeList(output.edges) };
 }
 
+/**
+ * Properties are sorted by name before fingerprinting: two nodes declaring
+ * the same properties in a different order assert the same contract, so
+ * reordering a list in a `.node` file must not invalidate a perfectly good
+ * implementation. That makes `name` load-bearing, so a duplicate is a
+ * declaration bug — it would make the sort ambiguous and make a violation
+ * report (which identifies a property by name) unreadable.
+ *
+ * `description` is excluded, consistent with this module already excluding
+ * cosmetic fields (description, unit, sourceKey) from every other
+ * fingerprint it computes.
+ */
+function fingerprintProperties(properties: PropertyDecl[]): { name: string; expr: PropertyExpr }[] {
+  const seen = new Set<string>();
+  for (const property of properties) {
+    if (seen.has(property.name)) {
+      throw new Error(
+        `Duplicate property name "${property.name}" — property names must be unique within a node.`,
+      );
+    }
+    seen.add(property.name);
+  }
+
+  return [...properties]
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    .map((property) => ({ name: property.name, expr: property.expr }));
+}
+
 function fingerprintNode(node: NodeDecl): NodeFingerprint {
   return {
     name: node.name,
     input: fingerprintInput(node.input),
     output: fingerprintOutput(node.output),
     ...(node.closure !== undefined && { closure: node.closure }),
+    ...(node.properties !== undefined &&
+      node.properties.length > 0 && { properties: fingerprintProperties(node.properties) }),
   };
 }
 

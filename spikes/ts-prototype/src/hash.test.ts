@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assertEdgeHash, hashEdge, hashEdges, hashNode } from "./hash.js";
-import type { AnyEdgeDef, EdgeDef, NodeDecl } from "./types.js";
+import type { AnyEdgeDef, EdgeDef, NodeDecl, PropertyDecl } from "./types.js";
 
 const base: EdgeDef = {
   name: "example",
@@ -408,6 +408,65 @@ describe("hashNode", () => {
     };
     const reordered: NodeDecl = { ...addTodo, input: { kind: "allOf", edges: [Todo, TodoList] } };
     expect((await hashNode(reordered)).hash).toBe((await hashNode(addTodo)).hash);
+  });
+});
+
+describe("hashNode — properties", () => {
+  const node: NodeDecl = {
+    name: "birthday",
+    input: { kind: "single", edge: base },
+    output: { kind: "single", edge: base },
+  };
+
+  const increments: PropertyDecl = {
+    name: "increments age by one",
+    description: "A birthday advances the person's age by exactly one year.",
+    expr: { eq: [{ get: "output.age" }, { add: [{ get: "input.age" }, { lit: 1 }] }] },
+  };
+
+  const preservesName: PropertyDecl = {
+    name: "preserves name",
+    description: "A birthday never changes the person's name.",
+    expr: { eq: [{ get: "output.name" }, { get: "input.name" }] },
+  };
+
+  it("changes the hash when a property is added", async () => {
+    const before = await hashNode(node);
+    const after = await hashNode({ ...node, properties: [increments] });
+    expect(after.hash).not.toBe(before.hash);
+  });
+
+  it("changes the hash when a property's expression changes", async () => {
+    const a = await hashNode({ ...node, properties: [increments] });
+    const b = await hashNode({
+      ...node,
+      properties: [{ ...increments, expr: { eq: [{ get: "output.age" }, { get: "input.age" }] } }],
+    });
+    expect(a.hash).not.toBe(b.hash);
+  });
+
+  it("is stable across a reordering that doesn't change meaning", async () => {
+    const a = await hashNode({ ...node, properties: [increments, preservesName] });
+    const b = await hashNode({ ...node, properties: [preservesName, increments] });
+    expect(a.hash).toBe(b.hash);
+  });
+
+  it("ignores a property's description, which is cosmetic", async () => {
+    const a = await hashNode({ ...node, properties: [increments] });
+    const b = await hashNode({ ...node, properties: [{ ...increments, description: "reworded entirely" }] });
+    expect(a.hash).toBe(b.hash);
+  });
+
+  it("treats an empty properties array as no properties at all", async () => {
+    const a = await hashNode(node);
+    const b = await hashNode({ ...node, properties: [] });
+    expect(a.hash).toBe(b.hash);
+  });
+
+  it("throws on duplicate property names, which would make the sort ambiguous and the report unreadable", async () => {
+    await expect(
+      hashNode({ ...node, properties: [increments, { ...preservesName, name: increments.name }] }),
+    ).rejects.toThrow(/duplicate property name/i);
   });
 });
 
