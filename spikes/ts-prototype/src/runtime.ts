@@ -49,6 +49,7 @@ import type { Program } from "./implementation.js";
 import type { AnyEdgeDef, Envelope, Failed, InputSpec, OutputSpec, PayloadOf } from "./types.js";
 import { Identity, failedEdgeName, failedAllOfEdgeName } from "./types.js";
 import { hashEdge } from "./hash.js";
+import type { Trace } from "./trace.js";
 
 /**
  * `program.nodes` stores heterogeneous NodeDefs in one `Record<string,
@@ -147,6 +148,7 @@ export async function runNetlist(
   correlationId: string,
   originPayloads: Record<string, unknown>,
   identity?: PayloadOf<typeof Identity>,
+  trace?: Trace,
 ): Promise<RunResult> {
   const failures: RunResult["failures"] = [];
   const fired = new Set<string>();
@@ -162,6 +164,7 @@ export async function runNetlist(
 
     let result: unknown;
     let envelope: Envelope | undefined;
+    let input: unknown;
     if (nodeDef.input.kind === "single") {
       let payload: unknown;
       if (origins.has(nodeName)) {
@@ -171,10 +174,20 @@ export async function runNetlist(
         payload = log.latest(nodeDef.input.edge.name, correlationId);
         if (payload === undefined) return false;
       }
+      input = payload;
       const invocation = await (membrane(nodeDef) as AnySingleInvoke)(payload, correlationId, identity);
       result = invocation.result;
       envelope = invocation.envelope;
     } else {
+      // membrane()'s allOf invoke resolves the bag internally and never
+      // hands it back — rebuild it the same way (one log.latest per
+      // declared edge) so the trace entry's `input` is the actual bag Fn
+      // ran on, not a re-derivation that could drift from it.
+      const bag: Record<string, unknown> = {};
+      for (const edge of nodeDef.input.edges) {
+        bag[edge.name] = log.latest(edge.name, correlationId);
+      }
+      input = bag;
       const invocation = await (membrane(nodeDef) as AnyAllOfInvoke)(correlationId, log, identity);
       if (invocation === undefined) return false;
       result = invocation.result;
@@ -182,6 +195,9 @@ export async function runNetlist(
     }
 
     fired.add(nodeName);
+    if (envelope !== undefined) {
+      trace?.record({ envelope, input, result });
+    }
     if (looksLikeFailed(result)) {
       // The synthesized Failed_* edge is a real emitted instance too — hash
       // it the same way, but it's the *elaborator*'s job to have synthesized
