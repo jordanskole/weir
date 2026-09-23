@@ -70,7 +70,23 @@ When the runtime logs an emitted instance it passes the invocation's envelope; `
 
 The pin is **(`envelope.node`, `envelope.contractHash`)**. No third field. Because §10 guarantees one accepted implementation per contract state and never overwrites, that pair resolves to exactly one file — and resolving it is how replay gets the code that actually ran, rather than whatever the declaration would hash to now.
 
-### 4. `Trace` — one entry per invocation
+### 4. Getting the envelope out of the membrane
+
+`buildEnvelope` runs *inside* `membrane()`, is handed to `Fn`, and never escapes — `SingleInvoke` returns only `OutputResult<O> | Failed<In>`. So as things stand the runtime cannot record what §2 and §5 require it to record: it never sees the envelope that was built.
+
+The obvious fix — pass a `Trace`/`Log` into `membrane()` and let it record — is **ruled out by an explicit design rule.** `membrane.ts` states it outright: *"`membrane(nodeDef)` takes nothing but the declaration itself — the returned function's behavior, and its very shape... is entirely a product of what the NodeDef's `input` says, never separately configured."* A recording sink is exactly the separate configuration that rule forbids, and the rule is load-bearing: it is why a membrane's behaviour is always derivable from the declaration alone.
+
+So the envelope comes **out** rather than the sink going **in**. The invoke's return becomes:
+
+```ts
+{ result: OutputResult<O> | Failed<In>; envelope: Envelope }
+```
+
+This respects the rule — what configures the membrane is unchanged; only what it hands back grows — and it is honest about what an invocation produces: the envelope is not a side effect of running a node, it is part of the record of having run it. `invokeWithInput` (`invoke.ts`) returns the same pair, and its callers destructure.
+
+**Cost, stated plainly:** four call sites change (`runtime.ts`, `invoke.ts`, and `fuzz.ts`/`accept.ts` via `invokeWithInput`), plus `index.ts`'s re-export and the tests that assert on results. None of them need the envelope; they take `.result` and carry on. It is a wide-but-shallow change, and the alternative was contradicting a rule the codebase states about itself.
+
+### 5. `Trace` — one entry per invocation
 
 A sibling of the Log, and the durable artifact §10's sentence actually requires:
 
@@ -89,7 +105,7 @@ export interface Trace {
 
 `runtime.ts` records one entry per node firing. An in-memory implementation (`InMemoryTrace`) mirrors `InMemoryLog` — the spike has no store, and this is enough to replay against.
 
-### 5. Replay
+### 6. Replay
 
 `resolveImplementation` today takes a `NodeDecl` and *recomputes* its hash, which is exactly wrong for replay: the declaration may have changed since the invocation ran, and recomputing would resolve the wrong implementation or none. Replay resolves by *recorded* hash:
 
@@ -136,3 +152,5 @@ This is §5's own doctrine applied one layer up: *"replay on mismatch either mig
 - Replaying against a pin with no implementation on disk fails loudly, naming the node and hash.
 - `replayInvocation` **refuses** when the supplied declaration has drifted — its hash no longer matching the recorded `contractHash` — naming both hashes, rather than running old code under a new contract.
 - `latestInstance` returns the stored provenance; `latest` returns the bare payload, unchanged.
+- `membrane()`'s invoke returns `{ result, envelope }`, and the envelope it returns is the same one `Fn` received — proved by a node that echoes its `env` back and comparing the two.
+- Every existing caller (`invokeWithInput`, and `fuzz.ts`/`accept.ts` through it) behaves identically on `.result`; `membrane(nodeDef)` still takes one argument.
