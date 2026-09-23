@@ -721,3 +721,50 @@ describe("topologySchema", () => {
     expect(validate({ A: "oops" })).toBe(false);
   });
 });
+
+describe("nodeSchema — properties", () => {
+  const validate = validatorFor(nodeSchema());
+  const validNode = (properties: unknown) => ({
+    input: "Person",
+    output: "Person",
+    examples: [{ given: { Person: { age: 41 } }, expect: { Person: { age: 42 } } }],
+    properties,
+  });
+
+  const increments = {
+    name: "increments age by one",
+    description: "A birthday advances the person's age by exactly one year.",
+    expr: { eq: [{ get: "output.age" }, { add: [{ get: "input.age" }, { lit: 1 }] }] },
+  };
+
+  it("accepts a nested property expression", () => {
+    expect(validate(validNode([increments]))).toBe(true);
+  });
+
+  it("accepts a node with no properties key at all", () => {
+    expect(
+      validate({
+        input: "Person",
+        output: "Person",
+        examples: [{ given: { Person: { age: 41 } }, expect: { Person: { age: 42 } } }],
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects a property missing its description", () => {
+    expect(validate(validNode([{ name: "x", expr: { lit: true } }]))).toBe(false);
+  });
+
+  it("rejects an unknown operator", () => {
+    expect(validate(validNode([{ ...increments, expr: { frobnicate: [{ lit: 1 }, { lit: 2 }] } }]))).toBe(false);
+  });
+
+  it("rejects a binary operator with the wrong arity", () => {
+    expect(validate(validNode([{ ...increments, expr: { eq: [{ lit: 1 }] } }]))).toBe(false);
+    expect(validate(validNode([{ ...increments, expr: { eq: [{ lit: 1 }, { lit: 2 }, { lit: 3 }] } }]))).toBe(false);
+  });
+
+  it("rejects an expression object carrying two operators at once", () => {
+    expect(validate(validNode([{ ...increments, expr: { lit: 1, get: "input.age" } }]))).toBe(false);
+  });
+});

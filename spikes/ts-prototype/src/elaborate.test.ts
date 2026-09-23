@@ -534,6 +534,43 @@ fn: "() => {}"
 `;
     expect(() => parseNodeFile(yaml, "birthday", resolveEdge)).toThrow(/fn/i);
   });
+
+  it("parses properties, per the spec's §10 worked example", () => {
+    const yaml = `
+input: Person
+output: Person
+examples:
+  - given: { age: 41 }
+    expect: { age: 42 }
+properties:
+  - name: increments age by one
+    description: A birthday advances the person's age by exactly one year.
+    expr:
+      eq:
+        - get: output.age
+        - add:
+            - get: input.age
+            - lit: 1
+`;
+    const node = parseNodeFile(yaml, "birthday", resolveEdge);
+    expect(node.properties).toEqual([
+      {
+        name: "increments age by one",
+        description: "A birthday advances the person's age by exactly one year.",
+        expr: { eq: [{ get: "output.age" }, { add: [{ get: "input.age" }, { lit: 1 }] }] },
+      },
+    ]);
+  });
+
+  it("gives a .node file with no properties key a NodeDecl with no properties key at all", () => {
+    const yaml = `
+description: d
+input: Person
+output: Person
+`;
+    const node = parseNodeFile(yaml, "birthday", resolveEdge);
+    expect(node).not.toHaveProperty("properties");
+  });
 });
 
 describe("parseTopologyFile", () => {
@@ -853,6 +890,74 @@ examples:
 
     expect(result.nodes.HandleFailed__Failed_Todo!.examples).toHaveLength(1);
     expect(result.nodes.HandleFailed__Failed_Person!.examples).toBeUndefined();
+  });
+
+  it("passes properties through to every anyOf-desugared shadow, same as closure", async () => {
+    const root = await writeFixture({
+      "edges/Failed_Todo.edge": `
+description: A failed Todo
+fields:
+  input:
+    type: utf8
+    label: Input
+    description: d
+    nullable: false
+`,
+      "edges/Failed_Person.edge": `
+description: A failed Person
+fields:
+  input:
+    type: utf8
+    label: Input
+    description: d
+    nullable: false
+`,
+      "edges/Recovered.edge": `
+description: A recovered value
+fields:
+  value:
+    type: utf8
+    label: Value
+    description: d
+    nullable: false
+`,
+      "nodes/HandleFailed.node": `
+description: Handles whichever failure shows up first
+input:
+  anyOf:
+    - Failed_Todo
+    - Failed_Person
+output: Recovered
+examples:
+  - given:
+      Failed_Todo:
+        input: "bad todo"
+    expect:
+      Recovered:
+        value: "recovered todo"
+properties:
+  - name: always recovers
+    description: The output value is never empty.
+    expr: { ne: [{ get: "output.value" }, { lit: "" }] }
+`,
+    });
+
+    const result = await elaborate(root);
+
+    expect(result.nodes.HandleFailed__Failed_Todo!.properties).toEqual([
+      {
+        name: "always recovers",
+        description: "The output value is never empty.",
+        expr: { ne: [{ get: "output.value" }, { lit: "" }] },
+      },
+    ]);
+    expect(result.nodes.HandleFailed__Failed_Person!.properties).toEqual([
+      {
+        name: "always recovers",
+        description: "The output value is never empty.",
+        expr: { ne: [{ get: "output.value" }, { lit: "" }] },
+      },
+    ]);
   });
 
   it("synthesizes a Failed_<A>_<B> edge for a declared allOf: combo, sorted and order-independent", async () => {

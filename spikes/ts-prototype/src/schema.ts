@@ -229,6 +229,40 @@ export function edgeSchema(): object {
 const edgeName = { type: "string", minLength: 1 };
 const edgeNameList = { type: "array", items: edgeName, minItems: 1 };
 
+const EXPR_REF = { $ref: "#/$defs/propertyExpr" } as const;
+
+// Kept in lockstep with types.ts's PropertyExpr union member-by-member — see
+// this task's grammar-agreement note. Binary: exactly two operands. Variadic:
+// one or more. `lit`, `get`, and `not` each get their own shape below.
+const BINARY_OPS = ["eq", "ne", "lt", "lte", "gt", "gte", "add", "sub", "implies"];
+const VARIADIC_OPS = ["and", "or"];
+
+/**
+ * A single node in the property-expression grammar (docs/design.md §6,
+ * PropertyExpr in types.ts) — self-referential, so defined once and
+ * referenced by `$ref` (the standard JSON Schema mechanism for a recursive
+ * grammar, supported by `redhat.vscode-yaml`'s bundled validator) rather than
+ * inlined at every operand position. `oneOf` (not `anyOf`) plus
+ * `additionalProperties: false` on every branch is what makes a two-operator
+ * object like `{ lit: 1, get: "x" }` invalid: exactly one branch may match,
+ * and each branch forbids every other operator's key.
+ */
+function propertyExprSchema(): Record<string, unknown> {
+  const binary = { type: "array", items: EXPR_REF, minItems: 2, maxItems: 2 };
+  const variadic = { type: "array", items: EXPR_REF, minItems: 1 };
+
+  return {
+    type: "object",
+    oneOf: [
+      { required: ["lit"], properties: { lit: { type: ["string", "number", "boolean", "null"] } }, additionalProperties: false },
+      { required: ["get"], properties: { get: { type: "string" } }, additionalProperties: false },
+      ...BINARY_OPS.map((op) => ({ required: [op], properties: { [op]: binary }, additionalProperties: false })),
+      ...VARIADIC_OPS.map((op) => ({ required: [op], properties: { [op]: variadic }, additionalProperties: false })),
+      { required: ["not"], properties: { not: EXPR_REF }, additionalProperties: false },
+    ],
+  };
+}
+
 /**
  * A "tagged" payload: exactly one key (the edge's name — a field's key in an
  * `.edge` map or, here, the sole property of an example), whose value must
@@ -394,9 +428,27 @@ export function nodeSchema(): object {
           },
         ],
       },
+      // JSON Schema's `properties` keyword, containing our field also named
+      // `properties` — see this task's header note. Optional, unlike
+      // `examples`: not added to `required` below, per the spec (a contract
+      // fully pinned by its examples is legitimate).
+      properties: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["name", "description", "expr"],
+          properties: {
+            name: { type: "string" },
+            description: { type: "string" },
+            expr: EXPR_REF,
+          },
+          additionalProperties: false,
+        },
+      },
     },
     additionalProperties: false,
     allOf: [...inputShapeConditionals, ...outputShapeConditionals],
+    $defs: { propertyExpr: propertyExprSchema() },
   };
 }
 

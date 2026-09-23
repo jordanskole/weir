@@ -257,13 +257,14 @@ export function parseNodeFile(yamlText: string, name: string, resolveEdge: EdgeR
   if ("fn" in raw) {
     throw new Error(`.node files declare the contract only (docs/design.md §10) — "fn" belongs in the implementation tree, not here.`);
   }
-  const { label, description, input, output, examples, closure } = raw as {
+  const { label, description, input, output, examples, closure, properties } = raw as {
     label?: unknown;
     description?: unknown;
     input?: unknown;
     output?: unknown;
     examples?: unknown;
     closure?: unknown;
+    properties?: unknown;
   };
 
   return {
@@ -274,6 +275,7 @@ export function parseNodeFile(yamlText: string, name: string, resolveEdge: EdgeR
     output: resolveOutputSpec(output, resolveEdge),
     ...(examples !== undefined && { examples: examples as NodeDecl["examples"] }),
     ...(closure !== undefined && { closure: closure as NodeDecl["closure"] }),
+    ...(properties !== undefined && { properties: properties as NodeDecl["properties"] }),
   };
 }
 
@@ -305,13 +307,14 @@ function parseAnyOfNodeFile(
   if ("fn" in raw) {
     throw new Error(`.node files declare the contract only (docs/design.md §10) — "fn" belongs in the implementation tree, not here.`);
   }
-  const { label, description, input, output, examples, closure } = raw as {
+  const { label, description, input, output, examples, closure, properties } = raw as {
     label?: unknown;
     description?: unknown;
     input?: { anyOf: unknown };
     output?: unknown;
     examples?: unknown;
     closure?: unknown;
+    properties?: unknown;
   };
 
   const edges = resolveEdgeNameList(input?.anyOf, "input.anyOf", resolveEdge);
@@ -330,6 +333,7 @@ function parseAnyOfNodeFile(
       output: outputSpec,
       ...(shadowExamples.length > 0 && { examples: shadowExamples as NodeDecl["examples"] }),
       ...(closure !== undefined && { closure: closure as NodeDecl["closure"] }),
+      ...(properties !== undefined && { properties: properties as NodeDecl["properties"] }),
     };
   }
   return decls;
