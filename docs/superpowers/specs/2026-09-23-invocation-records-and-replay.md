@@ -1,6 +1,6 @@
 # Invocation records, version pinning, and replay
 
-Status: designed.
+Status: implemented.
 
 ## Motivation
 
@@ -86,8 +86,10 @@ The obvious fix — pass a `Trace`/`Log` into `membrane()` and let it record —
 So the envelope comes **out** rather than the sink going **in**. The invoke's return becomes:
 
 ```ts
-{ result: OutputResult<O> | Failed<In>; envelope: Envelope }
+{ result: OutputResult<O> | Failed<In>; envelope?: Envelope }
 ```
+
+`envelope` is optional, not required, which is a refinement on what was originally sketched here. `buildEnvelope` runs after the input assert already passed — a rejected assert resolves to `Failed<In>` before any envelope exists, and so does a thrown `buildEnvelope` itself (a bad `scope` declaration). Both are real `Fn`-never-ran paths, and inventing an envelope for either would mean recording an invocation that didn't happen. Presence is therefore exact, not incidental: the envelope is there **iff `Fn` was actually invoked**. This is the tighter contract of the two — a downstream trace entry, gated on the same envelope, then exists exactly when an invocation happened, never for a rejected-before-`Fn` `Failed<In>`.
 
 This respects the rule — what configures the membrane is unchanged; only what it hands back grows — and it is honest about what an invocation produces: the envelope is not a side effect of running a node, it is part of the record of having run it. `invokeWithInput` (`invoke.ts`) returns the same pair, and its callers destructure.
 

@@ -254,6 +254,20 @@ export interface Log {
    * fixtures for an `allOf`-input node).
    */
   append(edgeName: string, correlationId: string, payload: unknown, envelope?: InstanceEnvelope): void;
+  /**
+   * Hazard to re-check if `Log` ever gains an async implementation:
+   * `runtime.ts`'s `tryFire` calls this a second time for an `allOf` node,
+   * rebuilding the same input bag `membrane()`'s own `allOf` invoke already
+   * read internally, so the trace entry it records carries the bag `Fn`
+   * actually ran on rather than a re-derivation that could silently drift
+   * from it. That's only safe today because this method is synchronous and
+   * there is no `await` between the runtime's read and `membrane()`'s own
+   * — nothing can append to the Log in the gap between the two reads. A
+   * backing store that made `latest` async (this file's own doc comment on
+   * `Log` already anticipates one replacing `InMemoryLog`) would reopen
+   * that window, and the trace could then record an input that was never
+   * the one actually invoked.
+   */
   latest(edgeName: string, correlationId: string): unknown | undefined;
   /** The full stored instance — payload plus provenance, when there is any (see `append`). */
   latestInstance(edgeName: string, correlationId: string): LoggedInstance | undefined;
