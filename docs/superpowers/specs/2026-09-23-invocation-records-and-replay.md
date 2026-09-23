@@ -1,0 +1,138 @@
+# Invocation records, version pinning, and replay
+
+Status: designed.
+
+## Motivation
+
+`getting-started.md`'s build order has listed this as step 5's last unbuilt item since it was written: *"replay against the implementation version an invocation was pinned to."* The acceptance gate (`accept.ts`) now produces the `<contract-hash>.ts` artifact there would be to pin against, so the blocker named there is gone.
+
+`design-history.md` is explicit that this came from an operational worry rather than tidiness: *"mutable `Fn` implementations break replay determinism, and redeploying a node's code out from under a long-running or replayed invocation is exactly the failure mode my earlier project's reactor orchestrators already had to solve."* §10 states the requirement: *"An invocation records which implementation version it actually ran under, immutable once written."*
+
+**Two findings reshaped this from "add a field" into what it is.**
+
+First, **the envelope is never persisted.** `buildEnvelope` runs once per invocation, is handed to `Fn` only if it declares `env`, and is then discarded; `Log.append(edgeName, correlationId, payload)` takes no envelope at all. So §10's "an invocation records..." has nowhere to be recorded — there is no invocation record. A pin field on a transient object pins nothing.
+
+Second, **the pin is not a new field.** `design-history.md` settled that *"the version identifier is the contract hash, full stop,"* and §10 guarantees one accepted implementation per contract state, never overwritten. So `{implRoot}/{node}/{short(contractHash)}.ts` is uniquely determined by **(node name, contract hash)**. The envelope already carries that hash — under the name `schemaHash`. What it has never carried is the *node's own name*. The open item design-history left as "the version-pin field's exact name/shape" resolves to an identity that was never recorded, not a hash that needs adding.
+
+**A conflation this surfaces and settles.** §1 lists the envelope as carrying a "schema hash," and §5 defines that as *"every edge instance carries the schema hash of the definition it was written under"* — the **edge's** hash, which is what makes replay-on-mismatch able to migrate or refuse. But `membrane.ts` sets `schemaHash` to `hashNode(nodeDef).hash` — the **node contract's** hash. Two different things under one name. Both are wanted, for different jobs and at different grains, so this spec gives each its own name rather than picking a winner.
+
+## Design
+
+### 1. `Envelope` — per invocation, what `Fn` sees
+
+```ts
+export interface Envelope {
+  id: string;
+  correlationId: string;
+  causationId: string | null;
+  timestamp: string;
+  step: number;
+  identity: Partial<PayloadOf<typeof Identity>>;
+  /** The node this invocation ran. Half of the version pin — see §3. */
+  node: string;
+  /** The node contract's hash: the value `schemaHash` already held, under a name that says so. The other half of the pin. */
+  contractHash: string;
+}
+```
+
+Two changes: `node` is added, and `schemaHash` is **renamed** to `contractHash` while keeping the value it already had.
+
+**`schemaHash` leaves the Fn-visible envelope entirely**, which is the non-obvious part. An envelope is built *before* `Fn` runs, so it cannot know which output edges will be emitted. §5's schema hash is a property of an emitted *instance*; for an `allOf`-output node emitting three branches, a single invocation-level `schemaHash` would be either wrong or arbitrary. It belongs at the grain where it's well-defined (§2), not here.
+
+### 2. Instance provenance — `schemaHash` attached where it is knowable
+
+`Log.append` gains an optional envelope, and stores provenance alongside the payload:
+
+```ts
+export interface LoggedInstance {
+  payload: unknown;
+  /** Absent for a staged input (see below); present for anything the runtime actually emitted. */
+  envelope?: Envelope & { schemaHash: string };
+}
+
+export interface Log {
+  append(edgeName: string, correlationId: string, payload: unknown, envelope?: Envelope): void;
+  latest(edgeName: string, correlationId: string): unknown | undefined;
+  /** The same entry with its provenance — so what §2 writes is actually readable. */
+  latestInstance(edgeName: string, correlationId: string): LoggedInstance | undefined;
+}
+```
+
+`latestInstance` exists because provenance nobody can read is provenance not worth storing — the same objection that ruled out pinning on a transient envelope. `latest` stays as-is so every current reader is untouched, and becomes a convenience over `latestInstance`.
+
+When the runtime logs an emitted instance it passes the invocation's envelope; `append` stores `{ ...envelope, schemaHash: await hashEdge(edge) }` for *that* edge. One invocation emitting three `allOf` branches produces three records sharing invocation ids and carrying three different edge hashes — which is exactly what §5 describes, and is only expressible at this grain.
+
+**Why the envelope is optional, named rather than hidden.** `Log.append` is currently doing two jobs: recording what a node emitted (`runtime.ts`'s `logOutput`) and *staging inputs* so an `allOf` node's readiness check has something to find (`invoke.ts`, and several tests). A staged input is not an emission and has no invocation behind it, so it has no envelope to carry. Making the parameter optional keeps those callers working and gives absence a real meaning — but it does mean `Log` is two things wearing one interface. Recorded in `open-questions.md` rather than papered over; splitting it is a separate decision.
+
+`latest` continues to return the bare payload, so every existing reader is unaffected.
+
+### 3. The version pin
+
+The pin is **(`envelope.node`, `envelope.contractHash`)**. No third field. Because §10 guarantees one accepted implementation per contract state and never overwrites, that pair resolves to exactly one file — and resolving it is how replay gets the code that actually ran, rather than whatever the declaration would hash to now.
+
+### 4. `Trace` — one entry per invocation
+
+A sibling of the Log, and the durable artifact §10's sentence actually requires:
+
+```ts
+export interface TraceEntry {
+  envelope: Envelope;      // carries node + contractHash: the pin
+  input: unknown;          // what the invocation ran on
+  result: unknown;         // what came back, Failed<In> included
+}
+
+export interface Trace {
+  record(entry: TraceEntry): void;
+  entries(correlationId: string): TraceEntry[];
+}
+```
+
+`runtime.ts` records one entry per node firing. An in-memory implementation (`InMemoryTrace`) mirrors `InMemoryLog` — the spike has no store, and this is enough to replay against.
+
+### 5. Replay
+
+`resolveImplementation` today takes a `NodeDecl` and *recomputes* its hash, which is exactly wrong for replay: the declaration may have changed since the invocation ran, and recomputing would resolve the wrong implementation or none. Replay resolves by *recorded* hash:
+
+```ts
+export function resolveImplementationAt(
+  node: NodeDecl,
+  implRoot: string,
+  contractHash: string,
+): Promise<NodeDef>;
+```
+
+Same file convention, same default-export check, same loud error when nothing is there — it simply takes the hash as an argument instead of deriving it. `resolveImplementation` becomes a thin wrapper that derives the hash and delegates, so there is one resolution path rather than two.
+
+Then:
+
+```ts
+export function replayInvocation(entry: TraceEntry, node: NodeDecl, implRoot: string): Promise<unknown>;
+```
+
+Resolves the pinned implementation, re-runs it through `membrane()` against `entry.input`, returns the result. **It does not compare.** Whether the replayed result matches `entry.result` is the caller's question, because answering it would require deciding what equality means for a `Failed<In>`, for a `many` collection, and for anything with a timestamp in it — the same class of question that produced three separate false-greens in this codebase already. A primitive that re-runs honestly is worth more than one that asserts something it can't fully define.
+
+**It does refuse a drifted declaration, which is the one check it must make.** The pin identifies the *implementation*; the `NodeDecl` comes from the caller. If that declaration has changed since the invocation ran, its hash no longer equals `entry.envelope.contractHash`, and replaying would run the old implementation against a *new* contract — `membrane()` asserting the new input shape, a different `scope`, different properties. That is not a replay of anything that ever happened. So `replayInvocation` compares `hashNode(node).hash` against the recorded `contractHash` and throws when they differ, naming both.
+
+This is §5's own doctrine applied one layer up: *"replay on mismatch either migrates through a declared rule or refuses."* There is no migration story for contracts, so it refuses. Declarations are not versioned anywhere — only implementations are — so a faithful replay under a changed contract isn't merely unimplemented, it isn't currently *representable*. Refusing loudly is the honest behaviour; silently running old code under a new contract is the one outcome worth ruling out.
+
+## Explicitly out of scope
+
+- **Comparing a replayed result to the recorded one.** See §5. The obvious next piece, deliberately not this one.
+- **A real store.** `InMemoryTrace` mirrors `InMemoryLog`; persistence beyond process lifetime is the serialization-format question (`open-questions.md`), untouched here.
+- **Splitting `Log`'s two jobs** (emission record vs. input staging). Surfaced by §2, recorded as an open question, not resolved.
+- **Migrate-or-refuse on edge schema mismatch.** §5 describes replay migrating through a declared rule or refusing when an instance's schema hash no longer matches. This spec makes the hash *present* on stored instances, which is the prerequisite; the migration machinery is separate.
+- **Causation chains.** `causationId` stays the honest `null` placeholder `membrane.ts` already documents — nothing yet tells a node which upstream instance triggered it, and inventing it here would be scope creep.
+- **`step`.** Likewise still `0`; the pulse model isn't wired into the membrane.
+
+## Testing
+
+- `Envelope` carries `node` and `contractHash`, and `contractHash` equals `hashNode(decl).hash` for the node that ran.
+- A logged emission stores an envelope whose `schemaHash` is that *edge's* hash — and for an `allOf`-output node, three emissions carry three different edge hashes but identical invocation ids.
+- A staged input (no envelope) still round-trips through `latest`, and every pre-existing `Log` caller keeps working unchanged.
+- `runtime.ts` records one trace entry per node firing, with the pin populated.
+- `resolveImplementationAt` resolves by a *given* hash, ignoring what the declaration currently hashes to — proved by resolving an implementation whose node declaration has since changed.
+- `resolveImplementation` still behaves exactly as before, now via the shared path.
+- `replayInvocation` re-runs a recorded invocation against the pinned implementation and returns its result; replaying an invocation whose node has since gained a *new* accepted implementation still runs the **old** pinned one — the test that proves the pin is doing its job.
+- Replaying against a pin with no implementation on disk fails loudly, naming the node and hash.
+- `replayInvocation` **refuses** when the supplied declaration has drifted — its hash no longer matching the recorded `contractHash` — naming both hashes, rather than running old code under a new contract.
+- `latestInstance` returns the stored provenance; `latest` returns the bare payload, unchanged.
