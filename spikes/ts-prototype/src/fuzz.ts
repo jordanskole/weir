@@ -10,6 +10,7 @@
 import { generateInputCases } from "./generate.js";
 import { invokeWithInput } from "./invoke.js";
 import { assertPayload } from "./membrane.js";
+import { checkProperty } from "./property.js";
 import { looksLikeFailed } from "./runtime.js";
 import type { AnyEdgeDef, InputSpec, NodeDef, OutputSpec } from "./types.js";
 
@@ -124,6 +125,15 @@ export interface FuzzReport {
   total: number;
   passed: number;
   failures: { input: unknown; error: string }[];
+  /**
+   * How many generated cases produced a result matching the declared
+   * OutputSpec, as opposed to `Failed<In>`. Properties are only evaluated
+   * against these — and a node declaring properties where this is zero has
+   * had every property pass vacuously, which is what the acceptance gate's
+   * guard exists to catch.
+   */
+  realOutputs: number;
+  propertyFailures: { property: string; input: unknown; output: unknown }[];
 }
 
 const DEFAULT_SEED = 42;
@@ -199,7 +209,10 @@ export async function fuzzNode(
   const cases = generateInputCases(nodeDef.input, seed, count);
 
   const failures: FuzzReport["failures"] = [];
+  const propertyFailures: FuzzReport["propertyFailures"] = [];
+  const properties = nodeDef.properties ?? [];
   let passed = 0;
+  let realOutputs = 0;
 
   for (const [i, input] of cases.entries()) {
     assertGeneratedCase(nodeDef.input, input, i);
@@ -212,7 +225,16 @@ export async function fuzzNode(
         error: `result matched neither the declared output nor Failed<In>: ${safeStringify(result)}`,
       });
     }
+
+    if (resultMatchesOutput(nodeDef.output, result)) {
+      realOutputs += 1;
+      for (const property of properties) {
+        if (!checkProperty(property, { input, output: result })) {
+          propertyFailures.push({ property: property.name, input, output: result });
+        }
+      }
+    }
   }
 
-  return { total: count, passed, failures };
+  return { total: count, passed, failures, realOutputs, propertyFailures };
 }

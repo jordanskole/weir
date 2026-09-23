@@ -223,3 +223,77 @@ describe("fuzzNode", () => {
     }
   });
 });
+
+describe("fuzzNode — properties", () => {
+  const increments = {
+    name: "increments age by one",
+    description: "A birthday advances the person's age by exactly one year.",
+    expr: { eq: [{ get: "output.age" }, { add: [{ get: "input.age" }, { lit: 1 }] }] },
+  } as const;
+
+  it("reports no property failures when the property holds", async () => {
+    const birthday = defineNode({
+      name: "birthday",
+      input: single(Person),
+      output: single(Person),
+      properties: [increments],
+      fn: (payload) => ({ age: payload.age + 1 }),
+    });
+
+    const report = await fuzzNode(birthday, { count: 20 });
+
+    expect(report.propertyFailures).toEqual([]);
+    expect(report.realOutputs).toBe(20);
+  });
+
+  it("reports a counterexample when the property is violated", async () => {
+    const stuck = defineNode({
+      name: "stuck",
+      input: single(Person),
+      output: single(Person),
+      properties: [increments],
+      fn: (payload) => ({ age: payload.age }),
+    });
+
+    const report = await fuzzNode(stuck, { count: 20 });
+
+    expect(report.propertyFailures.length).toBeGreaterThan(0);
+    expect(report.propertyFailures[0]!.property).toBe("increments age by one");
+    expect(report.propertyFailures[0]).toHaveProperty("input");
+    expect(report.propertyFailures[0]).toHaveProperty("output");
+    // The structural check still passes — { age } is a valid Person.
+    expect(report.failures).toEqual([]);
+  });
+
+  it("counts real outputs separately from Failed<In>, which properties are not evaluated against", async () => {
+    const alwaysFails = defineNode({
+      name: "alwaysFails",
+      input: single(Person),
+      output: single(Person),
+      properties: [increments],
+      fn: () => {
+        throw new Error("always broken");
+      },
+    });
+
+    const report = await fuzzNode(alwaysFails, { count: 20 });
+
+    expect(report.realOutputs).toBe(0);
+    expect(report.propertyFailures).toEqual([]);
+    // Every case is an acceptable Failed<In>, which is exactly why
+    // realOutputs exists — see the gate's vacuity guard.
+    expect(report.passed).toBe(20);
+  });
+
+  it("propagates a broken property expression as a declaration bug, not a violation", async () => {
+    const broken = defineNode({
+      name: "broken",
+      input: single(Person),
+      output: single(Person),
+      properties: [{ name: "typo", description: "references a field that isn't there", expr: { get: "output.nope" } }],
+      fn: (payload) => ({ age: payload.age + 1 }),
+    });
+
+    await expect(fuzzNode(broken, { count: 5 })).rejects.toThrow(/typo/);
+  });
+});
