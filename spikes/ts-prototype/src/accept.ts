@@ -13,12 +13,15 @@
  * behind: drafts aren't versions and don't live in the implementation tree
  * (§10).
  *
- * What this deliberately does *not* check: real semantic correctness
- * beyond what the declared examples pin down exactly. §6's property
- * assertions (`∀ p . ...`) have no representation in `types.ts` yet; a
- * candidate can pass every example and every structural check here and
- * still be wrong in a way nothing declared would catch. Named limitation,
- * not an oversight.
+ * Beyond examples and structural shape, a node may also declare §6
+ * property assertions (`∀ p . ...`) — invariants that must hold for every
+ * generated case whose result was a real output, not a `Failed<In>`. A
+ * candidate that only special-cases its declared examples (the motivating
+ * failure this closes) passes them exactly and fails a property on the
+ * first generated case that isn't the example. A node declaring properties
+ * where no generated case produced a real output is rejected as vacuous —
+ * every property having passed vacuously is the same false-green shape
+ * that has already shipped twice (design-history.md), not a clean result.
  *
  * A fresh draft directory per call sidesteps one gotcha (dynamic `import()`
  * caches by URL, so a fixed draft path would silently re-run the first
@@ -57,6 +60,14 @@ export type AcceptanceResult =
       reason: "checks-failed";
       exampleFailures: ExampleFailure[];
       fuzzReport: FuzzReport;
+      /**
+       * True when the node declares properties but no generated case
+       * produced a real output, so every property passed only because
+       * there was nothing to check it against. Carried explicitly because
+       * a rejection with no failures listed is otherwise unexplainable
+       * from the result alone.
+       */
+      vacuous: boolean;
     };
 
 async function exists(path: string): Promise<boolean> {
@@ -148,8 +159,18 @@ export async function acceptImplementation(
     const exampleFailures = await checkExamples(nodeDef);
     const fuzzReport = await fuzzNode(nodeDef, opts);
 
-    if (exampleFailures.length > 0 || fuzzReport.failures.length > 0) {
-      return { accepted: false, reason: "checks-failed", exampleFailures, fuzzReport };
+    // A node declaring properties none of whose generated cases produced a
+    // real output has had every property pass vacuously — the same
+    // false-green shape that shipped twice before this (design-history.md).
+    const vacuous = (nodeDecl.properties ?? []).length > 0 && fuzzReport.realOutputs === 0;
+
+    if (
+      exampleFailures.length > 0 ||
+      fuzzReport.failures.length > 0 ||
+      fuzzReport.propertyFailures.length > 0 ||
+      vacuous
+    ) {
+      return { accepted: false, reason: "checks-failed", exampleFailures, fuzzReport, vacuous };
     }
 
     // Computed before anything is written: it's a pure function of `source`

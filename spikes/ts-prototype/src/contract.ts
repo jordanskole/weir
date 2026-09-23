@@ -51,6 +51,12 @@ export interface SealedContract {
   closure?: NodeDecl["closure"];
   /** Present iff the node declares one — its presence means Fn takes `(payload, env)`. */
   scope?: NodeDecl["scope"];
+  /**
+   * Invariants the implementation must satisfy for every input
+   * (docs/design.md §6). Unlike examples, a property an agent can see is
+   * not a property an agent can game: the generator chooses the inputs.
+   */
+  properties?: NodeDecl["properties"];
   /** Fn may always return this instead of `output` — Failed<In>'s real shape, docs/design.md §3. */
   failure: { input: ContractInputSpec; reason?: string };
 }
@@ -103,6 +109,7 @@ export function exportContract(node: NodeDecl): SealedContract {
     ...(node.examples !== undefined && { examples: node.examples }),
     ...(node.closure !== undefined && { closure: node.closure }),
     ...(node.scope !== undefined && { scope: node.scope }),
+    ...(node.properties !== undefined && { properties: node.properties }),
     failure: { input: contractInputSpec(node.input) },
   };
 }

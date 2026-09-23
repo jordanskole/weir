@@ -44,6 +44,18 @@ const EXAMPLE_ONLY = `export default function birthday(payload) {
 }
 `;
 
+/**
+ * Hardcodes the declared example, and is a valid Person everywhere else —
+ * so it passes its examples and every structural check, and only the
+ * property catches it. The case §6's "the implementing agent can see the
+ * test" argument is actually about.
+ */
+const GAMES_THE_EXAMPLE = `export default function birthday(payload) {
+  if (payload.age === 41) return { age: 42 };
+  return { age: payload.age };
+}
+`;
+
 /** Wrong shape for every input — fails the example and fuzzing together. */
 const ALWAYS_WRONG = `export default function birthday() {
   return { nope: true };
@@ -310,5 +322,87 @@ describe("acceptImplementation", () => {
 
     await expect(acceptImplementation(manyNoIndex, CORRECT, dir, { count: 5 })).rejects.toThrow(/index/);
     expect(await readdir(dir)).toEqual([]);
+  });
+});
+
+describe("acceptImplementation — properties", () => {
+  const withProperty: NodeDecl = {
+    ...birthday,
+    properties: [
+      {
+        name: "increments age by one",
+        description: "A birthday advances the person's age by exactly one year.",
+        expr: { eq: [{ get: "output.age" }, { add: [{ get: "input.age" }, { lit: 1 }] }] },
+      },
+    ],
+  };
+
+  it("accepts a candidate that satisfies its property", async () => {
+    dir = await mkdtemp(join(tmpdir(), "weir-accept-test-"));
+
+    const result = await acceptImplementation(withProperty, CORRECT, dir, { count: 20 });
+
+    expect(result.accepted).toBe(true);
+  });
+
+  it("rejects a candidate that violates its property, persisting nothing", async () => {
+    dir = await mkdtemp(join(tmpdir(), "weir-accept-test-"));
+    const noIncrement = `export default function birthday(payload) {\n  return { age: payload.age };\n}\n`;
+
+    const result = await acceptImplementation(withProperty, noIncrement, dir, { count: 20 });
+
+    expect(result.accepted).toBe(false);
+    if (result.accepted) throw new Error("unreachable");
+    if (result.reason !== "checks-failed") throw new Error("unreachable");
+    expect(result.fuzzReport.propertyFailures.length).toBeGreaterThan(0);
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it("rejects the candidate that games its example — the case properties exist for", async () => {
+    dir = await mkdtemp(join(tmpdir(), "weir-accept-test-"));
+
+    // GAMES_THE_EXAMPLE hardcodes the declared example and is a valid
+    // Person for every other input too — it passes its examples and every
+    // structural check. Nothing but the property catches it: that's the
+    // whole point of this test.
+    const result = await acceptImplementation(withProperty, GAMES_THE_EXAMPLE, dir, { count: 20 });
+
+    expect(result.accepted).toBe(false);
+    if (result.accepted) throw new Error("unreachable");
+    if (result.reason !== "checks-failed") throw new Error("unreachable");
+    expect(result.exampleFailures).toEqual([]);
+    expect(result.fuzzReport.failures).toEqual([]);
+    expect(result.fuzzReport.propertyFailures.length).toBeGreaterThan(0);
+    expect(result.vacuous).toBe(false);
+  });
+
+  it("rejects as vacuous when a node declares properties but no case produced a real output", async () => {
+    dir = await mkdtemp(join(tmpdir(), "weir-accept-test-"));
+    const alwaysThrows = `export default function birthday() {\n  throw new Error("always broken");\n}\n`;
+
+    const result = await acceptImplementation(withProperty, alwaysThrows, dir, { count: 20 });
+
+    expect(result.accepted).toBe(false);
+    if (result.accepted) throw new Error("unreachable");
+    if (result.reason !== "checks-failed") throw new Error("unreachable");
+    expect(result.vacuous).toBe(true);
+    expect(result.fuzzReport.realOutputs).toBe(0);
+    expect(result.fuzzReport.propertyFailures).toEqual([]);
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it("does not apply the vacuity guard to a node that declares no properties", async () => {
+    dir = await mkdtemp(join(tmpdir(), "weir-accept-test-"));
+    const alwaysThrows = `export default function birthday() {\n  throw new Error("always broken");\n}\n`;
+
+    // No properties declared, so there is nothing to be vacuous about —
+    // this is rejected on its example, not on the guard.
+    const result = await acceptImplementation(birthday, alwaysThrows, dir, { count: 20 });
+
+    expect(result.accepted).toBe(false);
+    if (result.accepted) throw new Error("unreachable");
+    if (result.reason !== "checks-failed") throw new Error("unreachable");
+    expect(result.vacuous).toBe(false);
+    expect(result.exampleFailures.length).toBe(1);
   });
 });

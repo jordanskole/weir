@@ -315,3 +315,32 @@ describe("exportContract", () => {
     expect(exportContract(unscoped)).not.toHaveProperty("scope");
   });
 });
+
+describe("exportContract — properties", () => {
+  it("carries declared properties into the sealed contract", () => {
+    const property = {
+      name: "increments age by one",
+      description: "A birthday advances the person's age by exactly one year.",
+      expr: { eq: [{ get: "output.age" }, { add: [{ get: "input.age" }, { lit: 1 }] }] },
+    } as const;
+
+    const node: NodeDecl = {
+      name: "birthday",
+      input: { kind: "single", edge: Person },
+      output: { kind: "single", edge: Person },
+      properties: [property],
+    };
+
+    expect(exportContract(node).properties).toEqual([property]);
+  });
+
+  it("omits the key when no properties are declared", () => {
+    const node: NodeDecl = {
+      name: "birthday",
+      input: { kind: "single", edge: Person },
+      output: { kind: "single", edge: Person },
+    };
+
+    expect(exportContract(node)).not.toHaveProperty("properties");
+  });
+});

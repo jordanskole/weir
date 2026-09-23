@@ -20,6 +20,8 @@ export type {
   Example,
   NodeDef,
   NodeDecl,
+  PropertyDecl,
+  PropertyExpr,
 } from "./types.js";
 export { Unit } from "./types.js";
 
@@ -55,6 +57,9 @@ export { generateInputCases, generatePayload } from "./generate.js";
 
 export { fuzzNode } from "./fuzz.js";
 export type { FuzzReport } from "./fuzz.js";
+
+export { checkProperty, evaluateProperty } from "./property.js";
+export type { PropertyScope } from "./property.js";
 
 export { acceptImplementation } from "./accept.js";
 export type { AcceptanceResult, ExampleFailure } from "./accept.js";
