@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { hashNode } from "./hash.js";
 import { resolveImplementationAt } from "./implementation.js";
 import { invokeWithInput } from "./invoke.js";
+import { membrane } from "./membrane.js";
 import { replayInvocation } from "./replay.js";
 import type { TraceEntry } from "./trace.js";
 import type { AnyEdgeDef, NodeDecl } from "./types.js";
@@ -40,6 +41,20 @@ const birthdayV2: NodeDecl = {
   ...birthday,
   input: { kind: "single", edge: PersonV2 },
   output: { kind: "single", edge: PersonV2 },
+};
+
+// A node whose Fn reads the caller's narrowed identity back out — the
+// shape needed to prove replay recovers a recorded identity rather than
+// silently falling through to SYSTEM_IDENTITY. Typed with concrete
+// generics (not the plain, doubly-defaulted `NodeDecl` the other fixtures
+// above use) so `membrane()` resolves its real call shape directly, with
+// no `AnySingleInvoke`-style cast needed in this test.
+const whoAmI: NodeDecl<{ kind: "single"; edge: typeof Person }, { kind: "single"; edge: typeof Person }> = {
+  name: "whoAmI",
+  description: "Returns the caller's identity sub, narrowed via scope",
+  input: { kind: "single", edge: Person },
+  output: { kind: "single", edge: Person },
+  scope: ["read:Identity:sub"],
 };
 
 let dir: string | undefined;
@@ -161,5 +176,33 @@ describe("replayInvocation", () => {
     await expect(replayInvocation(entry, birthday, dir)).rejects.toThrow(
       new RegExp(`No accepted implementation for "birthday".*${shortA}`),
     );
+  });
+
+  it("replays under the recorded identity, not SYSTEM_IDENTITY — a node whose scope reads Identity:sub", async () => {
+    dir = await mkdtemp(join(tmpdir(), "weir-replay-identity-"));
+    const { short, hash } = await hashNode(whoAmI);
+    await writeImpl(
+      dir,
+      "whoAmI",
+      short,
+      `export default function whoAmI(payload, env) { return { value: env.identity.sub }; }\n`,
+    );
+
+    const nodeDef = await resolveImplementationAt(whoAmI, dir, hash);
+    // Recorded under a real caller identity, not the system default —
+    // membrane() already accepts this third argument.
+    const { result, envelope } = await membrane(nodeDef)({ age: 41 }, "c-identity", {
+      sub: "alice",
+      iss: "issuer",
+    });
+    if (!envelope) throw new Error("test setup: expected an envelope from a successful invocation");
+    expect(result).toEqual({ value: "alice" });
+    expect(envelope.identity).toEqual({ sub: "alice" });
+
+    const entry: TraceEntry = { envelope, input: { age: 41 }, result };
+    const replayed = await replayInvocation(entry, whoAmI, dir);
+
+    // The recorded value ("alice"), not SYSTEM_IDENTITY's "system".
+    expect(replayed).toEqual({ value: "alice" });
   });
 });

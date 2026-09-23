@@ -131,12 +131,20 @@ async function logOutput(
   }
   if (output.kind === "oneOf") {
     const tagged = result as { edge: string; payload: unknown };
+    // `find` returns undefined for a tag not among the declared edges —
+    // `Tagged<E>` makes that type-unreachable from a well-behaved Fn, so
+    // only a buggy one can land here. `instanceEnvelope` then returns
+    // undefined too, and the instance logs with no envelope: provenance-free,
+    // indistinguishable from a genuinely staged input (`membrane.ts`'s
+    // `LoggedInstance` doc comment). Accepted rather than thrown — failing
+    // an entire run over one node's bad tag would be the wrong trade.
     const edge = output.edges.find((e) => e.name === tagged.edge);
     log.append(tagged.edge, correlationId, tagged.payload, await instanceEnvelope(envelope, edge));
     return;
   }
   const tags = result as { edge: string; payload: unknown }[];
   for (const tagged of tags) {
+    // Same tradeoff as the oneOf lookup above.
     const edge = output.edges.find((e) => e.name === tagged.edge);
     log.append(tagged.edge, correlationId, tagged.payload, await instanceEnvelope(envelope, edge));
   }

@@ -7,6 +7,26 @@
  * carrying a timestamp is a real question, and answering it badly is how
  * this codebase has produced false greens before. Re-running honestly is
  * the primitive; judging the result is the caller's.
+ *
+ * The replayed call is re-fed `entry.envelope.identity` — the *narrowed*
+ * identity the trace recorded, not the full claims set the original caller
+ * actually held (`membrane.ts` never records that; only the fields a
+ * node's `scope` declared are ever kept). That's why this is honestly
+ * recoverable at all: re-narrowing an already-narrowed identity by the
+ * same `scope` is idempotent, so a replayed node reads back exactly what
+ * it read the first time. It stops being idempotent the moment `scope`
+ * widens after the fact — a field the original invocation's `scope` didn't
+ * declare was never recorded, so a replay against a widened declaration
+ * cannot recover it.
+ *
+ * And unlike most contract drift, a `scope`-only change will *not* trip
+ * the hash-drift refusal below: `hash.ts`'s `fingerprintNode` doesn't cover
+ * `scope` (docs/open-questions.md, "what belongs in the contract hash"), so
+ * a widened `scope` resolves the very same pinned implementation and
+ * replays "successfully," with the newly-declared field simply absent
+ * from `identity` — same as it would be for a caller who never held it.
+ * This is a residual limit, not a bug: there is no fuller identity
+ * anywhere to recover it from.
  */
 
 import { hashNode } from "./hash.js";
@@ -32,6 +52,11 @@ export async function replayInvocation(
   }
 
   const nodeDef = await resolveImplementationAt(node, implRoot, entry.envelope.contractHash);
-  const { result } = await invokeWithInput(nodeDef, entry.input, entry.envelope.correlationId);
+  const { result } = await invokeWithInput(
+    nodeDef,
+    entry.input,
+    entry.envelope.correlationId,
+    entry.envelope.identity,
+  );
   return result;
 }

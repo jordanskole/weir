@@ -310,11 +310,20 @@ export interface Invocation<In extends InputSpec, O extends OutputSpec> {
  * What `membrane()` returns for a `single`-input node: hand it a payload,
  * the invocation's correlationId, and (optionally) the caller's identity —
  * defaults to a documented system identity when omitted (file header).
+ * Typed `Partial`, not the full `PayloadOf<typeof Identity>`: a live
+ * caller normally supplies the full claims set, but `replay.ts` supplies
+ * only a previously *narrowed* identity (`Envelope.identity` is itself
+ * `Partial` — see that field's own doc comment), and `narrowIdentity`
+ * below only ever reads the fields a node's `scope` names regardless of
+ * which case this is. Re-feeding a narrowed identity through the same
+ * narrowing is idempotent under an unchanged `scope`, which is exactly
+ * what makes replay work (see replay.ts's header for the residual limit
+ * when `scope` has since widened).
  */
 type SingleInvoke<In extends InputSpec, O extends OutputSpec> = (
   payload: unknown,
   correlationId: string,
-  identity?: PayloadOf<typeof Identity>,
+  identity?: Partial<PayloadOf<typeof Identity>>,
 ) => Promise<Invocation<In, O>>;
 
 /**
@@ -328,7 +337,7 @@ type SingleInvoke<In extends InputSpec, O extends OutputSpec> = (
 type AllOfInvoke<In extends InputSpec, O extends OutputSpec> = (
   correlationId: string,
   log: Log,
-  identity?: PayloadOf<typeof Identity>,
+  identity?: Partial<PayloadOf<typeof Identity>>,
 ) => Promise<Invocation<In, O> | undefined>;
 
 type MembraneInvoke<In extends InputSpec, O extends OutputSpec> = In extends { kind: "single" }
@@ -345,15 +354,18 @@ const SYSTEM_IDENTITY: PayloadOf<typeof Identity> = { sub: "system", iss: "weir"
 const IDENTITY_FIELDS = Object.keys(Identity.fields) as (keyof PayloadOf<typeof Identity>)[];
 
 /**
- * Narrows a full `Identity` down to exactly the fields a node's `scope`
+ * Narrows an `Identity` down to exactly the fields a node's `scope`
  * declares — `{}` when no `scope` is declared (file header). Only
  * `read:Identity:<field>` resolves to anything today; any other verb or
  * edge throws, caught by the caller and turned into `Failed<In>`, never an
- * uncaught exception.
+ * uncaught exception. `identity` itself is `Partial`, not the full claims
+ * shape: an already-narrowed identity (replay's case — see `SingleInvoke`'s
+ * doc comment) can be fed back in here, and narrowing it again by the same
+ * `scope` is a no-op, since only fields present are ever read.
  */
 function narrowIdentity(
   scope: string[] | undefined,
-  identity: PayloadOf<typeof Identity>,
+  identity: Partial<PayloadOf<typeof Identity>>,
 ): Partial<PayloadOf<typeof Identity>> {
   if (!scope || scope.length === 0) return {};
 
@@ -381,7 +393,7 @@ function narrowIdentity(
 async function buildEnvelope(
   nodeDef: NodeDecl,
   correlationId: string,
-  identity: PayloadOf<typeof Identity>,
+  identity: Partial<PayloadOf<typeof Identity>>,
 ): Promise<Envelope> {
   return {
     id: crypto.randomUUID(),
@@ -448,6 +460,13 @@ export function membrane<In extends InputSpec, O extends OutputSpec>(
   if (nodeDef.input.kind === "allOf") {
     const edges = nodeDef.input.edges;
     const invoke: AllOfInvoke<In, O> = async (correlationId, log, identity) => {
+      // Hazard, other end: `Log.latest`'s own doc comment above warns that
+      // `runtime.ts`'s trace-rebuild read depends on nothing appending to
+      // the Log between its read and this one — synchronous `latest`, no
+      // `await` in between. That same invariant breaks identically if an
+      // `await` is ever introduced into *this* loop before it finishes
+      // reading every declared edge — this read is the other end of that
+      // same gap, not a separate hazard.
       const rawBag: Record<string, unknown> = {};
       for (const edge of edges) {
         const value = log.latest(edge.name, correlationId);

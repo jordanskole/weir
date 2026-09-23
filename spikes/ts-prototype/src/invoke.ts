@@ -13,7 +13,8 @@
 
 import { InMemoryLog, membrane } from "./membrane.js";
 import type { Log } from "./membrane.js";
-import type { Envelope, NodeDef } from "./types.js";
+import { Identity } from "./types.js";
+import type { Envelope, NodeDef, PayloadOf } from "./types.js";
 
 /**
  * The same documented cast idiom `runtime.ts` already uses: `membrane()`'s
@@ -21,15 +22,21 @@ import type { Envelope, NodeDef } from "./types.js";
  * resolve from a plain, doubly-defaulted `NodeDef` even after
  * `nodeDef.input.kind` has been checked at the value level — a real TS
  * narrowing limitation, not a genuine call-shape ambiguity (the `kind`
- * branch checks it at runtime).
+ * branch checks it at runtime). Both call shapes carry the same third,
+ * optional `identity` argument `membrane.ts`'s real `SingleInvoke`/
+ * `AllOfInvoke` accept — typed `Partial`, matching `Envelope.identity`
+ * itself, because replay's caller (see `replayInvocation`) can only ever
+ * supply a previously *narrowed* identity, never the full claims set.
  */
 type AnySingleInvoke = (
   payload: unknown,
   correlationId: string,
+  identity?: Partial<PayloadOf<typeof Identity>>,
 ) => Promise<{ result: unknown; envelope?: Envelope }>;
 type AnyAllOfInvoke = (
   correlationId: string,
   log: Log,
+  identity?: Partial<PayloadOf<typeof Identity>>,
 ) => Promise<{ result: unknown; envelope?: Envelope } | undefined>;
 
 /**
@@ -53,14 +60,22 @@ type AnyAllOfInvoke = (
  * output, `accept.ts`'s is arbitrary author-written example data — and only
  * the latter can ever hand this a non-object, so the guard costs the former
  * nothing.
+ *
+ * `identity` is optional and passed straight through to `membrane()` —
+ * omitted, a node resolves under `SYSTEM_IDENTITY` exactly as before
+ * (membrane.ts's documented default). `replay.ts` is the caller that
+ * supplies one, re-feeding a recorded `Envelope.identity` back in so a
+ * scoped node's replayed result reflects who actually invoked it rather
+ * than always falling through to the system default.
  */
 export async function invokeWithInput(
   nodeDef: NodeDef,
   input: unknown,
   correlationId: string,
+  identity?: Partial<PayloadOf<typeof Identity>>,
 ): Promise<{ result: unknown; envelope?: Envelope }> {
   if (nodeDef.input.kind === "single") {
-    return await (membrane(nodeDef) as AnySingleInvoke)(input, correlationId);
+    return await (membrane(nodeDef) as AnySingleInvoke)(input, correlationId, identity);
   }
 
   const log = new InMemoryLog();
@@ -68,6 +83,6 @@ export async function invokeWithInput(
   for (const edge of nodeDef.input.edges) {
     log.append(edge.name, correlationId, bag[edge.name]);
   }
-  const invocation = await (membrane(nodeDef) as AnyAllOfInvoke)(correlationId, log);
+  const invocation = await (membrane(nodeDef) as AnyAllOfInvoke)(correlationId, log, identity);
   return invocation ?? { result: undefined };
 }

@@ -65,7 +65,7 @@ export { acceptImplementation } from "./accept.js";
 export type { AcceptanceResult, ExampleFailure } from "./accept.js";
 
 export { invokeWithInput } from "./invoke.js";
-export type { Invocation } from "./membrane.js";
+export type { Invocation, InstanceEnvelope, LoggedInstance } from "./membrane.js";
 
 export { InMemoryTrace } from "./trace.js";
 export type { Trace, TraceEntry } from "./trace.js";
