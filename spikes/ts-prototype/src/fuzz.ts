@@ -7,10 +7,10 @@
  * "∀ p . ..." properties), only "did this crash or come back garbage."
  */
 
-import { assertPayload, InMemoryLog, membrane } from "./membrane.js";
+import { assertPayload } from "./membrane.js";
+import { invokeWithInput } from "./invoke.js";
 import { generateInputCases } from "./generate.js";
 import { looksLikeFailed } from "./runtime.js";
-import type { Log } from "./membrane.js";
 import type { AnyEdgeDef, InputSpec, NodeDef, OutputSpec } from "./types.js";
 
 /**
@@ -130,19 +130,6 @@ const DEFAULT_SEED = 42;
 const DEFAULT_COUNT = 100;
 
 /**
- * Same documented cast idiom runtime.ts's own AnySingleInvoke/AnyAllOfInvoke
- * use (and the same plain, doubly-defaulted `NodeDef` runtime.ts's own
- * `program.nodes: Record<string, NodeDef>` already stores its erased node
- * declarations as): membrane()'s return type is a conditional on NodeDef's
- * generic In, which TS can't resolve here even after nodeDef.input.kind is
- * checked at the value level — a real TS narrowing limitation, not a
- * genuine call-shape ambiguity (the `kind` branch itself checks it at
- * runtime).
- */
-type AnySingleInvoke = (payload: unknown, correlationId: string) => Promise<unknown>;
-type AnyAllOfInvoke = (correlationId: string, log: Log) => Promise<unknown>;
-
-/**
  * Validates one already-generated case against the declared InputSpec —
  * the same check membrane() itself runs at its own input boundary
  * (assertPayload, reused rather than reimplemented) — *before* handing the
@@ -214,33 +201,16 @@ export async function fuzzNode(
   const failures: FuzzReport["failures"] = [];
   let passed = 0;
 
-  if (nodeDef.input.kind === "single") {
-    const invoke = membrane(nodeDef) as AnySingleInvoke;
-    for (const [i, input] of cases.entries()) {
-      assertGeneratedCase(nodeDef.input, input, i);
-      const result = await invoke(input, `fuzz-${i}`);
-      if (isAcceptableResult(nodeDef.output, result)) {
-        passed += 1;
-      } else {
-        failures.push({ input, error: `result matched neither the declared output nor Failed<In>: ${safeStringify(result)}` });
-      }
-    }
-  } else {
-    const invoke = membrane(nodeDef) as AnyAllOfInvoke;
-    for (const [i, bagCase] of cases.entries()) {
-      assertGeneratedCase(nodeDef.input, bagCase, i);
-      const correlationId = `fuzz-${i}`;
-      const log = new InMemoryLog();
-      const bag = bagCase as Record<string, unknown>;
-      for (const edge of nodeDef.input.edges) {
-        log.append(edge.name, correlationId, bag[edge.name]);
-      }
-      const result = await invoke(correlationId, log);
-      if (isAcceptableResult(nodeDef.output, result)) {
-        passed += 1;
-      } else {
-        failures.push({ input: bagCase, error: `result matched neither the declared output nor Failed<In>: ${safeStringify(result)}` });
-      }
+  for (const [i, input] of cases.entries()) {
+    assertGeneratedCase(nodeDef.input, input, i);
+    const result = await invokeWithInput(nodeDef, input, `fuzz-${i}`);
+    if (isAcceptableResult(nodeDef.output, result)) {
+      passed += 1;
+    } else {
+      failures.push({
+        input,
+        error: `result matched neither the declared output nor Failed<In>: ${safeStringify(result)}`,
+      });
     }
   }
 
