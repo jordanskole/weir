@@ -1,6 +1,6 @@
 # The acceptance pipeline: generate → validate → persist
 
-Status: designed.
+Status: implemented.
 
 ## Motivation
 

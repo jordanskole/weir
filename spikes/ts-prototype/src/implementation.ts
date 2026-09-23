@@ -9,8 +9,8 @@
  * survive across the declarations/implementations package boundary (§10).
  * Draft attempts an agent iterates on before acceptance aren't versions and
  * don't live here (§10) — this only ever reads a file that's already been
- * accepted; writing new ones is a separate, not-yet-built concern (§6's
- * acceptance gate).
+ * accepted. Writing one is `accept.ts`'s job (`acceptImplementation`), the
+ * other half of this same seam.
  */
 
 import { pathToFileURL } from "node:url";
