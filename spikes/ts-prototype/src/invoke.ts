@@ -34,7 +34,16 @@ type AnyAllOfInvoke = (correlationId: string, log: Log) => Promise<unknown>;
  * first. One log per invocation, never shared, so nothing leaks between
  * cases. Resolves to `undefined` for an `allOf` node whose bag is missing a
  * declared edge — `membrane()`'s own readiness semantics, passed through
- * unchanged rather than reinterpreted here.
+ * unchanged rather than reinterpreted here. A non-object `input` (`null`,
+ * `undefined`, or any other non-object — what an author-written example
+ * whose `given` is malformed, e.g. `given:` with nothing after it in YAML,
+ * parses to) is treated the same way: every declared edge simply reads as
+ * missing from it, landing on the same not-ready `undefined` rather than
+ * throwing a raw `TypeError` trying to index into it. This module has two
+ * callers with two different trust levels for `input` — `fuzz.ts`'s is
+ * always pre-validated generator output, `accept.ts`'s is arbitrary
+ * author-written example data — and only the latter can ever hand this a
+ * non-object, so the guard costs the former nothing.
  */
 export async function invokeWithInput(
   nodeDef: NodeDef,
@@ -46,7 +55,7 @@ export async function invokeWithInput(
   }
 
   const log = new InMemoryLog();
-  const bag = input as Record<string, unknown>;
+  const bag = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
   for (const edge of nodeDef.input.edges) {
     log.append(edge.name, correlationId, bag[edge.name]);
   }

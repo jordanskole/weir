@@ -7,9 +7,9 @@
  * "∀ p . ..." properties), only "did this crash or come back garbage."
  */
 
-import { assertPayload } from "./membrane.js";
-import { invokeWithInput } from "./invoke.js";
 import { generateInputCases } from "./generate.js";
+import { invokeWithInput } from "./invoke.js";
+import { assertPayload } from "./membrane.js";
 import { looksLikeFailed } from "./runtime.js";
 import type { AnyEdgeDef, InputSpec, NodeDef, OutputSpec } from "./types.js";
 

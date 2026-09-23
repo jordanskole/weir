@@ -19,10 +19,20 @@
  * candidate can pass every example and every structural check here and
  * still be wrong in a way nothing declared would catch. Named limitation,
  * not an oversight.
+ *
+ * A fresh draft directory per call sidesteps one gotcha (dynamic `import()`
+ * caches by URL, so a fixed draft path would silently re-run the first
+ * candidate's code forever) but has a flip side worth naming rather than
+ * discovering later: each draft's URL stays registered in the process's ESM
+ * module registry for the process's lifetime even after the file behind it
+ * is deleted — there's no `import.unregister()`. Irrelevant at spike scale
+ * (a handful of calls per test run); real for the agent-iterating-toward-
+ * acceptance loop this gate exists to serve, where one long-running process
+ * could call this thousands of times.
  */
 
+import { constants } from "node:fs";
 import { access, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
@@ -85,6 +95,17 @@ export async function acceptImplementation(
   const nodeDir = join(implRoot, nodeDecl.name);
   const path = join(nodeDir, `${short}.ts`);
 
+  if ((nodeDecl.examples ?? []).length === 0) {
+    throw new Error(
+      `"${nodeDecl.name}" declares no examples. A single example can't pin down a function ` +
+        `(docs/design.md §6 — one example underdetermines the mapping a node's supposed to compute), ` +
+        `and with zero, nothing does: fuzzNode's generated-case check legitimately counts Failed<In> as ` +
+        `a pass, so a candidate that fails on every input would sail through unconstrained. ` +
+        `"schema.ts"'s nodeSchema() already requires examples to be non-empty at authoring time — this ` +
+        `is the same invariant, enforced again here because a candidate is actually checked against it.`,
+    );
+  }
+
   if (await exists(path)) {
     throw new Error(
       `"${nodeDecl.name}" already has an accepted implementation at contract hash "${short}" ` +
@@ -95,7 +116,13 @@ export async function acceptImplementation(
 
   // A fresh directory per call: dynamic import() caches by URL, so a fixed
   // draft path would silently re-run the first candidate's code forever.
-  const draftDir = await mkdtemp(join(tmpdir(), "weir-accept-"));
+  // Drafted under implRoot itself, not the OS temp dir — a candidate that
+  // imports one of the project's own dependencies must resolve bare
+  // specifiers the same way it will once persisted; drafting outside
+  // implRoot's own directory tree checks the candidate in a different
+  // module-resolution context than it will ever actually run in.
+  await mkdir(implRoot, { recursive: true });
+  const draftDir = await mkdtemp(join(implRoot, ".drafts-"));
   try {
     const draftPath = join(draftDir, `${short}.ts`);
     await writeFile(draftPath, source, "utf8");
@@ -125,13 +152,28 @@ export async function acceptImplementation(
       return { accepted: false, reason: "checks-failed", exampleFailures, fuzzReport };
     }
 
+    // Computed before anything is written: it's a pure function of `source`
+    // and it can throw (a parse-diagnostic candidate — metadata.ts's
+    // assertParsed) — if that happens after copyFile instead, an
+    // implementation file is left on disk with no metadata sibling, and the
+    // already-accepted check above then makes that contract hash permanently
+    // un-acceptable (nothing will ever pass `exists(path)` false again for
+    // it), recoverable only by hand. Computing first means nothing that can
+    // still fail is left to fail after a write has already happened.
+    const metadata = computeImplementationMetadata(source);
+
     await mkdir(nodeDir, { recursive: true });
-    // Copy rather than rename: the OS temp dir and implRoot aren't
-    // guaranteed to share a filesystem, and a cross-device rename is EXDEV.
-    await copyFile(draftPath, path);
+    // Copy rather than rename: not for cross-device safety anymore — the
+    // draft now lives under implRoot itself, so draftPath and path always
+    // share a filesystem — but copyFile's COPYFILE_EXCL flag makes the
+    // "never overwritten" invariant real rather than advisory, closing the
+    // TOCTOU window between the exists() check above and this write (two
+    // concurrent calls for the same contract hash could otherwise both see
+    // "doesn't exist yet" and the second would clobber the first).
+    await copyFile(draftPath, path, constants.COPYFILE_EXCL);
 
     const metadataPath = join(nodeDir, `${short}.meta.json`);
-    await writeFile(metadataPath, `${JSON.stringify(computeImplementationMetadata(source), null, 2)}\n`, "utf8");
+    await writeFile(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
 
     return { accepted: true, path, metadataPath };
   } finally {

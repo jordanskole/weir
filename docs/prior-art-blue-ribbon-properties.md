@@ -115,8 +115,8 @@ disputed number."* Fields with no validated source in the spike (`relief_envelop
 `prominence_ft`) are deliberately left out of the golden assertions rather than asserted
 against a guess.
 
-This is §10's accept-before-persist gate, run manually, before any tooling exists to run it
-automatically — further evidence (alongside bankql) that the pattern isn't weir-specific
+This is §10's accept-before-persist gate, run manually here rather than through `accept.ts`'s
+now-built automated version — further evidence (alongside bankql) that the pattern isn't weir-specific
 invention, it's what happens whenever a real project needs to trust generated/computed values
 without re-deriving them by hand each time.
 

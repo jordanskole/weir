@@ -62,4 +62,20 @@ describe("invokeWithInput", () => {
 
     expect(await invokeWithInput(boom, { age: 41 }, "c-4")).toEqual({ input: { age: 41 }, reason: "nope" });
   });
+
+  it("resolves a null/undefined allOf input the same way membrane's own not-ready path does, rather than throwing a raw TypeError", async () => {
+    const combine = defineNode({
+      name: "combine",
+      input: allOf(Person, Pet),
+      output: single(Person),
+      fn: () => ({ age: 7 }),
+    });
+
+    // A malformed `given` (an author writing `given:` with nothing after it in
+    // YAML parses as null) is not a real bag — every declared edge is missing,
+    // so this should land exactly where a bag genuinely missing an edge does:
+    // membrane's own readiness `undefined`, not a crash escaping the seam.
+    expect(await invokeWithInput(combine, null, "c-5")).toBeUndefined();
+    expect(await invokeWithInput(combine, undefined, "c-6")).toBeUndefined();
+  });
 });
