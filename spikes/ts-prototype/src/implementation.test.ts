@@ -5,7 +5,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { elaborate } from "./elaborate.js";
 import { hashNode } from "./hash.js";
-import { elaborateWithImplementations, resolveImplementation } from "./implementation.js";
+import {
+  elaborateWithImplementations,
+  resolveImplementation,
+  resolveImplementationAt,
+} from "./implementation.js";
 import type { AnyEdgeDef, NodeDecl } from "./types.js";
 
 const PERSON_BIRTHDAY_SRC = fileURLToPath(
@@ -66,6 +70,50 @@ describe("resolveImplementation", () => {
     await writeFile(join(dir, "birthday", `${short}.ts`), `export const notDefault = 1;\n`, "utf8");
 
     await expect(resolveImplementation(birthday, dir)).rejects.toThrow(/must default-export/);
+  });
+});
+
+describe("resolveImplementationAt", () => {
+  it("resolves using a given hash, ignoring what the declaration currently hashes to", async () => {
+    dir = await mkdtemp(join(tmpdir(), "weir-implementation-at-"));
+    const { hash: hashA, short: shortA } = await hashNode(birthday);
+    await mkdir(join(dir, "birthday"), { recursive: true });
+    await writeFile(
+      join(dir, "birthday", `${shortA}.ts`),
+      `export default function birthday(payload) { return { age: payload.age + 1 }; }\n`,
+      "utf8",
+    );
+
+    // Mutate the declaration (a wider Person edge) so it now hashes to a
+    // different value than the file we just wrote for.
+    const MutatedPerson: AnyEdgeDef = {
+      name: "Person",
+      label: "Person",
+      description: "A person",
+      fields: {
+        age: { type: "uint8", label: "Age", description: "d", nullable: false },
+        nickname: { type: "utf8", label: "Nickname", description: "d", nullable: true },
+      },
+    };
+    const mutatedBirthday: NodeDecl = {
+      ...birthday,
+      input: { kind: "single", edge: MutatedPerson },
+      output: { kind: "single", edge: MutatedPerson },
+    };
+    const hashB = (await hashNode(mutatedBirthday)).hash;
+    expect(hashB).not.toBe(hashA);
+
+    // resolveImplementationAt, given the OLD hash explicitly, still finds
+    // the file — even though `mutatedBirthday` no longer hashes to it.
+    const node = await resolveImplementationAt(mutatedBirthday, dir, hashA);
+    expect(await node.fn({ age: 41 })).toEqual({ age: 42 });
+
+    // resolveImplementation, which derives the hash from the declaration
+    // it's given, fails for that same mutated declaration: no file exists
+    // at hash B.
+    await expect(resolveImplementation(mutatedBirthday, dir)).rejects.toThrow(
+      /No accepted implementation for "birthday"/,
+    );
   });
 });
 

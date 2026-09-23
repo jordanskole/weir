@@ -19,11 +19,19 @@ import type { Wiring } from "./elaborate.js";
 import { hashNode } from "./hash.js";
 import type { AnyEdgeDef, FieldDef, InputSpec, NodeDecl, NodeDef, OutputSpec } from "./types.js";
 
-export async function resolveImplementation<In extends InputSpec, O extends OutputSpec>(
+/**
+ * Resolves the implementation accepted for a *given* contract hash, rather
+ * than for whatever the declaration hashes to now. That distinction is the
+ * whole point of replay: a declaration may have changed since an
+ * invocation ran, and re-deriving the hash would resolve the wrong file or
+ * none at all (docs/design.md §10, "Replay").
+ */
+export async function resolveImplementationAt<In extends InputSpec, O extends OutputSpec>(
   node: NodeDecl<In, O>,
   implRoot: string,
+  contractHash: string,
 ): Promise<NodeDef<In, O>> {
-  const { short } = await hashNode(node);
+  const short = contractHash.slice(0, 8);
   const path = `${implRoot}/${node.name}/${short}.ts`;
 
   let mod: Record<string, unknown>;
@@ -43,6 +51,20 @@ export async function resolveImplementation<In extends InputSpec, O extends Outp
   }
 
   return { ...node, fn: mod.default as NodeDef<In, O>["fn"] };
+}
+
+/**
+ * The everyday path: derives the contract hash from the declaration itself,
+ * then delegates to `resolveImplementationAt`. One resolution path, not
+ * two — this is a thin wrapper, never a separate implementation of the
+ * lookup.
+ */
+export async function resolveImplementation<In extends InputSpec, O extends OutputSpec>(
+  node: NodeDecl<In, O>,
+  implRoot: string,
+): Promise<NodeDef<In, O>> {
+  const { hash } = await hashNode(node);
+  return resolveImplementationAt(node, implRoot, hash);
 }
 
 /** Everything `elaborate()` produces, with every node contract resolved to a real, runnable NodeDef. */

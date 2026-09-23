@@ -69,3 +69,7 @@ export type { Invocation } from "./membrane.js";
 
 export { InMemoryTrace } from "./trace.js";
 export type { Trace, TraceEntry } from "./trace.js";
+
+export { resolveImplementationAt } from "./implementation.js";
+
+export { replayInvocation } from "./replay.js";
