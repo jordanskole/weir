@@ -55,3 +55,8 @@ export { generateInputCases, generatePayload } from "./generate.js";
 
 export { fuzzNode } from "./fuzz.js";
 export type { FuzzReport } from "./fuzz.js";
+
+export { acceptImplementation } from "./accept.js";
+export type { AcceptanceResult, ExampleFailure } from "./accept.js";
+
+export { invokeWithInput } from "./invoke.js";
