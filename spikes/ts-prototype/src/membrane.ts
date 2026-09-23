@@ -214,26 +214,64 @@ export function assertPayload<E extends AnyEdgeDef>(edge: E, payload: unknown): 
 }
 
 /**
+ * An `Envelope` plus the hash of the specific edge this instance was
+ * written under (docs/design.md §5) — the thing that later lets replay
+ * migrate-or-refuse when stored data predates an edge change. Deliberately
+ * distinct from `Envelope.contractHash` (the *node contract's* hash, fixed
+ * for the whole invocation): an `allOf`-output node emits several
+ * instances from one invocation, each under a different edge, so
+ * `schemaHash` varies per instance while `envelope.id` (naming that one
+ * invocation) stays the same across all of them.
+ */
+export interface InstanceEnvelope extends Envelope {
+  schemaHash: string;
+}
+
+/**
+ * One stored edge instance. `envelope` is absent for a *staged* input —
+ * see `Log.append` — never for a real emitted instance a node produced.
+ */
+export interface LoggedInstance {
+  payload: unknown;
+  envelope?: InstanceEnvelope;
+}
+
+/**
  * The per-edge-type logs a multi-input node's readiness is resolved
  * against (docs/design.md §5) — one log per edge type, each keyed by
  * correlation_id, never one shared mutable pool. `latest` returns `undefined`
  * when no instance of that edge type has appeared yet for that thread.
  */
 export interface Log {
-  append(edgeName: string, correlationId: string, payload: unknown): void;
+  /**
+   * Stores one edge instance. The Log stores provenance but never computes
+   * it: `append` receives an edge *name*, not its definition, and is
+   * synchronous, while hashing an edge (`hashEdge`) needs the definition
+   * and is async — so the Log cannot hash an edge even in principle. The
+   * caller that knows the edge (runtime.ts's `logOutput`) hashes it and
+   * passes the resulting `InstanceEnvelope`; `envelope` is omitted for a
+   * staged payload with no real invocation behind it (tests, readiness
+   * fixtures for an `allOf`-input node).
+   */
+  append(edgeName: string, correlationId: string, payload: unknown, envelope?: InstanceEnvelope): void;
   latest(edgeName: string, correlationId: string): unknown | undefined;
+  /** The full stored instance — payload plus provenance, when there is any (see `append`). */
+  latestInstance(edgeName: string, correlationId: string): LoggedInstance | undefined;
 }
 
 /** An in-memory Log — the spike has no real store yet; this is enough to test readiness against. */
 export class InMemoryLog implements Log {
-  private readonly entries = new Map<string, unknown>();
+  private readonly entries = new Map<string, LoggedInstance>();
   private key(edgeName: string, correlationId: string): string {
     return `${edgeName} ${correlationId}`;
   }
-  append(edgeName: string, correlationId: string, payload: unknown): void {
-    this.entries.set(this.key(edgeName, correlationId), payload);
+  append(edgeName: string, correlationId: string, payload: unknown, envelope?: InstanceEnvelope): void {
+    this.entries.set(this.key(edgeName, correlationId), { payload, envelope });
   }
   latest(edgeName: string, correlationId: string): unknown | undefined {
+    return this.entries.get(this.key(edgeName, correlationId))?.payload;
+  }
+  latestInstance(edgeName: string, correlationId: string): LoggedInstance | undefined {
     return this.entries.get(this.key(edgeName, correlationId));
   }
 }

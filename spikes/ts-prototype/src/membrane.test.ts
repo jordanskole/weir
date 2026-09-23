@@ -130,6 +130,18 @@ describe("membrane", () => {
   });
 });
 
+describe("Log — staged appends with no envelope", () => {
+  it("round-trips a staged append through latest, with no envelope on latestInstance", () => {
+    const log = new InMemoryLog();
+    log.append("Person", "thread-1", { age: 41, nickname: null });
+    expect(log.latest("Person", "thread-1")).toEqual({ age: 41, nickname: null });
+    expect(log.latestInstance("Person", "thread-1")).toEqual({
+      payload: { age: 41, nickname: null },
+      envelope: undefined,
+    });
+  });
+});
+
 const Address = defineEdge({
   name: "Address",
   label: "Address",

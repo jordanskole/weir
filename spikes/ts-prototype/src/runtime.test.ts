@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { defineEdge, defineField, defineNode, defineAnyOfNodes, allOf, single } from "./define.js";
 import { elaborate } from "./elaborate.js";
-import { hashNode } from "./hash.js";
+import { hashEdge, hashNode } from "./hash.js";
 import { elaborateWithImplementations } from "./implementation.js";
 import { InMemoryLog } from "./membrane.js";
 import { runNetlist } from "./runtime.js";
@@ -44,6 +44,24 @@ describe("runNetlist", () => {
 
     expect(result.failures).toEqual([]);
     expect(log.latest("Start", "thread-1")).toEqual({ value: "aa" });
+  });
+
+  it("stores per-instance provenance on the logged instance — envelope.node and envelope.schemaHash for the emitted edge", async () => {
+    const doubled = defineNode({
+      name: "doubled",
+      input: single(Start),
+      output: single(Start),
+      fn: (s) => ({ value: s.value + s.value }),
+    });
+    const program = programWith({ doubled }, { origins: ["doubled"], feeds: {} });
+    const log = new InMemoryLog();
+
+    await runNetlist(program, log, "thread-1", { doubled: { value: "a" } });
+
+    const instance = log.latestInstance("Start", "thread-1");
+    expect(instance?.payload).toEqual({ value: "aa" });
+    expect(instance?.envelope?.node).toBe("doubled");
+    expect(instance?.envelope?.schemaHash).toBe((await hashEdge(Start)).hash);
   });
 
   it("does not fire an origin node whose payload was never supplied", async () => {
@@ -211,6 +229,12 @@ describe("runNetlist", () => {
     expect(result.failures).toEqual([]);
     expect(log.latest("Failed_Start", "thread-1")).toEqual({ input: { value: "a" }, reason: "kaboom" });
     expect(log.latest("Start", "thread-1")).toBeUndefined();
+    // Failed_Start is synthesized by the elaborator, not declared in this
+    // hand-built program's `edges` — a missing synthesized edge is an
+    // elaborator concern, not something the runtime fails the run over, so
+    // the instance is logged with no envelope rather than throwing.
+    expect(program.edges.Failed_Start).toBeUndefined();
+    expect(log.latestInstance("Failed_Start", "thread-1")?.envelope).toBeUndefined();
   });
 
   it("a downstream node declaring Failed_<InputEdgeName> as its input becomes ready once the failure is logged", async () => {
@@ -247,6 +271,12 @@ describe("runNetlist", () => {
     expect(result.failures).toEqual([]);
     expect(log.latest("Failed_Start", "thread-1")).toEqual({ input: { value: "a" }, reason: "kaboom" });
     expect(log.latest("Start", "thread-1")).toEqual({ value: "a" });
+    // Failed_Start *is* declared in this program's `edges` (FailedStart,
+    // above) — the runtime looks it up and hashes it, same as any other
+    // emitted instance.
+    expect(log.latestInstance("Failed_Start", "thread-1")?.envelope?.schemaHash).toBe(
+      (await hashEdge(FailedStart)).hash,
+    );
   });
 
   it("routes an allOf-input node's failure to the sorted-name combo edge, order-independent", async () => {
@@ -349,6 +379,18 @@ describe("runNetlist", () => {
     expect(log.latest("InvoiceRequested", "thread-1")).toEqual({});
     expect(log.latest("InventoryReserved", "thread-1")).toEqual({});
     expect(result.failures).toEqual([]);
+
+    // Same invocation (one call to placeOrder), two emitted instances: the
+    // envelope.id ties them back to that one invocation, but each carries
+    // the schema hash of the edge it was actually written under — the whole
+    // reason this lives at instance grain rather than on the invocation.
+    const invoiceInstance = log.latestInstance("InvoiceRequested", "thread-1");
+    const inventoryInstance = log.latestInstance("InventoryReserved", "thread-1");
+    expect(invoiceInstance?.envelope?.id).toBeDefined();
+    expect(invoiceInstance?.envelope?.id).toBe(inventoryInstance?.envelope?.id);
+    expect(invoiceInstance?.envelope?.schemaHash).toBe((await hashEdge(InvoiceRequested)).hash);
+    expect(inventoryInstance?.envelope?.schemaHash).toBe((await hashEdge(InventoryReserved)).hash);
+    expect(invoiceInstance?.envelope?.schemaHash).not.toBe(inventoryInstance?.envelope?.schemaHash);
   });
 
   it("routes a many output — logs the whole collection as one edge instance", async () => {

@@ -44,10 +44,11 @@
  */
 
 import { membrane } from "./membrane.js";
-import type { Log } from "./membrane.js";
+import type { InstanceEnvelope, Log } from "./membrane.js";
 import type { Program } from "./implementation.js";
-import type { Envelope, Failed, InputSpec, OutputSpec, PayloadOf } from "./types.js";
+import type { AnyEdgeDef, Envelope, Failed, InputSpec, OutputSpec, PayloadOf } from "./types.js";
 import { Identity, failedEdgeName, failedAllOfEdgeName } from "./types.js";
+import { hashEdge } from "./hash.js";
 
 /**
  * `program.nodes` stores heterogeneous NodeDefs in one `Record<string,
@@ -89,26 +90,54 @@ export function looksLikeFailed(result: unknown): result is Failed<InputSpec> {
 }
 
 /**
+ * Builds the `InstanceEnvelope` for one emitted instance of `edge` — the
+ * invocation's `Envelope` plus that edge's own schema hash (docs/design.md
+ * §5). `undefined` when there's no base envelope to extend (Fn never ran)
+ * or no edge to hash against (see `logOutput`'s `oneOf` lookup and
+ * `tryFire`'s failure path — a missing synthesized edge, an elaborator
+ * concern, not something worth failing a run over).
+ */
+async function instanceEnvelope(
+  envelope: Envelope | undefined,
+  edge: AnyEdgeDef | undefined,
+): Promise<InstanceEnvelope | undefined> {
+  if (!envelope || !edge) return undefined;
+  return { ...envelope, schemaHash: (await hashEdge(edge)).hash };
+}
+
+/**
  * Logs a successful result under the right edge name(s) for its declared
  * output kind: `single`/`many` log the one result directly under the
  * declared edge's name (a `many` result is already one collection payload,
  * never N separate instances — docs/design-history.md, "`many` is a
  * collection, keyed by index, not an array"); `oneOf` logs only the branch
- * that actually tagged itself; `allOf` logs every tagged branch.
+ * that actually tagged itself; `allOf` logs every tagged branch. Each
+ * logged instance carries its own `InstanceEnvelope`, hashed against the
+ * specific edge it was written under — `envelope` here is the invocation's
+ * envelope (same `id` for every instance an `allOf`-output node emits;
+ * different `schemaHash` per instance, see `instanceEnvelope`).
  */
-function logOutput(log: Log, output: OutputSpec, result: unknown, correlationId: string): void {
+async function logOutput(
+  log: Log,
+  output: OutputSpec,
+  result: unknown,
+  correlationId: string,
+  envelope: Envelope | undefined,
+): Promise<void> {
   if (output.kind === "single" || output.kind === "many") {
-    log.append(output.edge.name, correlationId, result);
+    log.append(output.edge.name, correlationId, result, await instanceEnvelope(envelope, output.edge));
     return;
   }
   if (output.kind === "oneOf") {
     const tagged = result as { edge: string; payload: unknown };
-    log.append(tagged.edge, correlationId, tagged.payload);
+    const edge = output.edges.find((e) => e.name === tagged.edge);
+    log.append(tagged.edge, correlationId, tagged.payload, await instanceEnvelope(envelope, edge));
     return;
   }
   const tags = result as { edge: string; payload: unknown }[];
   for (const tagged of tags) {
-    log.append(tagged.edge, correlationId, tagged.payload);
+    const edge = output.edges.find((e) => e.name === tagged.edge);
+    log.append(tagged.edge, correlationId, tagged.payload, await instanceEnvelope(envelope, edge));
   }
 }
 
@@ -132,6 +161,7 @@ export async function runNetlist(
     }
 
     let result: unknown;
+    let envelope: Envelope | undefined;
     if (nodeDef.input.kind === "single") {
       let payload: unknown;
       if (origins.has(nodeName)) {
@@ -143,24 +173,37 @@ export async function runNetlist(
       }
       const invocation = await (membrane(nodeDef) as AnySingleInvoke)(payload, correlationId, identity);
       result = invocation.result;
+      envelope = invocation.envelope;
     } else {
       const invocation = await (membrane(nodeDef) as AnyAllOfInvoke)(correlationId, log, identity);
       if (invocation === undefined) return false;
       result = invocation.result;
+      envelope = invocation.envelope;
     }
 
     fired.add(nodeName);
     if (looksLikeFailed(result)) {
+      // The synthesized Failed_* edge is a real emitted instance too — hash
+      // it the same way, but it's the *elaborator*'s job to have synthesized
+      // it into program.edges (synthesizeFailedEdges/synthesizeAllOfFailedEdges).
+      // If it isn't there, log with no envelope rather than throw: a missing
+      // synthesized edge is an elaborator concern, not something worth
+      // failing an entire run over.
+      const failedName =
+        nodeDef.input.kind === "single"
+          ? failedEdgeName(nodeDef.input.edge.name)
+          : failedAllOfEdgeName(nodeDef.input.edges);
+      const failedEnvelope = await instanceEnvelope(envelope, program.edges[failedName]);
       if (nodeDef.input.kind === "single") {
-        log.append(failedEdgeName(nodeDef.input.edge.name), correlationId, result);
+        log.append(failedName, correlationId, result, failedEnvelope);
       } else {
         // The synthesized combo edge is flat (elaborate.ts's synthesizeAllOfFailedEdges:
         // {A, B, reason}, no `input` wrapper) — spread the bag alongside reason to match.
         const bag = result.input as Record<string, unknown>;
-        log.append(failedAllOfEdgeName(nodeDef.input.edges), correlationId, { ...bag, reason: result.reason });
+        log.append(failedName, correlationId, { ...bag, reason: result.reason }, failedEnvelope);
       }
     } else {
-      logOutput(log, nodeDef.output, result, correlationId);
+      await logOutput(log, nodeDef.output, result, correlationId, envelope);
     }
     return true;
   }
