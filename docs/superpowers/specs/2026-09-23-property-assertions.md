@@ -1,6 +1,6 @@
 # Property assertions: `∀ p . birthday(p).age == p.age + 1`, made real
 
-Status: designed.
+Status: implemented.
 
 ## Motivation
 

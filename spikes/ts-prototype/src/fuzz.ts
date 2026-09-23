@@ -2,9 +2,18 @@
  * The structural fuzz harness (docs/superpowers/specs/2026-09-10-
  * generator-and-fuzz-harness.md) — runs generated inputs through a node's
  * real Fn via membrane() and checks the result is structurally either a
- * valid OutputSpec match or a valid Failed<In>. Never checks semantic
- * correctness: no property-assertion mechanism exists yet (design.md §6's
- * "∀ p . ..." properties), only "did this crash or come back garbage."
+ * valid OutputSpec match or a valid Failed<In>. Also evaluates a node's
+ * declared §6 property assertions (docs/superpowers/specs/2026-09-23-
+ * property-assertions.md) against every generated case whose result was a
+ * real output — never against a Failed<In> case, since a property has
+ * nothing to check there — and reports any violation in `propertyFailures`,
+ * plus the `realOutputs` count a caller needs to tell "every property held"
+ * apart from "no property was ever exercised." This module only reports:
+ * it doesn't decide pass/fail on a candidate, and in particular doesn't
+ * enforce the vacuity guard itself (a node declaring properties with zero
+ * `realOutputs` is not rejected here) — that verdict belongs to the
+ * acceptance gate (accept.ts), which owns both example-checking and this
+ * report.
  */
 
 import { generateInputCases } from "./generate.js";
