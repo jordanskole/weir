@@ -17,7 +17,7 @@ The framing that settles the shape (design-history.md, "Iteration: it's a Petri 
 This is piece **(1)** of four, in dependency order:
 
 1. **The log becomes a log** — this spec. Instance retention, identity, per-node consumption, fire-per-unconsumed readiness. On its own it makes single-input recursion run.
-2. **Causation is real** — `causationId` threaded through membrane, trace and log. Today a hardcoded `null`.
+2. **Causation is real** — `causationIds` threaded through membrane, trace and log. Today a hardcoded `null`. Note that `envelope.step`, the *other* honest placeholder, is resolved here in piece (1) rather than there: under snapshot-wave scheduling it is just the pulse number (§6).
 3. **`allOf` joins by lineage** — zip plus shared-ancestor key. Needs (1) and (2).
 4. **Composite nodes** — topology-as-node, "enroll in workflow". Needs (1) **and (3)**: viewed from outside its membrane a topology *is* an `allOf` node, since its origin-shaped edges must all be satisfied together by one triggering event, so every composite entry point is `allOf`-shaped and inherits whatever (3) decides about joining (design-history.md, "Three axes and a clock"). (4) is not merely blocked on (1).
 
@@ -25,7 +25,7 @@ Each produces working, testable software alone. Nothing below implements (2), (3
 
 ## Design
 
-### 1. Instance identity: a monotonic `seq`, minted by the Log
+### 1. Instance identity and ordering: `id` and `seq`, both minted by the Log
 
 ```ts
 export interface LoggedInstance {
@@ -94,26 +94,33 @@ A node with `input.kind === "allOf"` keeps today's behaviour exactly: resolve ea
 
 Joining is piece (3), and it needs lineage from piece (2). Designing a join here and replacing it two specs later would mean designing it twice. The cost of the deferral, stated plainly: an `allOf` node in a cycle still fires once, so iteration works for single-input chains only. That is the honest boundary of this piece.
 
-### 6. The driver becomes a fixpoint loop
+### 6. The driver becomes a pulse loop, snapshot per pulse
 
 The origins-seeded queue and the child-pushing worklist are replaced by:
 
 ```
+pulse = 0
 firings = 0
 loop:
-  firedThisRound = false
-  for each node name, in sorted order:
-    take the OLDEST eligible work item for that node, if any:
-      fire it; mark consumed; firings += 1; firedThisRound = true
-      if budget !== undefined && firings >= budget:
-        return { failures, firings, stopped: "budget" }
-  if not firedThisRound:
-    return { failures, firings, stopped: "quiescence" }
+  pulse += 1
+  ready = every (node, eligible instance) pair, computed against the log AS IT STANDS NOW
+  if ready is empty:
+    return { failures, firings, pulses: pulse - 1, stopped: "quiescence" }
+  for each pair in ready, in sorted node order:
+    fire it at step = pulse; mark consumed; firings += 1
+    if budget !== undefined && firings >= budget:
+      return { failures, firings, pulses: pulse, stopped: "budget" }
 ```
 
-"Repeat until nothing new is produced" is the termination condition stated directly rather than emulated by queue bookkeeping. It is O(nodes) per round rather than a precise worklist; the spike can afford that, and a worklist is a later optimization that must produce identical results.
+**Snapshot semantics are the whole point.** `ready` is computed once per pulse, before any of it fires. Instances emitted during a pulse are therefore invisible until the next one. This is the pulse/wave model `design-history.md` settled long ago ("`every` lands; a pulse/wave model settles graph-level scheduling"), which `runtime.ts` currently approximates as a worklist *"without needing to number them"* — a shortcut that holds only while every node fires once. Once nodes fire repeatedly, the numbering stops being redundant and the wave has to be real.
 
-**At most one firing per node per round**, deliberately, rather than draining each node's eligible items before moving on. Draining starves: a node wired to itself that always emits has an eligible item every time it is checked, so an inner drain loop never exits and no other node ever fires — the budget would stop the run, but only after one node had monopolized every firing. One-per-round means a node with five queued instances takes five rounds and every other node still advances. Rounds stay meaningful as a fairness unit, and no node can hold the scan.
+Snapshotting is also what makes a self-feeding node safe without a special rule. It has one eligible instance when the pulse begins, so it fires once; the instance it emits belongs to the next pulse. No node can monopolize the scan, and no fairness heuristic is needed — an earlier draft of this spec invented a one-firing-per-node-per-round rule to solve a starvation problem that snapshotting does not have.
+
+**`envelope.step` is the pulse number**, and that is why this matters beyond scheduling. A node fires in pulse N exactly when its inputs became available in pulse N-1, so the pulse counter *is* causal position within the topology — siblings of a fan-out share it, and the longest causal path determines it at a fan-in. `step` is a hardcoded `0` today; snapshot-wave gives it its real value here rather than in piece (2), because the scheduler already knows it.
+
+Do not confuse `step` with `seq`. `step` is shared by everything in a pulse; `seq` is unique per instance, and many `seq` values occur within one pulse. `step` is a property of the program's shape and is identical on replay; `seq` is a property of one execution (design-history.md, "Three axes and a clock").
+
+Node iteration within a pulse is **sorted by name** so a run is reproducible. Order within a pulse cannot change which nodes fire — that set was fixed by the snapshot — so sorting affects only `seq` assignment and the interleaving of appends, never the pulse's outcome. That is a stronger guarantee than the previous draft's, where scan order could change what became eligible mid-pass.
 
 Node iteration is **sorted by name** so a run is reproducible. Sorting is for determinism, not correctness: a confluent graph reaches the same final instance set under any order, and weir does not guarantee confluence in general — two nodes consuming the same instances can interleave differently. Reproducibility is what is promised here; confluence is not.
 
@@ -152,6 +159,8 @@ export interface RunResult {
   failures: { node: string; failed: Failed<InputSpec> }[];
   /** How many times any node's Fn was invoked this run. */
   firings: number;
+  /** How many pulses ran. The last-fired node's `envelope.step` equals this. */
+  pulses: number;
   stopped: "quiescence" | "budget";
 }
 ```
@@ -167,16 +176,18 @@ A run that exhausts its budget is not a failure of any node, so it does not belo
 - **Arc eligibility.** Two nodes emitting the same edge type into different consumers: each consumer sees only its own producer's instances.
 - **Fan-out.** One instance consumed independently by two downstream nodes — both fire, neither starves the other.
 - **Budget.** A node wired to itself that always emits the continue-branch stops with `stopped: "budget"` and the exact firing count, rather than hanging.
-- **No starvation.** That same always-emitting node, running alongside an unrelated ready node, does not prevent the other from firing — the round-robin rule in §6, which a drain-per-node loop would violate.
+- **No starvation.** That same always-emitting node, running alongside an unrelated ready node, does not prevent the other from firing — snapshot semantics, not a fairness rule.
+- **Snapshot isolation.** An instance emitted during pulse N is not consumed during pulse N. A node wired to itself fires exactly once per pulse, never draining its own output within one.
+- **`step` is the pulse number.** Siblings of a fan-out share a `step`; a fan-in node's `step` is one past the longest path feeding it, not the shortest. A node firing on three queued instances from one fan-out produces three invocations at the *same* `step` — the case that distinguishes `step` from `seq`, which differs across all three.
 - **Staged inputs.** An appended instance with no envelope is eligible by type, so existing `invoke.ts` readiness fixtures keep working.
 - **`allOf` unchanged.** An `allOf` node in a cycle still fires once — asserted deliberately, so piece (3) has a test to change rather than a silent behaviour shift.
 
 ## Explicitly out of scope
 
-- **`causationId`** stays the hardcoded `null` it is today. Piece (2).
+- **`causationIds`** stay the hardcoded `null` they are today. Piece (2). `envelope.step` is the exception among the placeholders — §6 resolves it here.
 - **`allOf` joining by lineage.** Piece (3). §5 above pins current behaviour in a test so the change is visible when it comes.
 - **Composite nodes / "enroll in workflow".** Piece (4).
 - **Positional identity in a topology** — `birthday.then.birthday.then.birthday` running three times. A separate `open-questions.md` entry; it terminates by construction rather than by quiescence, and needs `Wiring` to represent instances, which nothing here touches.
 - **Durable or resumable consumption state.** Run-scoped, in memory, as today.
-- **A precise worklist.** The fixpoint scan is deliberate; optimizing it must not change results.
+- **A precise worklist.** The pulse scan is deliberate; optimizing it must not change results, and must preserve snapshot semantics — a worklist that lets a pulse consume its own output is a different execution model, not a faster one.
 - **Confluence guarantees.** Determinism is promised, confluence is not.
