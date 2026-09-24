@@ -106,6 +106,8 @@ That alone would be the third instance of a bug this project has now shipped twi
 
 **If a node declares any properties, at least one generated case must produce a real output, or the run fails.** A node that fails on every input can no longer score a clean sweep of zero violations. The two concerns stay separate and legible: what the property says, versus whether it was ever actually exercised.
 
+> **Superseded 2026-09-24 — the guard is no longer conditioned on properties.** Scoping it to property-declaring nodes made it the third instance of the very bug this section names, which is worth stating plainly since the paragraph above predicted the shape and then walked into it. The reasoning missed that properties were not what made the run vacuous; they were only what made it *visible*. Zero real outputs means the structural bar passed every case through `isAcceptableResult`'s `looksLikeFailed` branch, so it examined nothing — properties or no properties. A candidate special-casing its declared examples and throwing on every other input passed its examples exactly, drew zero structural failures, declared no properties, and was accepted and written to disk. The rule is now **zero real outputs fails the run, unconditionally**. The trade-off taken knowingly: a legitimate node whose valid domain is too narrow for the generator to hit is now refused rather than accepted unchecked.
+
 ### 7. `fuzzNode` and `FuzzReport`
 
 `fuzzNode` grows property checking rather than a parallel module generating its own cases: one seeded generation pass, one set of invocations, one report. The guard in §6 needs a count of real outputs, which the same loop computes naturally.

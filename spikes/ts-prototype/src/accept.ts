@@ -18,10 +18,17 @@
  * generated case whose result was a real output, not a `Failed<In>`. A
  * candidate that only special-cases its declared examples (the motivating
  * failure this closes) passes them exactly and fails a property on the
- * first generated case that isn't the example. A node declaring properties
- * where no generated case produced a real output is rejected as vacuous —
- * every property having passed vacuously is the same false-green shape
- * that has already shipped twice (design-history.md), not a clean result.
+ * first generated case that isn't the example.
+ *
+ * Independently of properties, a candidate where **no generated case
+ * produced a real output at all** is rejected as vacuous. The structural
+ * bar passes a result that either matches the output spec or is a
+ * `Failed<In>` — a failure being a legitimate node outcome — so a
+ * candidate that fails every generated case satisfies that bar without
+ * being examined by it. Zero real outputs therefore means the generated
+ * cases checked nothing, whether or not any property was declared; the
+ * guard was originally scoped to property-declaring nodes and let exactly
+ * that through (design-history.md).
  *
  * A fresh draft directory per call sidesteps one gotcha (dynamic `import()`
  * caches by URL, so a fixed draft path would silently re-run the first
@@ -159,10 +166,23 @@ export async function acceptImplementation(
     const exampleFailures = await checkExamples(nodeDef);
     const fuzzReport = await fuzzNode(nodeDef, opts);
 
-    // A node declaring properties none of whose generated cases produced a
-    // real output has had every property pass vacuously — the same
-    // false-green shape that shipped twice before this (design-history.md).
-    const vacuous = (nodeDecl.properties ?? []).length > 0 && fuzzReport.realOutputs === 0;
+    // A run in which no generated case produced a real output has checked
+    // nothing, so there is no clean result to accept. The structural bar's
+    // own pass predicate is `matches the output spec OR is a Failed<In>`
+    // (fuzz.ts's `isAcceptableResult` — a failure is always a legitimate
+    // node outcome), so a candidate that fails every generated case
+    // satisfies it perfectly while being examined by nothing.
+    //
+    // This deliberately does NOT depend on whether properties were
+    // declared. Properties were only ever where this got noticed: when they
+    // exist, every one of them passes vacuously and that's visible. When
+    // they don't, the emptiness is just as total and nothing says so. A
+    // candidate special-casing its declared examples and throwing on
+    // everything else passes its examples exactly, draws zero structural
+    // failures, and — while this was scoped to property-declaring nodes —
+    // was accepted and written to disk. That is the same false-green shape
+    // that has now shipped three times (design-history.md).
+    const vacuous = fuzzReport.realOutputs === 0;
 
     if (
       exampleFailures.length > 0 ||

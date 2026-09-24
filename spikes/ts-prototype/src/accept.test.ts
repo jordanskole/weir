@@ -391,18 +391,47 @@ describe("acceptImplementation — properties", () => {
     expect(await readdir(dir)).toEqual([]);
   });
 
-  it("does not apply the vacuity guard to a node that declares no properties", async () => {
+  it("applies the vacuity guard to a node that declares no properties too", async () => {
     dir = await mkdtemp(join(tmpdir(), "weir-accept-test-"));
     const alwaysThrows = `export default function birthday() {\n  throw new Error("always broken");\n}\n`;
 
-    // No properties declared, so there is nothing to be vacuous about —
-    // this is rejected on its example, not on the guard.
+    // Rejected twice over — on its example AND on the guard. Properties
+    // were never what made a run vacuous; a run in which nothing ever
+    // produced a real output has checked nothing either way.
     const result = await acceptImplementation(birthday, alwaysThrows, dir, { count: 20 });
 
     expect(result.accepted).toBe(false);
     if (result.accepted) throw new Error("unreachable");
     if (result.reason !== "checks-failed") throw new Error("unreachable");
-    expect(result.vacuous).toBe(false);
+    expect(result.vacuous).toBe(true);
     expect(result.exampleFailures.length).toBe(1);
+  });
+
+  it("rejects a candidate that passes its example and fails every generated case", async () => {
+    dir = await mkdtemp(join(tmpdir(), "weir-accept-test-"));
+
+    // The case the properties-scoped guard let through, and the reason this
+    // guard is not merely belt-and-braces: examples pass exactly, so
+    // `exampleFailures` is empty; every generated case throws, so every
+    // result is a Failed<In>, which `isAcceptableResult` accepts by design;
+    // and with no properties declared there was nothing else left to catch
+    // it. Before the guard widened, this was accepted and written to disk.
+    const passesExampleOnly = `export default function birthday(payload) {
+  if (payload.age === 41) return { age: 42 };
+  throw new Error("only handles the example");
+}
+`;
+
+    const result = await acceptImplementation(birthday, passesExampleOnly, dir, { count: 20 });
+
+    expect(result.accepted).toBe(false);
+    if (result.accepted) throw new Error("unreachable");
+    if (result.reason !== "checks-failed") throw new Error("unreachable");
+    expect(result.exampleFailures).toEqual([]);
+    expect(result.fuzzReport.failures).toEqual([]);
+    expect(result.fuzzReport.realOutputs).toBe(0);
+    expect(result.vacuous).toBe(true);
+    // Nothing persisted: the whole point of accept-before-persist.
+    expect(await readdir(dir)).toEqual([]);
   });
 });

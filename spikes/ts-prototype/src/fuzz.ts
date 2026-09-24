@@ -8,12 +8,13 @@
  * real output — never against a Failed<In> case, since a property has
  * nothing to check there — and reports any violation in `propertyFailures`,
  * plus the `realOutputs` count a caller needs to tell "every property held"
- * apart from "no property was ever exercised." This module only reports:
- * it doesn't decide pass/fail on a candidate, and in particular doesn't
- * enforce the vacuity guard itself (a node declaring properties with zero
- * `realOutputs` is not rejected here) — that verdict belongs to the
- * acceptance gate (accept.ts), which owns both example-checking and this
- * report.
+ * apart from "no property was ever exercised" — and, more broadly, to tell
+ * a clean structural run apart from one where every case failed and so
+ * nothing was checked at all. This module only reports: it doesn't decide
+ * pass/fail on a candidate, and in particular doesn't enforce the vacuity
+ * guard itself (zero `realOutputs` is not rejected here) — that verdict
+ * belongs to the acceptance gate (accept.ts), which owns both
+ * example-checking and this report.
  */
 
 import { generateInputCases } from "./generate.js";
@@ -137,9 +138,12 @@ export interface FuzzReport {
   /**
    * How many generated cases produced a result matching the declared
    * OutputSpec, as opposed to `Failed<In>`. Properties are only evaluated
-   * against these — and a node declaring properties where this is zero has
-   * had every property pass vacuously, which is what the acceptance gate's
-   * guard exists to catch.
+   * against these, so zero means every property passed vacuously — but it
+   * means something broader too, which is why the acceptance gate's guard
+   * keys on this number alone and not on whether properties exist: zero
+   * real outputs means `isAcceptableResult` accepted every case on the
+   * strength of its `looksLikeFailed` branch, so the structural bar
+   * examined nothing either.
    */
   realOutputs: number;
   /**
