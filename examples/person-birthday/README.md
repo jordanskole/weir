@@ -48,10 +48,13 @@ file uses `birthday#1` as a placeholder scheme — nothing in the docs commits t
 §1 specifies UUIDv7/ULID. Swapped for legibility in this hand-written example; a real elaborator/
 runtime should use the real scheme.
 
-**7. `causationId` chains to the previous step's envelope id; `correlationId` is shared across the
-whole run.** Matches the envelope fields in §1, but this file is the first place that actually
-wires them together end to end — worth checking against how joins/fan-in are eventually meant to
-use `causationId` (see "Join keying" in `docs/open-questions.md`, still unresolved).
+**7. `causationId` is `null` throughout; `correlationId` is shared across the whole run.**
+`buildEnvelope` (`spikes/ts-prototype/src/membrane.ts`) hardcodes `causationId: null` — causation
+isn't tracked yet, an honest placeholder awaiting its own spec, not a dropped value (see
+"Join keying" in `docs/open-questions.md`, still unresolved). `step` is the pulse number:
+`origin_Person_literal` is the origin and fires in the first pulse, `step: 1`; `birthday` becomes
+ready only once it has appended, so it fires the pulse after, `step: 2`; `expect_Person_age_42`
+follows one pulse later still, `step: 3`.
 
 **8. `Pass` and `Fail` are edges with no fields.** Reasonable given `expect` outputs `one of {Pass,
 Fail}` and neither carries data in this example, but a real `Fail` almost certainly wants a reason/

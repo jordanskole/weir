@@ -61,7 +61,7 @@
           "id": "env-1",
           "correlationId": "run-1",
           "causationId": null,
-          "step": 0,
+          "step": 1,
           "schemaHash": "4b7c35de"
         }
       },
@@ -72,8 +72,8 @@
         "envelope": {
           "id": "env-2",
           "correlationId": "run-1",
-          "causationId": "env-1",
-          "step": 1,
+          "causationId": null,
+          "step": 2,
           "schemaHash": "4b7c35de"
         }
       },
@@ -84,8 +84,8 @@
         "envelope": {
           "id": "env-3",
           "correlationId": "run-1",
-          "causationId": "env-2",
-          "step": 2,
+          "causationId": null,
+          "step": 3,
           "schemaHash": "c5d6ca8d"
         }
       }
