@@ -1,15 +1,28 @@
 /**
  * The runtime (docs/getting-started.md step 5): walks a `Program`'s
- * `wiring` in pulse order, calling each reachable node through `membrane()`
- * and appending successful results to the `Log`. Implements the pulse/wave
+ * `wiring` in pulse order, calling each node through `membrane()` and
+ * appending successful results to the `Log`. Implements the pulse/wave
  * model design-history.md already decided ("`every` lands; a pulse/wave
- * model settles graph-level scheduling") as a worklist rather than
- * precomputed pulse numbers: a node is attempted once after each of its
- * declared parents fires (every parent lists it again under its own
- * `then:`, per `.topology`'s own convention — design-history.md, "`.topology`
- * built"), and firing is idempotent (a `fired` set), so the *outcome* is
- * the same as running discrete pulses to a fixpoint without needing to
- * number them.
+ * model settles graph-level scheduling") as real, numbered pulses. Each
+ * pulse computes every (node, eligible instance) pair against the log *as
+ * it stands*, then fires all of them; instances emitted during a pulse are
+ * invisible until the next one. It is a Petri net: edges are places, nodes
+ * are transitions, an edge instance is a token, and `wiring.feeds` is the
+ * arc set that says which tokens a transition may consume
+ * (`eligibleInstances`).
+ *
+ * That snapshot is load-bearing twice over. It is why `envelope.step` is
+ * simply the pulse number — a node fires in pulse N exactly when its input
+ * became available in pulse N-1 — and it is why a node wired back to itself
+ * fires once per pulse instead of draining its own output within one, with
+ * no fairness rule needed. An earlier worklist stood in for this while every
+ * node fired at most once; once nodes fire repeatedly the numbering stops
+ * being redundant and the wave has to be real.
+ *
+ * The loop ends on quiescence (a pulse in which nothing fired) or on the
+ * host's `budget` (a firing count). Quiescence counts *firings*, not
+ * candidates: an `allOf` node is a candidate on every pulse until it fires,
+ * and `membrane()`'s own readiness check may decline it on all of them.
  *
  * Deliberately narrow, stated here rather than left implicit:
  * - **`Failed<In>` routing exists for `single`- and `allOf`-input nodes —
@@ -30,17 +43,21 @@
  *   for every real edge in this repo today (none has exactly `{input}` or
  *   `{input, reason}` as its full field set); would misfire against a
  *   hypothetical edge that did.
- * - **A node whose own name recurs as its own (transitive) descendant
- *   fires at most once per invocation**, not once per literal repetition
- *   a hand-authored `.topology` chain like `birthday.then.birthday.then.birthday`
- *   implies. Firing it repeatedly without a bound would loop forever —
- *   `.topology`'s adjacency-list `Wiring` can't distinguish "run it 3
- *   times" from "run it forever" once collapsed from nested YAML into a
- *   flat parent→children map, and design-history.md ("Weir has no loop
- *   construct") already flags that a real iteration-count bound isn't
- *   designed yet either. Firing once is the conservative, terminating
- *   default until that exists — not a claim the repeated-application case
- *   is actually supported.
+ * - **A node fires once per unconsumed instance arriving on an arc wired to
+ *   it**, so a topology wiring a node back to itself iterates until it
+ *   emits a branch nothing routes back (`oneOf` supplies the base case).
+ *   What that does *not* give you is positional repetition: a hand-authored
+ *   `.topology` chain like `birthday.then.birthday.then.birthday` still runs
+ *   `birthday` as one node, because `.topology`'s adjacency-list `Wiring`
+ *   collapses to a flat parent→children map that cannot represent "the
+ *   second birthday" at all (docs/open-questions.md). Termination there
+ *   would be by construction; here it is by quiescence, with the host's
+ *   `budget` as the backstop for a graph that never reaches it.
+ * - **`allOf`-input nodes still fire at most once per run** (`firedAllOf`,
+ *   the narrow remnant of the old global `fired` set), resolving their bag
+ *   by `latest` as before. Joining by lineage is a later spec and needs
+ *   causation, which does not exist yet; iteration therefore works for
+ *   single-input chains only. That is the honest boundary.
  */
 
 import { membrane } from "./membrane.js";
@@ -66,16 +83,24 @@ type AnySingleInvoke = (
   payload: unknown,
   correlationId: string,
   identity?: PayloadOf<typeof Identity>,
+  step?: number,
 ) => Promise<{ result: unknown; envelope?: Envelope }>;
 type AnyAllOfInvoke = (
   correlationId: string,
   log: Log,
   identity?: PayloadOf<typeof Identity>,
+  step?: number,
 ) => Promise<{ result: unknown; envelope?: Envelope } | undefined>;
 
 export interface RunResult {
   /** Currently always empty — the only InputSpec kind whose failures ever landed here (the removed `any` kind) no longer exists. Retained rather than removed, since deleting it would be a separate public-API change. */
   failures: { node: string; failed: Failed<InputSpec> }[];
+  /** How many times any node's Fn was invoked this run. */
+  firings: number;
+  /** How many pulses ran. */
+  pulses: number;
+  /** Why the run ended: nothing left to fire, or the host's budget was spent. */
+  stopped: "quiescence" | "budget";
 }
 
 /**
@@ -220,18 +245,40 @@ export function eligibleInstances(
 
 export async function runNetlist(program: Program, run: Run, host: Host): Promise<RunResult> {
   const { correlationId, originPayloads, identity } = run;
-  const { log, trace } = host;
+  const { log, trace, budget } = host;
   const failures: RunResult["failures"] = [];
-  const fired = new Set<string>();
+  const consumed = new Map<string, Set<number>>();
+  const originsFired = new Set<string>();
+  const firedAllOf = new Set<string>();
   const origins = new Set(program.wiring.origins);
 
-  async function tryFire(nodeName: string): Promise<boolean> {
-    if (fired.has(nodeName)) return false;
-
-    const nodeDef = program.nodes[nodeName];
-    if (!nodeDef) {
-      throw new Error(`Wiring references "${nodeName}", but no .node file declares it.`);
+  /** The seqs `nodeName` has already eaten. Per node, never global: two nodes consuming the same instance each get their own turn at it (the fan-out case). */
+  const consumedBy = (nodeName: string): Set<number> => {
+    let seen = consumed.get(nodeName);
+    if (!seen) {
+      seen = new Set();
+      consumed.set(nodeName, seen);
     }
+    return seen;
+  };
+
+  /**
+   * Fires one (node, instance) pair. `instance` is the specific token this
+   * firing consumes — a `single`-input node fires on *that* instance, not on
+   * whatever `log.latest` happens to hold by the time it runs, which under
+   * iteration is a different thing entirely. It is absent for an origin node
+   * (its payload comes from `originPayloads`, which is not a logged instance
+   * and has no `seq`) and for an `allOf` node (membrane resolves that bag
+   * itself). Returns whether `Fn` actually ran: `membrane()`'s own readiness
+   * check can still decline an `allOf` candidate, and quiescence is counted
+   * from this answer rather than from the candidate list.
+   */
+  async function tryFire(
+    nodeName: string,
+    instance: LoggedInstance | undefined,
+    pulse: number,
+  ): Promise<boolean> {
+    const nodeDef = program.nodes[nodeName];
 
     let result: unknown;
     let envelope: Envelope | undefined;
@@ -242,11 +289,11 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         if (!(nodeName in originPayloads)) return false;
         payload = originPayloads[nodeName];
       } else {
-        payload = log.latest(nodeDef.input.edge.name, correlationId);
-        if (payload === undefined) return false;
+        if (instance === undefined) return false;
+        payload = instance.payload;
       }
       input = payload;
-      const invocation = await (membrane(nodeDef) as AnySingleInvoke)(payload, correlationId, identity);
+      const invocation = await (membrane(nodeDef) as AnySingleInvoke)(payload, correlationId, identity, pulse);
       result = invocation.result;
       envelope = invocation.envelope;
     } else {
@@ -259,13 +306,17 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         bag[edge.name] = log.latest(edge.name, correlationId);
       }
       input = bag;
-      const invocation = await (membrane(nodeDef) as AnyAllOfInvoke)(correlationId, log, identity);
+      const invocation = await (membrane(nodeDef) as AnyAllOfInvoke)(correlationId, log, identity, pulse);
       if (invocation === undefined) return false;
       result = invocation.result;
       envelope = invocation.envelope;
     }
 
-    fired.add(nodeName);
+    // Mark what this firing consumed, now that it is known to have happened.
+    if (nodeDef.input.kind !== "single") firedAllOf.add(nodeName);
+    else if (origins.has(nodeName)) originsFired.add(nodeName);
+    else if (instance !== undefined) consumedBy(nodeName).add(instance.seq);
+
     if (envelope !== undefined) {
       trace?.record({ envelope, input, result });
     }
@@ -295,16 +346,62 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
     return true;
   }
 
-  const queue = [...program.wiring.origins];
-  while (queue.length > 0) {
-    const name = queue.shift()!;
-    const didFire = await tryFire(name);
-    if (didFire) {
-      for (const child of program.wiring.feeds[name] ?? []) {
-        queue.push(child);
-      }
+  // The pulse loop scans `program.nodes`, so a `wiring` naming a node no
+  // `.node` file declares would otherwise be ignored rather than reported.
+  // Checked once here, up front, instead of on every attempted firing.
+  for (const nodeName of [...program.wiring.origins, ...Object.values(program.wiring.feeds).flat()]) {
+    if (!(nodeName in program.nodes)) {
+      throw new Error(`Wiring references "${nodeName}", but no .node file declares it.`);
     }
   }
 
-  return { failures };
+  let firings = 0;
+  let pulse = 0;
+
+  for (;;) {
+    pulse += 1;
+
+    // The snapshot. Every candidate is computed against the log as it
+    // stands now, so an instance emitted during this pulse is invisible
+    // until the next one. That is what makes `step` equal the pulse
+    // number, and what stops a self-feeding node draining its own output
+    // inside one pulse without needing a fairness rule.
+    const candidates: { nodeName: string; instance?: LoggedInstance }[] = [];
+    for (const nodeName of Object.keys(program.nodes).sort()) {
+      const nodeDef = program.nodes[nodeName];
+      if (nodeDef.input.kind !== "single") {
+        if (!firedAllOf.has(nodeName)) candidates.push({ nodeName });
+        continue;
+      }
+      if (origins.has(nodeName)) {
+        if (!originsFired.has(nodeName) && nodeName in originPayloads) {
+          candidates.push({ nodeName });
+        }
+        continue;
+      }
+      for (const instance of eligibleInstances(program, log, consumedBy(nodeName), nodeDef, correlationId)) {
+        candidates.push({ nodeName, instance });
+      }
+    }
+
+    let firedThisPulse = 0;
+    for (const candidate of candidates) {
+      const didFire = await tryFire(candidate.nodeName, candidate.instance, pulse);
+      if (!didFire) continue;
+      firedThisPulse += 1;
+      firings += 1;
+      if (budget !== undefined && firings >= budget) {
+        return { failures, firings, pulses: pulse, stopped: "budget" };
+      }
+    }
+
+    // Counting actual firings rather than candidates matters: an `allOf`
+    // node is a candidate whenever it has not fired, but `membrane()`'s
+    // own readiness check may still decline it. Quiescence has to mean
+    // "nothing fired", not "nothing was offered", or an unready `allOf`
+    // node would spin the loop forever.
+    if (firedThisPulse === 0) {
+      return { failures, firings, pulses: pulse - 1, stopped: "quiescence" };
+    }
+  }
 }

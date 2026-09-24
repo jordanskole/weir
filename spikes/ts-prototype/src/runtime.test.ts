@@ -648,8 +648,20 @@ describe("runNetlist", () => {
       log.append("TodoList", "thread-1", validTodoList);
       log.append("Todo", "thread-1", malformedTodo);
 
+      // Narrowed to the one node under test, not just the one wiring. The
+      // pulse loop offers every node in `program.nodes` its eligible
+      // instances each pulse rather than walking out from the origins, so
+      // CompleteTodo — whose input is also Todo, and for which the staged
+      // (envelope-less) instance is eligible by type — would otherwise fire
+      // on the same malformed Todo and log its own Failed_Todo, defeating
+      // the per-edge-routing assertions below for a reason that has nothing
+      // to do with what this test is about.
       const result = await runNetlist(
-        { ...program, wiring: { origins: ["AddTodoToList"], feeds: {} } },
+        {
+          ...program,
+          nodes: { AddTodoToList: program.nodes.AddTodoToList! },
+          wiring: { origins: ["AddTodoToList"], feeds: {} },
+        },
         { correlationId: "thread-1", originPayloads: {} },
         { log },
       );
@@ -832,6 +844,351 @@ describe("runNetlist", () => {
     await runNetlist(program, { correlationId: "thread-1", originPayloads: { Handle__A: { value: "a" }, Handle__B: { value: "b" } } }, { log });
 
     expect(received.sort()).toEqual(["a", "b"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixtures for the pulse loop. Each is the smallest topology that makes its
+// assertion mean something; the comment on each says which bug it is there to
+// catch.
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical example, hand-built rather than elaborated from disk: an
+ * origin emitting `Person`, and `birthday: Person → Person` consuming it.
+ * `birthday` is deliberately *not* wired back to itself, so its own output is
+ * ineligible for it under arc-based readiness. Readiness by edge *type* would
+ * let it eat its own `Person` forever.
+ */
+const Person = defineEdge({
+  name: "Person",
+  label: "Person",
+  description: "d",
+  fields: { age: defineField({ type: "uint8", label: "Age", description: "d", nullable: false }) },
+});
+const personOrigin = defineNode({
+  name: "origin",
+  input: single(Person),
+  output: single(Person),
+  fn: (p) => p,
+});
+const birthday = defineNode({
+  name: "birthday",
+  input: single(Person),
+  output: single(Person),
+  fn: (p) => ({ age: p.age + 1 }),
+});
+const personBirthdayProgram = programWith(
+  { origin: personOrigin, birthday },
+  { origins: ["origin"], feeds: { origin: ["birthday"] } },
+);
+
+/**
+ * A real cycle. `seed` starts it; `countToThree` is wired back to itself and
+ * emits `Continue` until the bound, then the terminal `Done` branch nothing
+ * routes back — the base case that makes the graph go quiet. `forever` is the
+ * same node with the same output contract, minus the terminal branch.
+ */
+const Continue = defineEdge({
+  name: "Continue",
+  label: "Continue",
+  description: "d",
+  fields: { n: defineField({ type: "uint8", label: "n", description: "d", nullable: false }) },
+});
+const Done = defineEdge({
+  name: "Done",
+  label: "Done",
+  description: "d",
+  fields: { n: defineField({ type: "uint8", label: "n", description: "d", nullable: false }) },
+});
+const seed = defineNode({
+  name: "seed",
+  input: single(Continue),
+  output: single(Continue),
+  fn: (c) => c,
+});
+const countToThree = defineNode({
+  name: "countToThree",
+  input: single(Continue),
+  output: { kind: "oneOf", edges: [Continue, Done] },
+  fn: (c) => (c.n >= 3 ? { edge: "Done" as const, payload: c } : { edge: "Continue" as const, payload: { n: c.n + 1 } }),
+});
+const forever = defineNode({
+  name: "forever",
+  input: single(Continue),
+  output: { kind: "oneOf", edges: [Continue, Done] },
+  fn: (c) => ({ edge: "Continue" as const, payload: { n: c.n + 1 } }),
+});
+const countToThreeProgram = programWith(
+  { seed, countToThree },
+  { origins: ["seed"], feeds: { seed: ["countToThree"], countToThree: ["countToThree"] } },
+);
+const foreverProgram = programWith(
+  { seed, forever },
+  { origins: ["seed"], feeds: { seed: ["forever"], forever: ["forever"] } },
+);
+
+/**
+ * One instance consumed independently by two nodes. Both consumers fire in the
+ * same pulse, which is what makes them siblings: same `step`, different `seq`.
+ */
+const FanOutLeft = defineEdge({
+  name: "Left",
+  label: "Left",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const FanOutRight = defineEdge({
+  name: "Right",
+  label: "Right",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const fanOutProgram = programWith(
+  {
+    source: defineNode({ name: "source", input: single(Start), output: single(Start), fn: (s) => s }),
+    toLeft: defineNode({
+      name: "toLeft",
+      input: single(Start),
+      output: single(FanOutLeft),
+      fn: (s) => ({ value: `left-${s.value}` }),
+    }),
+    toRight: defineNode({
+      name: "toRight",
+      input: single(Start),
+      output: single(FanOutRight),
+      fn: (s) => ({ value: `right-${s.value}` }),
+    }),
+  },
+  { origins: ["source"], feeds: { source: ["toLeft", "toRight"] } },
+);
+
+/**
+ * An `allOf` node inside a genuine cycle: `join` emits `Joined`, `recycle`
+ * turns that back into a fresh `A`, which feeds `join` again. Only the
+ * `firedAllOf` guard stops that looping — remove it and this runs to budget.
+ */
+const CycleA = defineEdge({
+  name: "A",
+  label: "A",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const CycleB = defineEdge({
+  name: "B",
+  label: "B",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const Joined = defineEdge({
+  name: "Joined",
+  label: "Joined",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const allOfInCycleProgram = programWith(
+  {
+    a: defineNode({ name: "a", input: single(CycleA), output: single(CycleA), fn: (v) => v }),
+    b: defineNode({ name: "b", input: single(CycleB), output: single(CycleB), fn: (v) => v }),
+    join: defineNode({
+      name: "join",
+      input: allOf(CycleA, CycleB),
+      output: single(Joined),
+      fn: ({ A, B }) => ({ value: `${A.value}+${B.value}` }),
+    }),
+    recycle: defineNode({
+      name: "recycle",
+      input: single(Joined),
+      output: single(CycleA),
+      fn: (j) => ({ value: j.value }),
+    }),
+  },
+  {
+    origins: ["a", "b"],
+    feeds: { a: ["join"], b: ["join"], join: ["recycle"], recycle: ["join"] },
+  },
+);
+
+describe("runNetlist — iteration", () => {
+  it("leaves the canonical example unchanged: each node fires once, stopping on quiescence", async () => {
+    // The regression test for arc-based eligibility. If readiness were by
+    // edge type, birthday would consume its own Person output forever.
+    const log = new InMemoryLog();
+    const result = await runNetlist(
+      personBirthdayProgram,
+      { correlationId: "c1", originPayloads: { origin: { age: 41 } } },
+      { log, budget: 50 },
+    );
+
+    expect(result.stopped).toBe("quiescence");
+    expect(result.firings).toBe(2);
+    expect(log.instances("Person", "c1")).toHaveLength(2); // the origin's, and birthday's
+    expect(log.latest("Person", "c1")).toEqual({ age: 42 });
+  });
+
+  it("runs a real cycle until the node emits its terminal branch", async () => {
+    // countToThree is wired to itself and emits Continue until 3, then Done.
+    const log = new InMemoryLog();
+    const result = await runNetlist(
+      countToThreeProgram,
+      { correlationId: "c1", originPayloads: { seed: { n: 0 } } },
+      { log, budget: 50 },
+    );
+
+    expect(result.stopped).toBe("quiescence");
+    expect(log.latest("Done", "c1")).toEqual({ n: 3 });
+    // seed, then countToThree on n=0,1,2,3 — the iteration count, not just
+    // the terminal value, so a loop that fired the node once more or once
+    // fewer would still be caught.
+    expect(result.firings).toBe(5);
+    expect(log.instances("Continue", "c1")).toHaveLength(4);
+  });
+
+  it("stops on budget rather than hanging when a cycle never terminates", async () => {
+    const log = new InMemoryLog();
+    const result = await runNetlist(
+      foreverProgram,
+      { correlationId: "c1", originPayloads: { seed: { n: 0 } } },
+      { log, budget: 10 },
+    );
+
+    expect(result.stopped).toBe("budget");
+    expect(result.firings).toBe(10);
+  });
+
+  it("does not consume within the pulse that produced — snapshot isolation", async () => {
+    // A self-feeding node fires exactly once per pulse. With 10 firings
+    // allowed it therefore takes 10 pulses, never draining its own output
+    // inside one.
+    const log = new InMemoryLog();
+    const result = await runNetlist(
+      foreverProgram,
+      { correlationId: "c1", originPayloads: { seed: { n: 0 } } },
+      { log, budget: 10 },
+    );
+
+    expect(result.pulses).toBe(result.firings);
+    expect(result.pulses).toBe(10);
+  });
+
+  it("gives every invocation in a pulse the same step, and siblings different seqs", async () => {
+    const log = new InMemoryLog();
+    await runNetlist(
+      fanOutProgram,
+      { correlationId: "c1", originPayloads: { source: { value: "a" } } },
+      { log, budget: 50 },
+    );
+
+    const siblings = [...log.instances("Left", "c1"), ...log.instances("Right", "c1")];
+    expect(new Set(siblings.map((i) => i.envelope?.step)).size).toBe(1);
+    expect(new Set(siblings.map((i) => i.seq)).size).toBe(siblings.length);
+    // Sharing a step is not enough on its own — a hardcoded 0 shares it too.
+    // The value has to be the pulse the siblings actually fired in, one past
+    // the pulse that produced the instance they consumed.
+    expect(siblings[0]?.envelope?.step).toBe(2);
+    expect(log.instances("Start", "c1")[0]?.envelope?.step).toBe(1);
+  });
+
+  it("fans one instance out to two consumers without either starving the other", async () => {
+    const log = new InMemoryLog();
+    await runNetlist(
+      fanOutProgram,
+      { correlationId: "c1", originPayloads: { source: { value: "a" } } },
+      { log, budget: 50 },
+    );
+
+    expect(log.instances("Left", "c1")).toHaveLength(1);
+    expect(log.instances("Right", "c1")).toHaveLength(1);
+  });
+
+  it("fires a node once per queued instance, each invocation seeing its own payload at one shared step", async () => {
+    // Three producers put three instances of one edge type in front of one
+    // consumer. It fires three times — on *those* instances, not on whatever
+    // log.latest holds by then, which is the newest of the three — and all
+    // three invocations share a step while differing in seq. This is the case
+    // that distinguishes step from seq, and the one that catches a firing
+    // resolved by edge name instead of by the token it was handed.
+    const received: string[] = [];
+    const Out = defineEdge({
+      name: "Out",
+      label: "Out",
+      description: "d",
+      fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+    });
+    const producers = ["p1", "p2", "p3"].map((name) =>
+      defineNode({ name, input: single(Start), output: single(Start), fn: (s) => s }),
+    );
+    const sink = defineNode({
+      name: "sink",
+      input: single(Start),
+      output: single(Out),
+      fn: (s) => {
+        received.push(s.value);
+        return { value: s.value };
+      },
+    });
+    const program = programWith(
+      { p1: producers[0]!, p2: producers[1]!, p3: producers[2]!, sink },
+      { origins: ["p1", "p2", "p3"], feeds: { p1: ["sink"], p2: ["sink"], p3: ["sink"] } },
+    );
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      program,
+      { correlationId: "c1", originPayloads: { p1: { value: "a" }, p2: { value: "b" }, p3: { value: "c" } } },
+      { log, budget: 50 },
+    );
+
+    expect(result.stopped).toBe("quiescence");
+    expect(received.sort()).toEqual(["a", "b", "c"]);
+    const out = log.instances("Out", "c1");
+    expect(out).toHaveLength(3);
+    expect(new Set(out.map((i) => i.envelope?.step))).toEqual(new Set([2]));
+    expect(new Set(out.map((i) => i.seq)).size).toBe(3);
+  });
+
+  it("still fires an allOf node at most once — deliberately unchanged here", async () => {
+    // Joining is a later spec. Pinned so that change is visible when it
+    // comes rather than silent.
+    const log = new InMemoryLog();
+    const result = await runNetlist(
+      allOfInCycleProgram,
+      { correlationId: "c1", originPayloads: { a: { value: "a" }, b: { value: "b" } } },
+      { log, budget: 50 },
+    );
+
+    expect(result.stopped).toBe("quiescence");
+    expect(log.instances("Joined", "c1")).toHaveLength(1);
+    // The cycle is real: recycle did fire on the join's output and put a
+    // fresh A back in front of join, which declined to fire again.
+    expect(log.instances("A", "c1")).toHaveLength(2);
+  });
+
+  it("does not spin when an allOf node can never become ready", async () => {
+    // An allOf node is a candidate on every pulse until it fires, but
+    // membrane declines it while an edge it declared is missing. Quiescence
+    // has to count firings, not candidates, or this hangs.
+    const log = new InMemoryLog();
+    const result = await runNetlist(
+      programWith(
+        {
+          a: defineNode({ name: "a", input: single(CycleA), output: single(CycleA), fn: (v) => v }),
+          join: defineNode({
+            name: "join",
+            input: allOf(CycleA, CycleB),
+            output: single(Joined),
+            fn: ({ A, B }) => ({ value: `${A.value}+${B.value}` }),
+          }),
+        },
+        { origins: ["a"], feeds: { a: ["join"] } },
+      ),
+      { correlationId: "c1", originPayloads: { a: { value: "a" } } },
+      { log, budget: 50 },
+    );
+
+    expect(result.stopped).toBe("quiescence");
+    expect(result.firings).toBe(1);
+    expect(log.instances("Joined", "c1")).toEqual([]);
   });
 });
 
