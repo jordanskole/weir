@@ -332,12 +332,12 @@ kept in sync by tooling, not memory — the elaborator (§4) scaffolds and wires
 pairing the same way it already resolves fixed values and monomorphizes generics. The
 separation is structural, not just two extensions in one folder: declarations
 (`.edge`/`.node`/`.topology`) and implementations live in genuinely different trees, a
-real package boundary — my earlier project's `packages/schemas` (declarative)
-vs. `apps/durable-functions` (runtime) is the precedent, not just an analogy. A `.node`
+real package boundary — a system I built previously split `packages/schemas` (declarative)
+from `apps/durable-functions` (runtime), and that's the precedent here, not just an analogy. A `.node`
 file's schema carries no field for `fn` at all — the contract doesn't reference its
 implementation, doesn't know whether one exists yet. The elaborator resolves
 `{node-name}/{contract-hash}.ts` in the implementation tree by name alone, the same way
-that platform's `actionRegistry` never stores a handler's file path — mapping by
+that project's `actionRegistry` never stores a handler's file path — mapping by
 convention, enforced by codegen, not by a stored reference. An explicit path field would
 also have to survive being resolved across that package boundary, which a bare name
 doesn't need to.
