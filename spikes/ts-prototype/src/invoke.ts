@@ -18,24 +18,26 @@ import type { Envelope, NodeDef, PayloadOf } from "./types.js";
 
 /**
  * The same documented cast idiom `runtime.ts` already uses: `membrane()`'s
- * return type is a conditional on NodeDef's generic `In`, which TS can't
- * resolve from a plain, doubly-defaulted `NodeDef` even after
- * `nodeDef.input.kind` has been checked at the value level — a real TS
- * narrowing limitation, not a genuine call-shape ambiguity (the `kind`
+ * argument and return types are a conditional on NodeDef's generic `In`,
+ * which TS can't resolve from a plain, doubly-defaulted `NodeDef` even
+ * after `nodeDef.input.kind` has been checked at the value level — a real
+ * TS narrowing limitation, not a genuine call-shape ambiguity (the `kind`
  * branch checks it at runtime). Both call shapes carry the same third and
  * fourth, optional `identity`/`step` arguments `membrane.ts`'s real
- * `SingleInvoke`/`AllOfInvoke` accept — `identity` typed `Partial`,
- * matching `Envelope.identity` itself, because replay's caller (see
+ * `MembraneArgs` accepts — `identity` typed `Partial`, matching
+ * `Envelope.identity` itself, because replay's caller (see
  * `replayInvocation`) can only ever supply a previously *narrowed*
  * identity, never the full claims set.
  */
 type AnySingleInvoke = (
+  nodeDef: NodeDef,
   payload: unknown,
   correlationId: string,
   identity?: Partial<PayloadOf<typeof Identity>>,
   step?: number,
 ) => Promise<{ result: unknown; envelope?: Envelope }>;
 type AnyAllOfInvoke = (
+  nodeDef: NodeDef,
   correlationId: string,
   log: Log,
   identity?: Partial<PayloadOf<typeof Identity>>,
@@ -88,7 +90,7 @@ export async function invokeWithInput(
   step?: number,
 ): Promise<{ result: unknown; envelope?: Envelope }> {
   if (nodeDef.input.kind === "single") {
-    return await (membrane(nodeDef) as AnySingleInvoke)(input, correlationId, identity, step);
+    return await (membrane as AnySingleInvoke)(nodeDef, input, correlationId, identity, step);
   }
 
   const log = new InMemoryLog();
@@ -96,6 +98,6 @@ export async function invokeWithInput(
   for (const edge of nodeDef.input.edges) {
     log.append(edge.name, correlationId, bag[edge.name]);
   }
-  const invocation = await (membrane(nodeDef) as AnyAllOfInvoke)(correlationId, log, identity, step);
+  const invocation = await (membrane as AnyAllOfInvoke)(nodeDef, correlationId, log, identity, step);
   return invocation ?? { result: undefined };
 }

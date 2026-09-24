@@ -76,21 +76,24 @@ import type { Trace } from "./trace.js";
 /**
  * `program.nodes` stores heterogeneous NodeDefs in one `Record<string,
  * NodeDef>`, erasing each node's own literal `In`/`O` to the generic
- * default. `membrane()`'s return type is a conditional on `In`, which TS
- * can't resolve from that erased generic even after `nodeDef.input.kind`
- * has been checked at the value level — a real TS narrowing limitation,
- * not a genuine call-shape ambiguity (checked at runtime by the `kind`
- * branch itself). These two aliases name the cast instead of hiding it.
- * `AnyAllOfInvoke` names the cast for `allOf`-input nodes' call shape
- * (`correlationId, log, identity?`); `In` is erased here too.
+ * default. `membrane()`'s argument and return types are a conditional on
+ * `In`, which TS can't resolve from that erased generic even after
+ * `nodeDef.input.kind` has been checked at the value level — a real TS
+ * narrowing limitation, not a genuine call-shape ambiguity (checked at
+ * runtime by the `kind` branch itself). These two aliases name the cast
+ * instead of hiding it. `AnyAllOfInvoke` names the cast for `allOf`-input
+ * nodes' call shape (`nodeDef, correlationId, log, identity?`); `In` is
+ * erased here too.
  */
 type AnySingleInvoke = (
+  nodeDef: NodeDef,
   payload: unknown,
   correlationId: string,
   identity?: PayloadOf<typeof Identity>,
   step?: number,
 ) => Promise<{ result: unknown; envelope?: Envelope }>;
 type AnyAllOfInvoke = (
+  nodeDef: NodeDef,
   correlationId: string,
   log: Log,
   identity?: PayloadOf<typeof Identity>,
@@ -312,7 +315,7 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         payload = instance.payload;
       }
       input = payload;
-      const invocation = await (membrane(nodeDef) as AnySingleInvoke)(payload, correlationId, identity, pulse);
+      const invocation = await (membrane as AnySingleInvoke)(nodeDef, payload, correlationId, identity, pulse);
       result = invocation.result;
       envelope = invocation.envelope;
     } else {
@@ -325,7 +328,7 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         bag[edge.name] = log.latest(edge.name, correlationId);
       }
       input = bag;
-      const invocation = await (membrane(nodeDef) as AnyAllOfInvoke)(correlationId, log, identity, pulse);
+      const invocation = await (membrane as AnyAllOfInvoke)(nodeDef, correlationId, log, identity, pulse);
       if (invocation === undefined) return false;
       result = invocation.result;
       envelope = invocation.envelope;

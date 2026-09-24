@@ -2,7 +2,8 @@
  * The membrane (docs/design.md §5) — the boundary every node invocation
  * passes through, generated purely from a node's own NodeDef. Not a
  * primitive a `.node` author declares or configures; there is nothing to
- * pass `membrane()` beyond the NodeDef itself.
+ * pass `membrane()` beyond the NodeDef and the invocation's own arguments —
+ * never separate configuration such as a sink or a logger.
  *
  * Covers `single` and `allOf` InputSpecs, including compound (nested-edge)
  * and many-of-compound fields in the payload being asserted. A rejected
@@ -16,7 +17,7 @@
  * `causationId` is always `null` (no causation-chain tracking exists yet —
  * nothing currently tells a node which specific upstream edge instance
  * triggered it). `step` used to be the other one; it is now the scheduler's
- * pulse number, passed in by whoever invokes (see `SingleInvoke`) and
+ * pulse number, passed in by whoever invokes (see `MembraneArgs`) and
  * defaulting to 0 for callers with no scheduler behind them. `identity` narrows
  * the caller-supplied `Identity` claims to exactly the fields a node's
  * `scope` declares (`{}` when no `scope` is declared) — only
@@ -346,8 +347,9 @@ export class InMemoryLog implements Log {
  * for those paths would mean recording an invocation that never happened.
  *
  * The envelope is returned rather than a recording sink being passed in,
- * because `membrane(nodeDef)` takes nothing but the declaration (see this
- * file's header) — what it hands back may grow; what configures it may not.
+ * because `membrane()` takes nothing but the declaration and the
+ * invocation's own arguments (see this file's header) — what it hands back
+ * may grow; what configures it may not.
  */
 export interface Invocation<In extends InputSpec, O extends OutputSpec> {
   result: OutputResult<O> | Failed<In>;
@@ -355,18 +357,23 @@ export interface Invocation<In extends InputSpec, O extends OutputSpec> {
 }
 
 /**
- * What `membrane()` returns for a `single`-input node: hand it a payload,
- * the invocation's correlationId, and (optionally) the caller's identity —
- * defaults to a documented system identity when omitted (file header).
- * Typed `Partial`, not the full `PayloadOf<typeof Identity>`: a live
- * caller normally supplies the full claims set, but `replay.ts` supplies
- * only a previously *narrowed* identity (`Envelope.identity` is itself
- * `Partial` — see that field's own doc comment), and `narrowIdentity`
- * below only ever reads the fields a node's `scope` names regardless of
- * which case this is. Re-feeding a narrowed identity through the same
- * narrowing is idempotent under an unchanged `scope`, which is exactly
- * what makes replay work (see replay.ts's header for the residual limit
- * when `scope` has since widened).
+ * `membrane()`'s arguments after the declaration itself. A `single`-input
+ * node takes a payload directly, the invocation's correlationId, and
+ * (optionally) the caller's identity — defaults to a documented system
+ * identity when omitted (file header). An `allOf`-input node takes a
+ * correlationId and the Log to resolve readiness against instead of a
+ * payload — see `MembraneResult` for what that readiness check resolves
+ * to.
+ *
+ * `identity` is typed `Partial`, not the full `PayloadOf<typeof Identity>`:
+ * a live caller normally supplies the full claims set, but `replay.ts`
+ * supplies only a previously *narrowed* identity (`Envelope.identity` is
+ * itself `Partial` — see that field's own doc comment), and
+ * `narrowIdentity` below only ever reads the fields a node's `scope` names
+ * regardless of which case this is. Re-feeding a narrowed identity through
+ * the same narrowing is idempotent under an unchanged `scope`, which is
+ * exactly what makes replay work (see replay.ts's header for the residual
+ * limit when `scope` has since widened).
  *
  * `step` is the scheduler's pulse number, threaded in rather than stamped on
  * afterwards: the envelope is built *before* `Fn` runs and handed to it, so a
@@ -374,34 +381,24 @@ export interface Invocation<In extends InputSpec, O extends OutputSpec> {
  * the log disagrees with. Optional and trailing, exactly as `identity` is —
  * a caller with no scheduler behind it gets the documented default of 0.
  */
-type SingleInvoke<In extends InputSpec, O extends OutputSpec> = (
-  payload: unknown,
-  correlationId: string,
-  identity?: Partial<PayloadOf<typeof Identity>>,
-  step?: number,
-) => Promise<Invocation<In, O>>;
+type MembraneArgs<In extends InputSpec> = In extends { kind: "single" }
+  ? [payload: unknown, correlationId: string, identity?: Partial<PayloadOf<typeof Identity>>, step?: number]
+  : [correlationId: string, log: Log, identity?: Partial<PayloadOf<typeof Identity>>, step?: number];
 
 /**
- * What `membrane()` returns for an `allOf`-input node: a readiness check
- * against a correlation_id's logs, not a direct payload. Resolves to
+ * What `membrane()` resolves to. A `single`-input node always resolves to
+ * a real `Invocation`. An `allOf`-input node's result is a readiness check
+ * against a correlationId's logs rather than a direct call: it resolves to
  * `undefined` — not an error — when the edges it declared needing haven't
  * all appeared yet; a caller (a scheduler, not built here) decides when to
  * try again. That bare `undefined` is a readiness signal, distinct from an
- * `Invocation` whose `envelope` happens to be absent.
- *
- * `step` carries the same meaning, and for the same reason, as on
- * `SingleInvoke` — see that type's doc comment.
+ * `Invocation` whose `envelope` happens to be absent — which is exactly why
+ * only the `allOf` branch carries it: a `single`-input call must not be
+ * typed as possibly-undefined.
  */
-type AllOfInvoke<In extends InputSpec, O extends OutputSpec> = (
-  correlationId: string,
-  log: Log,
-  identity?: Partial<PayloadOf<typeof Identity>>,
-  step?: number,
-) => Promise<Invocation<In, O> | undefined>;
-
-type MembraneInvoke<In extends InputSpec, O extends OutputSpec> = In extends { kind: "single" }
-  ? SingleInvoke<In, O>
-  : AllOfInvoke<In, O>;
+type MembraneResult<In extends InputSpec, O extends OutputSpec> = In extends { kind: "single" }
+  ? Invocation<In, O>
+  : Invocation<In, O> | undefined;
 
 function reasonOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
@@ -418,7 +415,7 @@ const IDENTITY_FIELDS = Object.keys(Identity.fields) as (keyof PayloadOf<typeof 
  * `read:Identity:<field>` resolves to anything today; any other verb or
  * edge throws, caught by the caller and turned into `Failed<In>`, never an
  * uncaught exception. `identity` itself is `Partial`, not the full claims
- * shape: an already-narrowed identity (replay's case — see `SingleInvoke`'s
+ * shape: an already-narrowed identity (replay's case — see `MembraneArgs`'s
  * doc comment) can be fed back in here, and narrowing it again by the same
  * `scope` is a no-op, since only fields present are ever read.
  */
@@ -498,84 +495,107 @@ function callFn<In extends InputSpec, O extends OutputSpec>(
 
 /**
  * Wraps a node's Fn so it can never run against an unasserted or
- * not-yet-ready input. `membrane(nodeDef)` takes nothing but the
- * declaration itself — the returned function's behavior, and its very
- * shape (direct payload vs. correlation-id readiness check), is entirely a
+ * not-yet-ready input. `membrane()` takes the declaration and the
+ * invocation's own arguments — never separate configuration such as a sink
+ * or a logger — and performs the invocation itself rather than handing
+ * back a callable for the caller to invoke later: no detached invoker is
+ * ever held outside this function. That means "if you call membrane, these
+ * things happen" is guaranteed by this function's shape. It does not mean
+ * "invocation only ever happens through membrane" — `nodeDef.fn` is still a
+ * public field, reachable directly, so that stronger claim remains a matter
+ * of convention, not something this refactor makes structural. Its call
+ * shape (direct payload vs. correlation-id readiness check) is entirely a
  * product of what the NodeDef's `input` says, never separately configured.
  * A rejected assert or an uncaught throw from `Fn` resolves to `Failed<In>`
  * — `{ input, reason }` — rather than rejecting; nothing escapes the
  * boundary as an exception (design.md §3).
  */
-export function membrane<In extends InputSpec, O extends OutputSpec>(
+export async function membrane<In extends InputSpec, O extends OutputSpec>(
   nodeDef: NodeDef<In, O>,
-): MembraneInvoke<In, O> {
+  ...args: MembraneArgs<In>
+): Promise<MembraneResult<In, O>> {
   if (nodeDef.input.kind === "single") {
     const edge = nodeDef.input.edge;
-    const invoke: SingleInvoke<In, O> = async (payload, correlationId, identity, step) => {
-      let validated: InputPayload<In>;
-      try {
-        validated = assertPayload(edge, payload) as InputPayload<In>;
-      } catch (cause) {
-        return { result: { input: payload as InputPayload<In>, reason: reasonOf(cause) } };
-      }
-      let envelope: Envelope;
-      try {
-        envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY, step);
-      } catch (cause) {
-        return { result: { input: validated, reason: reasonOf(cause) } };
-      }
-      try {
-        return { result: await callFn(nodeDef, validated, envelope), envelope };
-      } catch (cause) {
-        return { result: { input: validated, reason: reasonOf(cause) }, envelope };
-      }
-    };
-    return invoke as MembraneInvoke<In, O>;
+    const [payload, correlationId, identity, step] = args as unknown as [
+      payload: unknown,
+      correlationId: string,
+      identity: Partial<PayloadOf<typeof Identity>> | undefined,
+      step: number | undefined,
+    ];
+    let validated: InputPayload<In>;
+    try {
+      validated = assertPayload(edge, payload) as InputPayload<In>;
+    } catch (cause) {
+      return { result: { input: payload as InputPayload<In>, reason: reasonOf(cause) } } as MembraneResult<In, O>;
+    }
+    let envelope: Envelope;
+    try {
+      envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY, step);
+    } catch (cause) {
+      return { result: { input: validated, reason: reasonOf(cause) } } as MembraneResult<In, O>;
+    }
+    try {
+      return { result: await callFn(nodeDef, validated, envelope), envelope } as MembraneResult<In, O>;
+    } catch (cause) {
+      return { result: { input: validated, reason: reasonOf(cause) }, envelope } as MembraneResult<In, O>;
+    }
   }
 
   if (nodeDef.input.kind === "allOf") {
     const edges = nodeDef.input.edges;
-    const invoke: AllOfInvoke<In, O> = async (correlationId, log, identity, step) => {
-      // Hazard, other end: `Log.latest`'s own doc comment above warns that
-      // `runtime.ts`'s trace-rebuild read depends on nothing appending to
-      // the Log between its read and this one — synchronous `latest`, no
-      // `await` in between. That same invariant breaks identically if an
-      // `await` is ever introduced into *this* loop before it finishes
-      // reading every declared edge — this read is the other end of that
-      // same gap, not a separate hazard.
-      const rawBag: Record<string, unknown> = {};
-      for (const edge of edges) {
-        const value = log.latest(edge.name, correlationId);
-        if (value === undefined) return undefined;
-        rawBag[edge.name] = value;
-      }
+    const [correlationId, log, identity, step] = args as unknown as [
+      correlationId: string,
+      log: Log,
+      identity: Partial<PayloadOf<typeof Identity>> | undefined,
+      step: number | undefined,
+    ];
 
-      const bag: Record<string, unknown> = {};
-      const errors: string[] = [];
-      for (const edge of edges) {
-        try {
-          bag[edge.name] = assertPayload(edge, rawBag[edge.name]);
-        } catch (cause) {
-          errors.push(reasonOf(cause));
-        }
-      }
-      if (errors.length > 0) {
-        return { result: { input: rawBag as InputPayload<In>, reason: errors.join("; ") } };
-      }
+    // Hazard, other end: `Log.latest`'s own doc comment above warns that
+    // `runtime.ts`'s trace-rebuild read depends on nothing appending to
+    // the Log between its read and this one — synchronous `latest`, no
+    // `await` in between. That same invariant breaks identically if an
+    // `await` is ever introduced into *this* loop before it finishes
+    // reading every declared edge — this read is the other end of that
+    // same gap, not a separate hazard.
+    const rawBag: Record<string, unknown> = {};
+    for (const edge of edges) {
+      const value = log.latest(edge.name, correlationId);
+      if (value === undefined) return undefined as MembraneResult<In, O>;
+      rawBag[edge.name] = value;
+    }
 
-      let envelope: Envelope;
+    const bag: Record<string, unknown> = {};
+    const errors: string[] = [];
+    for (const edge of edges) {
       try {
-        envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY, step);
+        bag[edge.name] = assertPayload(edge, rawBag[edge.name]);
       } catch (cause) {
-        return { result: { input: bag as InputPayload<In>, reason: reasonOf(cause) } };
+        errors.push(reasonOf(cause));
       }
-      try {
-        return { result: await callFn(nodeDef, bag as InputPayload<In>, envelope), envelope };
-      } catch (cause) {
-        return { result: { input: bag as InputPayload<In>, reason: reasonOf(cause) }, envelope };
-      }
-    };
-    return invoke as MembraneInvoke<In, O>;
+    }
+    if (errors.length > 0) {
+      return {
+        result: { input: rawBag as InputPayload<In>, reason: errors.join("; ") },
+      } as MembraneResult<In, O>;
+    }
+
+    let envelope: Envelope;
+    try {
+      envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY, step);
+    } catch (cause) {
+      return { result: { input: bag as InputPayload<In>, reason: reasonOf(cause) } } as MembraneResult<In, O>;
+    }
+    try {
+      return { result: await callFn(nodeDef, bag as InputPayload<In>, envelope), envelope } as MembraneResult<
+        In,
+        O
+      >;
+    } catch (cause) {
+      return { result: { input: bag as InputPayload<In>, reason: reasonOf(cause) }, envelope } as MembraneResult<
+        In,
+        O
+      >;
+    }
   }
 
   // Exhaustiveness guard: InputSpec is a closed union of single/allOf, so
