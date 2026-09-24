@@ -4,9 +4,10 @@
  * appending successful results to the `Log`. Implements the pulse/wave
  * model design-history.md already decided ("`every` lands; a pulse/wave
  * model settles graph-level scheduling") as real, numbered pulses. Each
- * pulse computes every (node, eligible instance) pair against the log *as
- * it stands*, then fires all of them; instances emitted during a pulse are
- * invisible until the next one. It is a Petri net: edges are places, nodes
+ * pulse computes every (node, eligible instance) pair — over the nodes the
+ * wiring actually reaches — against the log *as it stands*, then fires all
+ * of them; instances emitted during a pulse are invisible until the next
+ * one. It is a Petri net: edges are places, nodes
  * are transitions, an edge instance is a token, and `wiring.feeds` is the
  * arc set that says which tokens a transition may consume
  * (`eligibleInstances`).
@@ -346,14 +347,41 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
     return true;
   }
 
-  // The pulse loop scans `program.nodes`, so a `wiring` naming a node no
-  // `.node` file declares would otherwise be ignored rather than reported.
-  // Checked once here, up front, instead of on every attempted firing.
+  // The pulse loop scans the wiring rather than `program.nodes`, so a
+  // `wiring` naming a node no `.node` file declares would otherwise be
+  // ignored rather than reported. Checked once here, up front, instead of on
+  // every attempted firing.
   for (const nodeName of [...program.wiring.origins, ...Object.values(program.wiring.feeds).flat()]) {
     if (!(nodeName in program.nodes)) {
       throw new Error(`Wiring references "${nodeName}", but no .node file declares it.`);
     }
   }
+
+  /**
+   * Which nodes this run may fire: the transitive closure of `wiring.feeds`
+   * from `wiring.origins`, computed once. Cycles are the point of this spec,
+   * so the visited set is what terminates it.
+   *
+   * Scanning every entry in `program.nodes` instead would let a node that
+   * appears nowhere in the topology fire, since `eligibleInstances` treats an
+   * envelope-less instance as eligible by type (`§4`, second clause) and a
+   * node with no incoming arc has nothing else to filter on. That bypass
+   * exists for *staged or injected* inputs — `invoke.ts`, readiness fixtures
+   * — not to let an unwired node self-start off a type match, which is the
+   * type-soup behaviour arc-based readiness exists to eliminate. Restricting
+   * the scan also keeps a program's behaviour a function of its topology
+   * rather than of which node definitions happen to be in the map.
+   */
+  const reachable = new Set<string>();
+  const frontier = [...program.wiring.origins];
+  while (frontier.length > 0) {
+    const nodeName = frontier.pop()!;
+    if (reachable.has(nodeName)) continue;
+    reachable.add(nodeName);
+    for (const child of program.wiring.feeds[nodeName] ?? []) frontier.push(child);
+  }
+  /** Sorted, so a run is reproducible — order within a pulse cannot change *which* nodes fire (the snapshot fixed that), only `seq` assignment and the interleaving of appends. */
+  const scanned = [...reachable].sort();
 
   let firings = 0;
   let pulse = 0;
@@ -367,7 +395,7 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
     // number, and what stops a self-feeding node draining its own output
     // inside one pulse without needing a fairness rule.
     const candidates: { nodeName: string; instance?: LoggedInstance }[] = [];
-    for (const nodeName of Object.keys(program.nodes).sort()) {
+    for (const nodeName of scanned) {
       const nodeDef = program.nodes[nodeName];
       if (nodeDef.input.kind !== "single") {
         if (!firedAllOf.has(nodeName)) candidates.push({ nodeName });

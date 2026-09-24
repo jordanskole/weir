@@ -648,20 +648,14 @@ describe("runNetlist", () => {
       log.append("TodoList", "thread-1", validTodoList);
       log.append("Todo", "thread-1", malformedTodo);
 
-      // Narrowed to the one node under test, not just the one wiring. The
-      // pulse loop offers every node in `program.nodes` its eligible
-      // instances each pulse rather than walking out from the origins, so
-      // CompleteTodo — whose input is also Todo, and for which the staged
-      // (envelope-less) instance is eligible by type — would otherwise fire
-      // on the same malformed Todo and log its own Failed_Todo, defeating
-      // the per-edge-routing assertions below for a reason that has nothing
-      // to do with what this test is about.
+      // Only the wiring is narrowed, not `program.nodes`: CompleteTodo also
+      // declares Todo as its input and the staged instance is envelope-less
+      // (so eligible by type), but this wiring does not reach it, and the
+      // pulse loop scans only what the wiring reaches. The per-edge-routing
+      // assertions below therefore measure AddTodoToList's failure routing
+      // and nothing else.
       const result = await runNetlist(
-        {
-          ...program,
-          nodes: { AddTodoToList: program.nodes.AddTodoToList! },
-          wiring: { origins: ["AddTodoToList"], feeds: {} },
-        },
+        { ...program, wiring: { origins: ["AddTodoToList"], feeds: {} } },
         { correlationId: "thread-1", originPayloads: {} },
         { log },
       );
@@ -1162,6 +1156,41 @@ describe("runNetlist — iteration", () => {
     // The cycle is real: recycle did fire on the join's output and put a
     // fresh A back in front of join, which declined to fire again.
     expect(log.instances("A", "c1")).toHaveLength(2);
+  });
+
+  it("never fires a node the wiring does not reach, even with a staged instance of its input edge", async () => {
+    // Eligibility follows arcs, not types. A node with no incoming arc has
+    // nothing to filter on — the envelope-less bypass would make any staged
+    // instance of its input edge eligible — so the pulse scan is restricted
+    // to the transitive closure of `feeds` from `origins`. The staged
+    // instance here is exactly the bypass's shape: appended with no
+    // envelope, as invoke.ts and the readiness fixtures do.
+    const received: string[] = [];
+    const wired = defineNode({ name: "wired", input: single(Start), output: single(Start), fn: (s) => s });
+    const unwired = defineNode({
+      name: "unwired",
+      input: single(CycleA),
+      output: single(Joined),
+      fn: (v) => {
+        received.push(v.value);
+        return { value: v.value };
+      },
+    });
+    const log = new InMemoryLog();
+    log.append("A", "c1", { value: "staged" });
+
+    const result = await runNetlist(
+      programWith({ wired, unwired }, { origins: ["wired"], feeds: {} }),
+      { correlationId: "c1", originPayloads: { wired: { value: "a" } } },
+      { log, budget: 50 },
+    );
+
+    // The run did happen — `wired` fired — so this is not passing because
+    // nothing ran at all.
+    expect(result.firings).toBe(1);
+    expect(log.latest("Start", "c1")).toEqual({ value: "a" });
+    expect(received).toEqual([]);
+    expect(log.instances("Joined", "c1")).toEqual([]);
   });
 
   it("does not spin when an allOf node can never become ready", async () => {
