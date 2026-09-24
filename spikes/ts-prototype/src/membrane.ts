@@ -411,6 +411,18 @@ async function buildEnvelope(
  * Calls `Fn` with an `Envelope` only if it declared a second parameter to
  * receive one — arity-detected (`fn.length`), the same opt-in `env` already
  * had at the type level, made real here for the first time.
+ *
+ * Arity and `scope` are deliberately orthogonal, and it's worth saying so
+ * because they look like they should be the same switch. `scope` decides
+ * what's *inside* `envelope.identity` (see `narrowIdentity`); arity decides
+ * whether the implementation wanted the envelope at all. Identity is one of
+ * eight fields on it — a node may well want `correlationId` or `step` while
+ * declaring no scope whatsoever, and that node receives an envelope whose
+ * `identity` narrowed to nothing. Prior art (generalized in
+ * design-history.md) settled this the same way: its handler signature always
+ * carried the scoped-environment parameter, with the declared list narrowing
+ * the parameter's *type* rather than gating its presence, so declaring
+ * nothing yielded an empty object that was still passed.
  */
 function callFn<In extends InputSpec, O extends OutputSpec>(
   nodeDef: NodeDef<In, O>,
