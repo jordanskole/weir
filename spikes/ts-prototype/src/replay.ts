@@ -19,14 +19,13 @@
  * declare was never recorded, so a replay against a widened declaration
  * cannot recover it.
  *
- * And unlike most contract drift, a `scope`-only change will *not* trip
- * the hash-drift refusal below: `hash.ts`'s `fingerprintNode` doesn't cover
- * `scope` (docs/open-questions.md, "what belongs in the contract hash"), so
- * a widened `scope` resolves the very same pinned implementation and
- * replays "successfully," with the newly-declared field simply absent
- * from `identity` — same as it would be for a caller who never held it.
- * This is a residual limit, not a bug: there is no fuller identity
- * anywhere to recover it from.
+ * A widened `scope` is caught by the hash-drift refusal below, which is
+ * where it belongs: `hash.ts`'s `fingerprintNode` covers `scope`, so the
+ * declaration's hash no longer matches the recorded `contractHash` and the
+ * replay refuses by name rather than quietly handing `Fn` an identity
+ * missing the newly-declared field. Refusing is the honest outcome — there
+ * is no fuller identity anywhere to recover that field from, so a replay
+ * under the widened declaration could never be faithful.
  */
 
 import { hashNode } from "./hash.js";

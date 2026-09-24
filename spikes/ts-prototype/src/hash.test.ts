@@ -482,3 +482,49 @@ describe("assertEdgeHash", () => {
     );
   });
 });
+
+describe("hashNode — scope", () => {
+  const node: NodeDecl = {
+    name: "birthday",
+    input: { kind: "single", edge: base },
+    output: { kind: "single", edge: base },
+  };
+
+  it("changes the hash when a scope is added", async () => {
+    const before = await hashNode(node);
+    const after = await hashNode({ ...node, scope: ["read:Identity:sub"] });
+    expect(after.hash).not.toBe(before.hash);
+  });
+
+  it("changes the hash when a declared scope changes", async () => {
+    // The case this exists for: `scope` feeds narrowIdentity, so changing it
+    // changes what data Fn actually receives. Left unhashed, the previously
+    // accepted implementation would resolve unchanged and read the old field
+    // as undefined — silently, with acceptImplementation declining to
+    // re-check because the hash said nothing changed.
+    const a = await hashNode({ ...node, scope: ["read:Identity:sub"] });
+    const b = await hashNode({ ...node, scope: ["read:Identity:iss"] });
+    expect(a.hash).not.toBe(b.hash);
+  });
+
+  it("is stable across a reordering that doesn't change meaning", async () => {
+    const a = await hashNode({ ...node, scope: ["read:Identity:sub", "read:Identity:iss"] });
+    const b = await hashNode({ ...node, scope: ["read:Identity:iss", "read:Identity:sub"] });
+    expect(a.hash).toBe(b.hash);
+  });
+
+  it("treats an empty scope array as no scope at all", async () => {
+    const a = await hashNode(node);
+    const b = await hashNode({ ...node, scope: [] });
+    expect(a.hash).toBe(b.hash);
+  });
+
+  it("treats a repeated scope as the single scope it narrows to", async () => {
+    // Unlike a duplicate property name, a repeated scope is merely redundant
+    // rather than ambiguous — narrowing to the same field twice is the same
+    // narrowing — so it de-duplicates instead of throwing.
+    const a = await hashNode({ ...node, scope: ["read:Identity:sub"] });
+    const b = await hashNode({ ...node, scope: ["read:Identity:sub", "read:Identity:sub"] });
+    expect(a.hash).toBe(b.hash);
+  });
+});

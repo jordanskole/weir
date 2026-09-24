@@ -162,13 +162,18 @@ export async function hashEdges(edges: AnyEdgeDef[]): Promise<Record<string, Sch
  * examples are the acceptance test suite *for* a contract, not part of the
  * contract itself (§10: "written once it passes both its examples and
  * generated property cases" — examples gate acceptance, they don't define
- * the hash being accepted against).
+ * the hash being accepted against). `scope` is included for the opposite
+ * reason: it's behavioural, not a verification artifact. `membrane` narrows
+ * `identity` by it, so it decides what the implementation actually receives
+ * — widen or change a scope and the previously accepted implementation is
+ * being asked to compute from different data.
  */
 interface NodeFingerprint {
   name: string;
   input: InputSpecFingerprint;
   output: OutputSpecFingerprint;
   closure?: unknown;
+  scope?: string[];
   properties?: { name: string; expr: PropertyExpr }[];
 }
 
@@ -241,12 +246,26 @@ function fingerprintProperties(properties: PropertyDecl[]): { name: string; expr
     .map((property) => ({ name: property.name, expr: property.expr }));
 }
 
+/**
+ * Sorted for the same reason properties are — declaration order carries no
+ * meaning, so reordering a scope list must not invalidate an accepted
+ * implementation. Duplicates de-duplicate rather than throw: unlike a
+ * duplicate property name, a repeated scope is redundant but unambiguous
+ * (narrowing to the same field twice is that one narrowing), so there's
+ * nothing for a declarer to disambiguate.
+ */
+function fingerprintScope(scope: string[]): string[] {
+  return [...new Set(scope)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
 function fingerprintNode(node: NodeDecl): NodeFingerprint {
   return {
     name: node.name,
     input: fingerprintInput(node.input),
     output: fingerprintOutput(node.output),
     ...(node.closure !== undefined && { closure: node.closure }),
+    ...(node.scope !== undefined &&
+      node.scope.length > 0 && { scope: fingerprintScope(node.scope) }),
     ...(node.properties !== undefined &&
       node.properties.length > 0 && { properties: fingerprintProperties(node.properties) }),
   };

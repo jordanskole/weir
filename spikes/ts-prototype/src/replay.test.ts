@@ -178,6 +178,38 @@ describe("replayInvocation", () => {
     );
   });
 
+  it("rejects a scope-only widening — the drift the recorded identity could never satisfy", async () => {
+    // A widened scope names a field the original invocation never recorded
+    // (membrane only keeps what the declared scope narrowed to), so no
+    // faithful replay exists. Since `scope` is fingerprinted, this refuses
+    // by hash rather than quietly handing Fn an identity missing the field.
+    dir = await mkdtemp(join(tmpdir(), "weir-replay-scope-drift-"));
+    const { short, hash } = await hashNode(whoAmI);
+    await writeImpl(
+      dir,
+      "whoAmI",
+      short,
+      `export default function whoAmI(payload, env) { return { value: env.identity.sub }; }\n`,
+    );
+
+    const nodeDef = await resolveImplementationAt(whoAmI, dir, hash);
+    const { result, envelope } = await membrane(nodeDef)({ age: 41 }, "c-scope-drift", {
+      sub: "alice",
+      iss: "issuer",
+    });
+    if (!envelope) throw new Error("test setup: expected an envelope from a successful invocation");
+    expect(envelope.identity).toEqual({ sub: "alice" });
+
+    const widened = { ...whoAmI, scope: ["read:Identity:sub", "read:Identity:iss"] };
+    const { hash: widenedHash } = await hashNode(widened);
+    expect(widenedHash).not.toBe(hash);
+
+    const entry: TraceEntry = { envelope, input: { age: 41 }, result };
+    await expect(replayInvocation(entry, widened, dir)).rejects.toThrow(
+      new RegExp(`Cannot replay "whoAmI"`),
+    );
+  });
+
   it("replays under the recorded identity, not SYSTEM_IDENTITY — a node whose scope reads Identity:sub", async () => {
     dir = await mkdtemp(join(tmpdir(), "weir-replay-identity-"));
     const { short, hash } = await hashNode(whoAmI);
