@@ -150,14 +150,39 @@ async function logOutput(
   }
 }
 
-export async function runNetlist(
-  program: Program,
-  log: Log,
-  correlationId: string,
-  originPayloads: Record<string, unknown>,
-  identity?: PayloadOf<typeof Identity>,
-  trace?: Trace,
-): Promise<RunResult> {
+/**
+ * What a trigger supplies: which run this is, what fired it, on whose
+ * behalf. Paired with `Host` (what the execution environment supplies) so
+ * `runNetlist` takes three parameters rather than eight.
+ */
+export interface Run {
+  correlationId: string;
+  originPayloads: Record<string, unknown>;
+  identity?: PayloadOf<typeof Identity>;
+}
+
+/**
+ * What the execution environment supplies: where instances live, where
+ * invocations are recorded, and how much may be spent.
+ *
+ * `budget` lives here rather than in `Run` because bounding iteration is
+ * the host's job, not the language's (design-history.md, "Iteration: it's
+ * a Petri net"). Undefined means unbounded, which is the honest
+ * run-to-quiescence semantics; a hosted runtime passes one because that is
+ * where multi-tenancy and billing live.
+ *
+ * Deliberately not called `Zone`. A zone (design.md §7) is per-*node* —
+ * where a node executes — and one run spans many. This is per-*run*.
+ */
+export interface Host {
+  log: Log;
+  trace?: Trace;
+  budget?: number;
+}
+
+export async function runNetlist(program: Program, run: Run, host: Host): Promise<RunResult> {
+  const { correlationId, originPayloads, identity } = run;
+  const { log, trace } = host;
   const failures: RunResult["failures"] = [];
   const fired = new Set<string>();
   const origins = new Set(program.wiring.origins);

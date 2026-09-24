@@ -41,7 +41,7 @@ describe("runNetlist", () => {
     const program = programWith({ doubled }, { origins: ["doubled"], feeds: {} });
     const log = new InMemoryLog();
 
-    const result = await runNetlist(program, log, "thread-1", { doubled: { value: "a" } });
+    const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { doubled: { value: "a" } } }, { log });
 
     expect(result.failures).toEqual([]);
     expect(log.latest("Start", "thread-1")).toEqual({ value: "aa" });
@@ -57,7 +57,7 @@ describe("runNetlist", () => {
     const program = programWith({ doubled }, { origins: ["doubled"], feeds: {} });
     const log = new InMemoryLog();
 
-    await runNetlist(program, log, "thread-1", { doubled: { value: "a" } });
+    await runNetlist(program, { correlationId: "thread-1", originPayloads: { doubled: { value: "a" } } }, { log });
 
     const instance = log.latestInstance("Start", "thread-1");
     expect(instance?.payload).toEqual({ value: "aa" });
@@ -75,7 +75,7 @@ describe("runNetlist", () => {
     const program = programWith({ doubled }, { origins: ["doubled"], feeds: {} });
     const log = new InMemoryLog();
 
-    await runNetlist(program, log, "thread-1", {});
+    await runNetlist(program, { correlationId: "thread-1", originPayloads: {} }, { log });
 
     expect(log.latest("Start", "thread-1")).toBeUndefined();
   });
@@ -99,7 +99,7 @@ describe("runNetlist", () => {
     );
     const log = new InMemoryLog();
 
-    await runNetlist(program, log, "thread-1", { step1: { value: "a" } });
+    await runNetlist(program, { correlationId: "thread-1", originPayloads: { step1: { value: "a" } } }, { log });
 
     expect(log.latest("Start", "thread-1")).toEqual({ value: "a-1-2" });
   });
@@ -124,7 +124,7 @@ describe("runNetlist", () => {
     const log = new InMemoryLog();
     const trace = new InMemoryTrace();
 
-    await runNetlist(program, log, "thread-1", { step1: { value: "a" } }, undefined, trace);
+    await runNetlist(program, { correlationId: "thread-1", originPayloads: { step1: { value: "a" } } }, { log, trace });
 
     const entries = trace.entries("thread-1");
     expect(entries).toHaveLength(2);
@@ -176,7 +176,7 @@ describe("runNetlist", () => {
     log.append("A", "thread-1", { value: "a" });
     log.append("B", "thread-1", { value: "b" });
 
-    await runNetlist(program, log, "thread-1", {}, undefined, trace);
+    await runNetlist(program, { correlationId: "thread-1", originPayloads: {} }, { log, trace });
 
     const entries = trace.entries("thread-1");
     expect(entries).toHaveLength(1);
@@ -202,7 +202,7 @@ describe("runNetlist", () => {
     // Malformed payload: assertPayload rejects it before Fn (and thus the
     // envelope) ever exists — membrane.ts's Invocation.envelope is present
     // iff Fn actually ran.
-    await runNetlist(program, log, "thread-1", { failing: { value: 5 } }, undefined, trace);
+    await runNetlist(program, { correlationId: "thread-1", originPayloads: { failing: { value: 5 } } }, { log, trace });
 
     expect(trace.entries("thread-1")).toEqual([]);
   });
@@ -246,7 +246,7 @@ describe("runNetlist", () => {
     };
     const log = new InMemoryLog();
 
-    await runNetlist(program, log, "thread-1", { origin: { value: "a" } });
+    await runNetlist(program, { correlationId: "thread-1", originPayloads: { origin: { value: "a" } } }, { log });
 
     expect(log.latest("Left", "thread-1")).toEqual({ value: "left-a" });
     expect(log.latest("Right", "thread-1")).toEqual({ value: "right-a" });
@@ -301,7 +301,7 @@ describe("runNetlist", () => {
     };
     const log = new InMemoryLog();
 
-    await runNetlist(program, log, "thread-1", { nodeA: { value: "a" } });
+    await runNetlist(program, { correlationId: "thread-1", originPayloads: { nodeA: { value: "a" } } }, { log });
 
     expect(log.latest("C", "thread-1")).toEqual({ value: "a+a" });
     expect(cCalls).toBe(1);
@@ -328,7 +328,7 @@ describe("runNetlist", () => {
     );
     const log = new InMemoryLog();
 
-    const result = await runNetlist(program, log, "thread-1", { failing: { value: "a" } });
+    const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { failing: { value: "a" } } }, { log });
 
     expect(result.failures).toEqual([]);
     expect(log.latest("Failed_Start", "thread-1")).toEqual({ input: { value: "a" }, reason: "kaboom" });
@@ -370,7 +370,7 @@ describe("runNetlist", () => {
     };
     const log = new InMemoryLog();
 
-    const result = await runNetlist(program, log, "thread-1", { failing: { value: "a" } });
+    const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { failing: { value: "a" } } }, { log });
 
     expect(result.failures).toEqual([]);
     expect(log.latest("Failed_Start", "thread-1")).toEqual({ input: { value: "a" }, reason: "kaboom" });
@@ -414,7 +414,7 @@ describe("runNetlist", () => {
     log.append("A", "thread-1", { value: "a" });
     log.append("B", "thread-1", { value: "b" });
 
-    const result = await runNetlist(program, log, "thread-1", {});
+    const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: {} }, { log });
 
     expect(result.failures).toEqual([]);
     expect(log.latest("Failed_A_B", "thread-1")).toEqual({
@@ -441,7 +441,7 @@ describe("runNetlist", () => {
     };
     const log = new InMemoryLog();
 
-    const result = await runNetlist(program, log, "thread-1", { checker: { value: "ok" } });
+    const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { checker: { value: "ok" } } }, { log });
 
     expect(log.latest("Pass", "thread-1")).toEqual({});
     expect(log.latest("Fail", "thread-1")).toBeUndefined();
@@ -478,7 +478,7 @@ describe("runNetlist", () => {
     };
     const log = new InMemoryLog();
 
-    const result = await runNetlist(program, log, "thread-1", { placeOrder: { value: "a" } });
+    const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { placeOrder: { value: "a" } } }, { log });
 
     expect(log.latest("InvoiceRequested", "thread-1")).toEqual({});
     expect(log.latest("InventoryReserved", "thread-1")).toEqual({});
@@ -519,7 +519,7 @@ describe("runNetlist", () => {
     };
     const log = new InMemoryLog();
 
-    const result = await runNetlist(program, log, "thread-1", { siblings: { value: "a" } });
+    const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { siblings: { value: "a" } } }, { log });
 
     expect(log.latest("Sibling", "thread-1")).toEqual({ "8": { age: 8 }, "12": { age: 12 } });
     expect(result.failures).toEqual([]);
@@ -551,7 +551,7 @@ describe("runNetlist", () => {
       const program = await elaborateWithImplementations(PERSON_BIRTHDAY_SRC, dir);
       const log = new InMemoryLog();
 
-      const result = await runNetlist(program, log, "thread-1", { birthday: { age: 41, nickname: null } });
+      const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { birthday: { age: 41, nickname: null } } }, { log });
 
       expect(log.latest("Person", "thread-1")).toEqual({ age: 42, nickname: null });
       expect(log.latest("Pass", "thread-1")).toEqual({});
@@ -581,7 +581,7 @@ describe("runNetlist", () => {
       const log = new InMemoryLog();
       const todo = { id: "todo-1", title: "Buy milk and eggs", description: null, is_complete: false };
 
-      const result = await runNetlist(program, log, "thread-1", { CreateTodo: todo });
+      const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { CreateTodo: todo } }, { log });
 
       expect(log.latest("Todo", "thread-1")).toEqual({ ...todo, is_complete: true });
       expect(log.latest("TodoList", "thread-1")).toBeUndefined();
@@ -610,7 +610,7 @@ describe("runNetlist", () => {
       const log = new InMemoryLog();
       const attempt = { id: "todo-1", title: "Buy milk and eggs", description: null, is_complete: true };
 
-      const result = await runNetlist(program, log, "thread-1", { CreateTodo: attempt });
+      const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { CreateTodo: attempt } }, { log });
 
       expect(result.failures).toEqual([]);
       expect(log.latest("Failed_NewTodo", "thread-1")).toEqual({
@@ -649,9 +649,8 @@ describe("runNetlist", () => {
 
       const result = await runNetlist(
         { ...program, wiring: { origins: ["AddTodoToList"], feeds: {} } },
-        log,
-        "thread-1",
-        {},
+        { correlationId: "thread-1", originPayloads: {} },
+        { log },
       );
 
       expect(result.failures).toEqual([]);
@@ -703,7 +702,7 @@ describe("runNetlist", () => {
         ingredients: { Butter: { name: "Butter", amount: "1 cup, softened" } },
       };
 
-      const result = await runNetlist(program, log, "thread-1", { gatherIngredients: recipe });
+      const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { gatherIngredients: recipe } }, { log });
 
       expect(log.latest("Dough", "thread-1")).toEqual({ title: recipe.title, servings: recipe.servings });
       expect(log.latest("Oven", "thread-1")).toEqual({ temperature: recipe.temperature, preheated: true });
@@ -779,7 +778,7 @@ describe("runNetlist", () => {
       const program = await elaborateWithImplementations(root, dir);
       const log = new InMemoryLog();
 
-      await runNetlist(program, log, "thread-1", { failing: { title: "bad todo" } });
+      await runNetlist(program, { correlationId: "thread-1", originPayloads: { failing: { title: "bad todo" } } }, { log });
 
       expect(log.latest("Failed_Todo", "thread-1")).toEqual({ input: { title: "bad todo" }, reason: "kaboom" });
       expect(log.latest("Failed_Person", "thread-1")).toBeUndefined();
@@ -829,7 +828,7 @@ describe("runNetlist", () => {
     const program = programWith(shadows, { origins: ["Handle__A", "Handle__B"], feeds: {} });
     const log = new InMemoryLog();
 
-    await runNetlist(program, log, "thread-1", { Handle__A: { value: "a" }, Handle__B: { value: "b" } });
+    await runNetlist(program, { correlationId: "thread-1", originPayloads: { Handle__A: { value: "a" }, Handle__B: { value: "b" } } }, { log });
 
     expect(received.sort()).toEqual(["a", "b"]);
   });
