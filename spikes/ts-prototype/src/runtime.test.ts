@@ -233,6 +233,62 @@ describe("runNetlist", () => {
     expect(instance?.envelope?.schemaHash).toBe((await hashEdge(FailedStart)).hash);
   });
 
+  it("a bad scope declaration — the one remaining no-envelope path — logs Failed<In> with no provenance and records no trace entry, without corrupting either", async () => {
+    const FailedStart = defineEdge({
+      name: "Failed_Start",
+      label: "Failed (Start)",
+      description: "d",
+      fields: { input: Start, reason: defineField({ type: "utf8", label: "Reason", description: "d", nullable: true }) },
+    });
+    const badScope = defineNode({
+      name: "badScope",
+      input: single(Start),
+      output: single(Start),
+      // Not "read:Identity:<field>" — buildEnvelope throws before the input
+      // is ever asserted, so this node fails on every input, valid or not.
+      scope: ["read:Identity:bogus"],
+      fn: (s) => s,
+    });
+    const program: Program = {
+      fields: {},
+      edges: { Start, Failed_Start: FailedStart },
+      nodes: { badScope },
+      wiring: { origins: ["badScope"], feeds: {} },
+    };
+    const log = new InMemoryLog();
+    const trace = new InMemoryTrace();
+
+    // A perfectly valid Start payload — isolating the failure to the
+    // declaration itself, not the data. membrane()'s Invocation.envelope is
+    // absent here specifically because buildEnvelope itself threw (a
+    // declaration bug), the one case that stays optional after 2026-09-24's
+    // reordering (see membrane.ts's Invocation doc comment).
+    const result = await runNetlist(
+      program,
+      { correlationId: "thread-1", originPayloads: { badScope: { value: "a" } } },
+      { log, trace },
+    );
+
+    expect(result.stopped).toBe("quiescence");
+    expect(log.latest("Failed_Start", "thread-1")).toEqual({
+      input: { value: "a" },
+      reason: expect.stringMatching(/bogus/),
+    });
+    expect(log.latest("Start", "thread-1")).toBeUndefined();
+
+    // No envelope to build a trace entry from — tryFire's `envelope !==
+    // undefined` guard excludes it, rather than recording a trace entry
+    // with no envelope.
+    expect(trace.entries("thread-1")).toEqual([]);
+
+    // No envelope to hash the instance's provenance from either —
+    // instanceEnvelope's `!envelope` guard returns undefined cleanly here,
+    // rather than spreading `undefined` into `{ schemaHash }` and minting a
+    // corrupt InstanceEnvelope missing every real field.
+    const instance = log.latestInstance("Failed_Start", "thread-1");
+    expect(instance?.envelope).toBeUndefined();
+  });
+
   it("walks a fan-out — one node feeding two next nodes, both firing off the same output", async () => {
     const Left = defineEdge({
       name: "Left",

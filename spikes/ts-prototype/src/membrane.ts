@@ -342,15 +342,27 @@ export class InMemoryLog implements Log {
 /**
  * What one pass through the membrane produced: the node's result, and the
  * envelope built for it. `envelope` is built *before* the input is
- * asserted, so it is present for every **attempt** — a rejected input
- * assert still carries one, since `Fn`'s not having run is exactly the
- * thing worth recording provenance for (2026-09-24, superseding the
- * narrower "present iff `Fn` actually ran" rule this file used to document
- * — see docs/superpowers/specs/2026-09-23-invocation-records-and-replay.md
- * §4 for the superseded reasoning and what changed). Only a failure inside
- * `buildEnvelope` itself (a bad `scope` declaration) resolves to
- * `Failed<In>` with no envelope at all — there, nothing was ever built to
- * attach, and that is a declaration bug rather than a rejected attempt.
+ * asserted, so it is present for every **attempt**, not only every
+ * completed invocation (2026-09-24, superseding the narrower "present iff
+ * `Fn` actually ran" rule this file used to document — see
+ * docs/superpowers/specs/2026-09-23-invocation-records-and-replay.md §4 for
+ * the superseded reasoning and what changed). A rejected input assert now
+ * carries a real envelope, since `Fn`'s not having run is exactly the thing
+ * worth recording provenance for.
+ *
+ * `envelope` stays **optional**, though, and the remaining case where it is
+ * absent is much narrower than before: only when `buildEnvelope` itself
+ * throws (a bad `scope` declaration — see its own doc comment). There,
+ * nothing was ever built to attach; the declaration is broken regardless of
+ * what input arrives, so this isn't an "attempt" in the sense the rest of
+ * this comment describes. Before 2026-09-24, `envelope` was absent for
+ * *any* rejected input — every `Failed<In>` from a bad payload, not just
+ * the rare bad-declaration case. Narrowing that to one path is the real
+ * improvement here; it is not "nothing changed." `tryFire` (`runtime.ts`)
+ * and `instanceEnvelope` (`runtime.ts`) both still check for this case —
+ * their checks are not dead code merely because it's rare, and deleting
+ * them would let a bad-scope node's firing corrupt a trace entry or a
+ * logged instance with a spread of `undefined` instead of failing cleanly.
  *
  * The envelope is returned rather than a recording sink being passed in,
  * because `membrane()` takes nothing but the declaration and the
@@ -359,7 +371,7 @@ export class InMemoryLog implements Log {
  */
 export interface Invocation<In extends InputSpec, O extends OutputSpec> {
   result: OutputResult<O> | Failed<In>;
-  envelope: Envelope;
+  envelope?: Envelope;
 }
 
 /**
@@ -398,10 +410,10 @@ type MembraneArgs<In extends InputSpec> = In extends { kind: "single" }
  * `undefined` — not an error — when the edges it declared needing haven't
  * all appeared yet; a caller (a scheduler, not built here) decides when to
  * try again. That bare `undefined` is a readiness signal, distinct from a
- * real `Invocation` (whose `envelope` is itself non-optional — see
- * `Invocation`'s own doc comment) — which is exactly why only the `allOf`
- * branch carries it: a `single`-input call must not be typed as
- * possibly-undefined.
+ * real `Invocation` whose own `envelope` field happens to be absent (see
+ * `Invocation`'s own doc comment for when that narrower case still
+ * happens) — which is exactly why only the `allOf` branch carries it: a
+ * `single`-input call must not be typed as possibly-undefined.
  */
 type MembraneResult<In extends InputSpec, O extends OutputSpec> = In extends { kind: "single" }
   ? Invocation<In, O>
