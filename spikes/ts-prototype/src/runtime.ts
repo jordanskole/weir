@@ -44,9 +44,9 @@
  */
 
 import { membrane } from "./membrane.js";
-import type { InstanceEnvelope, Log } from "./membrane.js";
+import type { InstanceEnvelope, Log, LoggedInstance } from "./membrane.js";
 import type { Program } from "./implementation.js";
-import type { AnyEdgeDef, Envelope, Failed, InputSpec, OutputSpec, PayloadOf } from "./types.js";
+import type { AnyEdgeDef, Envelope, Failed, InputSpec, NodeDef, OutputSpec, PayloadOf } from "./types.js";
 import { Identity, failedEdgeName, failedAllOfEdgeName } from "./types.js";
 import { hashEdge } from "./hash.js";
 import type { Trace } from "./trace.js";
@@ -178,6 +178,44 @@ export interface Host {
   log: Log;
   trace?: Trace;
   budget?: number;
+}
+
+/**
+ * Which instances a `single`-input node may fire on right now.
+ *
+ * Readiness is `(arc, unconsumed instance)`, not `(edge type, unconsumed
+ * instance)`, and the difference is load-bearing. `tryFire` used to
+ * resolve input by edge *name* alone, with `wiring.feeds` driving only
+ * queue order. That was harmless while every node fired once; under
+ * fire-per-unconsumed-instance it diverges, because `birthday: Person →
+ * Person` would observe its own output as a new unconsumed `Person` and
+ * run away on the project's canonical example.
+ *
+ * A Petri net does not work that way: arcs connect specific places to
+ * specific transitions, and a token is not eligible merely for having the
+ * right type. `wiring.feeds` is weir's arc set, and every emitted instance
+ * already records its producer in `envelope.node`.
+ *
+ * An instance with no envelope is eligible by type alone. That is not a
+ * loophole — an absent envelope already means "staged or injected from
+ * outside rather than produced by an arc" (see `LoggedInstance`), which is
+ * exactly the case that has no producer to check.
+ */
+export function eligibleInstances(
+  program: Program,
+  log: Log,
+  consumed: ReadonlySet<number>,
+  nodeDef: NodeDef,
+  correlationId: string,
+): LoggedInstance[] {
+  if (nodeDef.input.kind !== "single") return [];
+  const consumers = (producer: string): string[] => program.wiring.feeds[producer] ?? [];
+  return log.instances(nodeDef.input.edge.name, correlationId).filter((instance) => {
+    if (consumed.has(instance.seq)) return false;
+    const producer = instance.envelope?.node;
+    if (producer === undefined) return true;
+    return consumers(producer).includes(nodeDef.name);
+  });
 }
 
 export async function runNetlist(program: Program, run: Run, host: Host): Promise<RunResult> {

@@ -8,10 +8,11 @@ import { elaborate } from "./elaborate.js";
 import { hashEdge, hashNode } from "./hash.js";
 import { elaborateWithImplementations } from "./implementation.js";
 import { InMemoryLog } from "./membrane.js";
-import { runNetlist } from "./runtime.js";
+import { eligibleInstances, runNetlist } from "./runtime.js";
 import { InMemoryTrace } from "./trace.js";
 import type { Program } from "./implementation.js";
 import type { NodeDef } from "./types.js";
+import type { InstanceEnvelope } from "./membrane.js";
 
 const PERSON_BIRTHDAY_SRC = fileURLToPath(
   new URL("../../../examples/person-birthday/src", import.meta.url),
@@ -831,5 +832,100 @@ describe("runNetlist", () => {
     await runNetlist(program, { correlationId: "thread-1", originPayloads: { Handle__A: { value: "a" }, Handle__B: { value: "b" } } }, { log });
 
     expect(received.sort()).toEqual(["a", "b"]);
+  });
+});
+
+describe("eligibleInstances", () => {
+  const Value = defineEdge({
+    name: "Value",
+    label: "Value",
+    description: "d",
+    fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+  });
+  const downstream = defineNode({
+    name: "downstream",
+    input: single(Value),
+    output: single(Value),
+    fn: (v) => v,
+  });
+  const someAllOfNode = defineNode({
+    name: "someAllOfNode",
+    input: allOf(Value),
+    output: single(Value),
+    fn: () => ({ value: "x" }),
+  });
+  // "upstream" appears only as a producer name in test envelopes, never as
+  // an actual NodeDef — eligibleInstances only ever reads
+  // program.wiring.feeds[envelope.node], so a bare string key is enough to
+  // stand in for a real wired-in producer node.
+  const program = programWith(
+    { downstream, someAllOfNode },
+    { origins: [], feeds: { upstream: ["downstream"] } },
+  );
+
+  function envelopeFrom(node: string): InstanceEnvelope {
+    return {
+      id: "inv-" + node,
+      correlationId: "c1",
+      causationId: null,
+      timestamp: new Date().toISOString(),
+      step: 0,
+      identity: {},
+      node,
+      contractHash: "hash",
+      schemaHash: "edge-hash",
+    };
+  }
+
+  it("returns an unconsumed instance produced by a node wired to this one", () => {
+    const log = new InMemoryLog();
+    log.append("Value", "c1", { value: "a" }, envelopeFrom("upstream"));
+
+    const result = eligibleInstances(program, log, new Set(), program.nodes.downstream, "c1");
+
+    expect(result.map((i) => i.payload)).toEqual([{ value: "a" }]);
+  });
+
+  it("excludes an instance produced by a node NOT wired to this one", () => {
+    // The canonical-example guard: birthday emits Person and also consumes
+    // Person, but nothing wires birthday to itself, so its own output is
+    // not eligible for it.
+    const log = new InMemoryLog();
+    log.append("Value", "c1", { value: "a" }, envelopeFrom("unrelated"));
+
+    expect(eligibleInstances(program, log, new Set(), program.nodes.downstream, "c1")).toEqual([]);
+  });
+
+  it("excludes an already-consumed instance", () => {
+    const log = new InMemoryLog();
+    log.append("Value", "c1", { value: "a" }, envelopeFrom("upstream"));
+    const seq = log.instances("Value", "c1")[0].seq;
+
+    expect(eligibleInstances(program, log, new Set([seq]), program.nodes.downstream, "c1")).toEqual([]);
+  });
+
+  it("treats an instance with no envelope as eligible by type — a staged input", () => {
+    const log = new InMemoryLog();
+    log.append("Value", "c1", { value: "a" });
+
+    expect(eligibleInstances(program, log, new Set(), program.nodes.downstream, "c1")).toHaveLength(1);
+  });
+
+  it("returns instances oldest first", () => {
+    const log = new InMemoryLog();
+    log.append("Value", "c1", { value: "first" }, envelopeFrom("upstream"));
+    log.append("Value", "c1", { value: "second" }, envelopeFrom("upstream"));
+
+    expect(eligibleInstances(program, log, new Set(), program.nodes.downstream, "c1").map((i) => i.payload)).toEqual([
+      { value: "first" },
+      { value: "second" },
+    ]);
+  });
+
+  it("returns nothing for an allOf-input node — that is not its job", () => {
+    const log = new InMemoryLog();
+    log.append("Value", "c1", { value: "a" }, envelopeFrom("upstream"));
+
+    expect(eligibleInstances(program, log, new Set(), program.nodes.someAllOfNode, "c1")).toEqual([]);
   });
 });
