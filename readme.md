@@ -106,20 +106,20 @@ gatherIngredients:
 
 ## What a run leaves behind
 
-Elaboration turns those files into a netlist — concrete nodes, concrete edges, no type variables. Execution appends to a log. For this recipe, the log opens like this:
+Elaboration turns those files into a netlist — concrete nodes, concrete edges, no type variables. Execution appends to a log. For this recipe, the log opens like this (`envelope` also carries `timestamp`, `identity`, `node` and `contractHash`, and each instance its own `schemaHash` — trimmed here to the fields that matter for this walkthrough):
 
 ```json
 { "instance": "gatherIngredients#1", "edge": "Recipe", "payload": { "title": "Chocolate Chip Cookies", "servings": 24 },
-  "envelope": { "id": "env-1", "correlationId": "run-1", "causationId": null,    "step": 0 } }
+  "envelope": { "id": "env-1", "correlationId": "run-1", "causationId": null, "step": 1 } }
 
 { "instance": "mix#1",               "edge": "Dough",  "payload": { "title": "Chocolate Chip Cookies", "servings": 24 },
-  "envelope": { "id": "env-2", "correlationId": "run-1", "causationId": "env-1", "step": 1 } }
+  "envelope": { "id": "env-2", "correlationId": "run-1", "causationId": null, "step": 2 } }
 
 { "instance": "preheatOven#1",       "edge": "Oven",   "payload": { "temperature": 375, "preheated": true },
-  "envelope": { "id": "env-3", "correlationId": "run-1", "causationId": "env-1", "step": 1 } }
+  "envelope": { "id": "env-3", "correlationId": "run-1", "causationId": null, "step": 2 } }
 ```
 
-Two entries at `step: 1`, both caused by the same `env-1` — `mix` and `preheatOven` are independent, concurrent applications of the same origin, not a sequence. `bake` waits for both before it can append its own entry.
+`causationId` is `null` throughout — causation isn't tracked yet, an honest placeholder awaiting its own spec, not a dropped value. `step` is the pulse number: `gatherIngredients` is the origin and fires in the first pulse, `step: 1`; `mix` and `preheatOven` become ready only once it has appended, so they fire the pulse after, `step: 2` — independent, concurrent applications of the same origin, not a sequence. `bake` waits for both before it can append its own entry, one pulse later still.
 
 That log is the source of truth. Node state is a fold over prior edges keyed by correlation id. The tables an application shows you are materialized views over it. Both the tables and any node's implementation can be deleted and rebuilt from it; the only durable artifacts are edge definitions and topology.
 
