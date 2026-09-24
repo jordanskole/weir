@@ -187,25 +187,50 @@ describe("runNetlist", () => {
     expect(entries[0]?.result).toEqual({ value: "a+b" });
   });
 
-  it("does not record a trace entry when no envelope came back (a rejected input assert — no invocation happened)", async () => {
-    const failing = defineNode({
-      name: "failing",
+  it("records a trace entry and a provenance-carrying Failed_* instance for a rejected input — before 2026-09-24 a rejection produced neither", async () => {
+    const FailedStart = defineEdge({
+      name: "Failed_Start",
+      label: "Failed (Start)",
+      description: "d",
+      fields: { input: Start, reason: defineField({ type: "utf8", label: "Reason", description: "d", nullable: true }) },
+    });
+    const rejecting = defineNode({
+      name: "rejecting",
       input: single(Start),
       output: single(Start),
-      fn: () => {
-        throw new Error("kaboom");
-      },
+      fn: (s) => s,
     });
-    const program = programWith({ failing }, { origins: ["failing"], feeds: {} });
+    const program: Program = {
+      fields: {},
+      edges: { Start, Failed_Start: FailedStart },
+      nodes: { rejecting },
+      wiring: { origins: ["rejecting"], feeds: {} },
+    };
     const log = new InMemoryLog();
     const trace = new InMemoryTrace();
 
-    // Malformed payload: assertPayload rejects it before Fn (and thus the
-    // envelope) ever exists — membrane.ts's Invocation.envelope is present
-    // iff Fn actually ran.
-    await runNetlist(program, { correlationId: "thread-1", originPayloads: { failing: { value: 5 } } }, { log, trace });
+    // Malformed payload (`value` is a number, Start declares it `utf8`):
+    // assertPayload rejects it, but membrane() now builds the envelope
+    // *before* asserting, so this attempt is observable — a real trace
+    // entry, and a Failed_Start instance that carries provenance instead of
+    // looking exactly like a staged input.
+    await runNetlist(
+      program,
+      { correlationId: "thread-1", originPayloads: { rejecting: { value: 5 } } },
+      { log, trace },
+    );
 
-    expect(trace.entries("thread-1")).toEqual([]);
+    const entries = trace.entries("thread-1");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.envelope.node).toBe("rejecting");
+    expect(entries[0]?.envelope.contractHash).toBe((await hashNode(rejecting)).hash);
+    expect(entries[0]?.input).toEqual({ value: 5 });
+    expect(entries[0]?.result).toEqual({ input: { value: 5 }, reason: expect.stringMatching(/value/) });
+
+    const instance = log.latestInstance("Failed_Start", "thread-1");
+    expect(instance?.envelope).toBeDefined();
+    expect(instance?.envelope?.node).toBe("rejecting");
+    expect(instance?.envelope?.schemaHash).toBe((await hashEdge(FailedStart)).hash);
   });
 
   it("walks a fan-out — one node feeding two next nodes, both firing off the same output", async () => {

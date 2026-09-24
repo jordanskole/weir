@@ -126,10 +126,14 @@ export function looksLikeFailed(result: unknown): result is Failed<InputSpec> {
 /**
  * Builds the `InstanceEnvelope` for one emitted instance of `edge` — the
  * invocation's `Envelope` plus that edge's own schema hash (docs/design.md
- * §5). `undefined` when there's no base envelope to extend (Fn never ran)
- * or no edge to hash against (see `logOutput`'s `oneOf` lookup and
- * `tryFire`'s failure path — a missing synthesized edge, an elaborator
- * concern, not something worth failing a run over).
+ * §5). `undefined` when there's no edge to hash against (see `logOutput`'s
+ * `oneOf` lookup and `tryFire`'s failure path — a missing synthesized edge,
+ * an elaborator concern, not something worth failing a run over); this is
+ * the meaningful case in day-to-day operation. The `!envelope` branch is a
+ * belt-and-suspenders leftover for the one path that still produces no
+ * `Envelope` at all — `buildEnvelope` itself throwing on a bad `scope`
+ * declaration (see `tryFire`'s comment above its own `envelope` check) —
+ * not "Fn never ran": a rejected input still carries a real envelope now.
  */
 async function instanceEnvelope(
   envelope: Envelope | undefined,
@@ -339,6 +343,15 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
     else if (origins.has(nodeName)) originsFired.add(nodeName);
     else if (instance !== undefined) consumedBy(nodeName).add(instance.seq);
 
+    // `envelope` is present for every real attempt now — `membrane()` builds
+    // it before asserting the input (membrane.ts's `Invocation.envelope` is
+    // non-optional as of 2026-09-24), so a rejected input records a trace
+    // entry too, not only a completed `Fn` run. The only way `envelope` is
+    // still `undefined` here is `buildEnvelope` itself throwing (a bad
+    // `scope` declaration) — a declaration bug with nothing built to
+    // attach, which is why this guard stays rather than becoming
+    // unconditional: recording a trace entry with no envelope would be
+    // worse than recording none at all.
     if (envelope !== undefined) {
       trace?.record({ envelope, input, result });
     }

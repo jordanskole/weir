@@ -34,25 +34,29 @@ describe("membrane", () => {
     expect(invocation.result).toEqual({ age: 11, nickname: "Bird" });
   });
 
-  it("resolves to Failed<In>, carrying the original payload, when a required field is missing — fn never runs", async () => {
+  it("resolves to Failed<In>, carrying the original payload, when a required field is missing — fn never runs, but the attempt still carries a real envelope", async () => {
     let called = false;
     const node = defineNode({ ...birthday, fn: (p) => { called = true; return p; } });
     const invocation = await membrane(node, { nickname: null }, "thread-1");
     expect(invocation.result).toEqual({ input: { nickname: null }, reason: expect.stringMatching(/age/) });
-    expect(invocation.envelope).toBeUndefined();
+    expect(invocation.envelope).toBeDefined();
+    expect(invocation.envelope.node).toBe(node.name);
+    expect(invocation.envelope.contractHash).toBe((await hashNode(node)).hash);
     expect(called).toBe(false);
   });
 
-  it("resolves to Failed<In> for the wrong type on a field", async () => {
+  it("resolves to Failed<In> for the wrong type on a field — envelope present, since buildEnvelope now runs before the assert", async () => {
     const invocation = await membrane(birthday, { age: "old", nickname: null }, "thread-1");
     expect(invocation.result).toEqual({ input: { age: "old", nickname: null }, reason: expect.stringMatching(/age/) });
-    expect(invocation.envelope).toBeUndefined();
+    expect(invocation.envelope).toBeDefined();
+    expect(invocation.envelope.node).toBe(birthday.name);
   });
 
-  it("resolves to Failed<In> for null on a non-nullable field", async () => {
+  it("resolves to Failed<In> for null on a non-nullable field — envelope present, since buildEnvelope now runs before the assert", async () => {
     const invocation = await membrane(birthday, { age: null, nickname: null }, "thread-1");
     expect(invocation.result).toEqual({ input: { age: null, nickname: null }, reason: expect.stringMatching(/age/) });
-    expect(invocation.envelope).toBeUndefined();
+    expect(invocation.envelope).toBeDefined();
+    expect(invocation.envelope.node).toBe(birthday.name);
   });
 
   it("accepts null for a nullable field", async () => {
@@ -119,9 +123,11 @@ describe("membrane", () => {
     expect((invocation.result as { id: string }).id).toBe(invocation.envelope?.id);
   });
 
-  it("resolves with no envelope when the input assert rejects — Fn never ran", async () => {
+  it("still returns a real envelope when the input assert rejects — Fn never ran, but the attempt is observable", async () => {
     const invocation = await membrane(birthday, { age: "old", nickname: null }, "thread-1");
-    expect(invocation.envelope).toBeUndefined();
+    expect(invocation.envelope).toBeDefined();
+    expect(invocation.envelope.correlationId).toBe("thread-1");
+    expect(invocation.envelope.node).toBe(birthday.name);
     expect(invocation.result).toEqual({
       input: { age: "old", nickname: null },
       reason: expect.stringMatching(/age/),
@@ -444,7 +450,7 @@ describe("membrane — allOf", () => {
     expect(second?.result).toEqual({ value: "a+b" });
   });
 
-  it("resolves to Failed<In>, carrying the raw bag, when one edge's payload fails assertion — no envelope, buildEnvelope never ran", async () => {
+  it("resolves to Failed<In>, carrying the raw bag, when one edge's payload fails assertion — envelope present, since buildEnvelope now runs before the assert", async () => {
     const log = new InMemoryLog();
     log.append("A", "thread-1", { value: 5 });
     log.append("B", "thread-1", { value: "b" });
@@ -453,7 +459,8 @@ describe("membrane — allOf", () => {
       input: { A: { value: 5 }, B: { value: "b" } },
       reason: expect.stringMatching(/A/),
     });
-    expect(invocation?.envelope).toBeUndefined();
+    expect(invocation?.envelope).toBeDefined();
+    expect(invocation?.envelope?.node).toBe(nodeC.name);
   });
 
   it("resolves to Failed<In> with the thrown message as reason, when fn throws — envelope present, since Fn ran", async () => {

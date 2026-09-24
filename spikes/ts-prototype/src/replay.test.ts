@@ -113,6 +113,36 @@ describe("replayInvocation", () => {
     expect(replayed).toEqual({ age: 42 });
   });
 
+  it("replays a rejected input deterministically — the entry a rejection now produces re-rejects the same way", async () => {
+    dir = await mkdtemp(join(tmpdir(), "weir-replay-reject-"));
+    const { short, hash } = await hashNode(birthday);
+    await writeImpl(
+      dir,
+      "birthday",
+      short,
+      `export default function birthday(payload) { return { age: payload.age + 1 }; }\n`,
+    );
+
+    // A malformed payload: assertPayload rejects it before Fn ever runs, but
+    // membrane() now builds the envelope first (2026-09-24), so this is
+    // still a real, recordable entry rather than something with no
+    // provenance for `recordInvocation`'s `!envelope` guard to trip on.
+    const entry = await recordInvocation(birthday, dir, hash, { age: "not-a-number" }, "c-reject");
+    expect(entry.result).toEqual({
+      input: { age: "not-a-number" },
+      reason: expect.stringMatching(/age/),
+    });
+
+    const replayed = await replayInvocation(entry, birthday, dir);
+
+    // Re-running rejects the same way, deterministically — the honest
+    // outcome for an entry that was never a completed Fn run.
+    expect(replayed).toEqual({
+      input: { age: "not-a-number" },
+      reason: expect.stringMatching(/age/),
+    });
+  });
+
   it("the pin does its job: a second implementation accepted under a new contract hash doesn't change what an old entry replays to", async () => {
     dir = await mkdtemp(join(tmpdir(), "weir-replay-pin-"));
     const { short: shortA, hash: hashA } = await hashNode(birthday);

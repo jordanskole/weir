@@ -341,10 +341,16 @@ export class InMemoryLog implements Log {
 
 /**
  * What one pass through the membrane produced: the node's result, and the
- * envelope built for it. `envelope` is present **iff `Fn` was actually
- * invoked** — a rejected input assert or a failure inside `buildEnvelope`
- * resolves to `Failed<In>` before any envelope exists, and inventing one
- * for those paths would mean recording an invocation that never happened.
+ * envelope built for it. `envelope` is built *before* the input is
+ * asserted, so it is present for every **attempt** — a rejected input
+ * assert still carries one, since `Fn`'s not having run is exactly the
+ * thing worth recording provenance for (2026-09-24, superseding the
+ * narrower "present iff `Fn` actually ran" rule this file used to document
+ * — see docs/superpowers/specs/2026-09-23-invocation-records-and-replay.md
+ * §4 for the superseded reasoning and what changed). Only a failure inside
+ * `buildEnvelope` itself (a bad `scope` declaration) resolves to
+ * `Failed<In>` with no envelope at all — there, nothing was ever built to
+ * attach, and that is a declaration bug rather than a rejected attempt.
  *
  * The envelope is returned rather than a recording sink being passed in,
  * because `membrane()` takes nothing but the declaration and the
@@ -353,7 +359,7 @@ export class InMemoryLog implements Log {
  */
 export interface Invocation<In extends InputSpec, O extends OutputSpec> {
   result: OutputResult<O> | Failed<In>;
-  envelope?: Envelope;
+  envelope: Envelope;
 }
 
 /**
@@ -391,10 +397,11 @@ type MembraneArgs<In extends InputSpec> = In extends { kind: "single" }
  * against a correlationId's logs rather than a direct call: it resolves to
  * `undefined` — not an error — when the edges it declared needing haven't
  * all appeared yet; a caller (a scheduler, not built here) decides when to
- * try again. That bare `undefined` is a readiness signal, distinct from an
- * `Invocation` whose `envelope` happens to be absent — which is exactly why
- * only the `allOf` branch carries it: a `single`-input call must not be
- * typed as possibly-undefined.
+ * try again. That bare `undefined` is a readiness signal, distinct from a
+ * real `Invocation` (whose `envelope` is itself non-optional — see
+ * `Invocation`'s own doc comment) — which is exactly why only the `allOf`
+ * branch carries it: a `single`-input call must not be typed as
+ * possibly-undefined.
  */
 type MembraneResult<In extends InputSpec, O extends OutputSpec> = In extends { kind: "single" }
   ? Invocation<In, O>
@@ -522,17 +529,20 @@ export async function membrane<In extends InputSpec, O extends OutputSpec>(
       identity: Partial<PayloadOf<typeof Identity>> | undefined,
       step: number | undefined,
     ];
-    let validated: InputPayload<In>;
-    try {
-      validated = assertPayload(edge, payload) as InputPayload<In>;
-    } catch (cause) {
-      return { result: { input: payload as InputPayload<In>, reason: reasonOf(cause) } } as MembraneResult<In, O>;
-    }
     let envelope: Envelope;
     try {
       envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY, step);
     } catch (cause) {
-      return { result: { input: validated, reason: reasonOf(cause) } } as MembraneResult<In, O>;
+      return { result: { input: payload as InputPayload<In>, reason: reasonOf(cause) } } as MembraneResult<In, O>;
+    }
+    let validated: InputPayload<In>;
+    try {
+      validated = assertPayload(edge, payload) as InputPayload<In>;
+    } catch (cause) {
+      return {
+        result: { input: payload as InputPayload<In>, reason: reasonOf(cause) },
+        envelope,
+      } as MembraneResult<In, O>;
     }
     try {
       return { result: await callFn(nodeDef, validated, envelope), envelope } as MembraneResult<In, O>;
@@ -564,6 +574,13 @@ export async function membrane<In extends InputSpec, O extends OutputSpec>(
       rawBag[edge.name] = value;
     }
 
+    let envelope: Envelope;
+    try {
+      envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY, step);
+    } catch (cause) {
+      return { result: { input: rawBag as InputPayload<In>, reason: reasonOf(cause) } } as MembraneResult<In, O>;
+    }
+
     const bag: Record<string, unknown> = {};
     const errors: string[] = [];
     for (const edge of edges) {
@@ -576,15 +593,10 @@ export async function membrane<In extends InputSpec, O extends OutputSpec>(
     if (errors.length > 0) {
       return {
         result: { input: rawBag as InputPayload<In>, reason: errors.join("; ") },
+        envelope,
       } as MembraneResult<In, O>;
     }
 
-    let envelope: Envelope;
-    try {
-      envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY, step);
-    } catch (cause) {
-      return { result: { input: bag as InputPayload<In>, reason: reasonOf(cause) } } as MembraneResult<In, O>;
-    }
     try {
       return { result: await callFn(nodeDef, bag as InputPayload<In>, envelope), envelope } as MembraneResult<
         In,
