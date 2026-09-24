@@ -135,10 +135,12 @@ describe("Log — staged appends with no envelope", () => {
     const log = new InMemoryLog();
     log.append("Person", "thread-1", { age: 41, nickname: null });
     expect(log.latest("Person", "thread-1")).toEqual({ age: 41, nickname: null });
-    expect(log.latestInstance("Person", "thread-1")).toEqual({
-      payload: { age: 41, nickname: null },
-      envelope: undefined,
-    });
+    const instance = log.latestInstance("Person", "thread-1");
+    expect(instance).toBeDefined();
+    expect(instance?.payload).toEqual({ age: 41, nickname: null });
+    expect(instance?.envelope).toBeUndefined();
+    expect(instance?.id).toBeDefined();
+    expect(instance?.seq).toEqual(0);
   });
 });
 
@@ -616,5 +618,71 @@ describe("membrane — scope", () => {
       reason: expect.stringMatching(/write/),
     });
     expect(invocation.envelope).toBeUndefined();
+  });
+});
+
+describe("InMemoryLog — retention", () => {
+  it("retains every appended instance rather than overwriting", () => {
+    const log = new InMemoryLog();
+    log.append("Person", "c1", { age: 41 });
+    log.append("Person", "c1", { age: 42 });
+
+    expect(log.instances("Person", "c1").map((i) => i.payload)).toEqual([{ age: 41 }, { age: 42 }]);
+  });
+
+  it("still returns the most recent instance from latest and latestInstance", () => {
+    const log = new InMemoryLog();
+    log.append("Person", "c1", { age: 41 });
+    log.append("Person", "c1", { age: 42 });
+
+    expect(log.latest("Person", "c1")).toEqual({ age: 42 });
+    expect(log.latestInstance("Person", "c1")?.payload).toEqual({ age: 42 });
+  });
+
+  it("keeps correlations and edge types separate", () => {
+    const log = new InMemoryLog();
+    log.append("Person", "c1", { age: 41 });
+    log.append("Person", "c2", { age: 1 });
+    log.append("Pet", "c1", { species: "cat" });
+
+    expect(log.instances("Person", "c1")).toHaveLength(1);
+    expect(log.instances("Person", "c2")).toHaveLength(1);
+    expect(log.instances("Pet", "c1")).toHaveLength(1);
+  });
+
+  it("returns an empty array for an edge type never appended", () => {
+    expect(new InMemoryLog().instances("Nothing", "c1")).toEqual([]);
+  });
+
+  it("mints a monotonic seq across edge types, not per edge type", () => {
+    const log = new InMemoryLog();
+    log.append("Person", "c1", { age: 41 });
+    log.append("Pet", "c1", { species: "cat" });
+    log.append("Person", "c1", { age: 42 });
+
+    const seqs = [
+      log.instances("Person", "c1")[0].seq,
+      log.instances("Pet", "c1")[0].seq,
+      log.instances("Person", "c1")[1].seq,
+    ];
+    expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+    expect(new Set(seqs).size).toBe(3);
+  });
+
+  it("mints a distinct id per instance and returns it from append", () => {
+    const log = new InMemoryLog();
+    const first = log.append("Person", "c1", { age: 41 });
+    const second = log.append("Person", "c1", { age: 41 });
+
+    expect(first).not.toBe(second);
+    expect(log.instances("Person", "c1").map((i) => i.id)).toEqual([first, second]);
+  });
+
+  it("does not let a returned instances array mutate the log", () => {
+    const log = new InMemoryLog();
+    log.append("Person", "c1", { age: 41 });
+    log.instances("Person", "c1").push({ id: "x", seq: 99, payload: { age: 0 } });
+
+    expect(log.instances("Person", "c1")).toHaveLength(1);
   });
 });

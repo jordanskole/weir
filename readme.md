@@ -13,9 +13,9 @@ An application is a directed graph of nodes wired together by their edge types, 
 
 The name comes from a fish weir: rather than watching the whole ocean, you build the one narrow place everything has to cross, and check it there. Edges are those crossings.
 
-> **Status: early, but it runs.** The example below elaborates from real `.edge`/`.node`/`.topology` files and executes end to end — schema assertion, multi-input readiness, `Failed<In>` routing, structural hashing, and implementation resolution by contract hash all work against files on disk, with a test suite over them. So does the acceptance gate that decides whether a drafted implementation is allowed to persist at all: it runs the node's declared examples, generated structural cases, and its `∀ p . …` property assertions before anything is written, and an invocation records the implementation version it ran under so it can be replayed against exactly that one.
+> **Status: early, but it runs.** The example below elaborates from real `.edge`/`.node`/`.topology` files and executes end to end — schema assertion, multi-input readiness, `Failed<In>` routing, structural hashing, and implementation resolution by contract hash all work against files on disk, with a test suite over them. So does the acceptance gate that decides whether a drafted implementation is allowed to persist at all: it runs the node's declared examples, generated structural cases, and its `∀ p . …` property assertions before anything is written, and an invocation records the implementation version it ran under so it can be replayed against exactly that one. **Iteration runs too:** the log retains every instance instead of overwriting, and a single-input node fires once per unconsumed instance reaching it along a declared arc, so a cycle in the wiring runs to quiescence rather than firing once ([spec](docs/superpowers/specs/2026-09-24-instance-retention-and-iteration.md)). The qualifier: `allOf` joining by lineage isn't built — an `allOf` node still fires at most once per run, so iteration works for single-input chains only.
 >
-> Not built yet: the planner and the rest of the `sys` queries, zones and classification, composite nodes, and any log that outlives the process. **Iteration is specified but not yet built** — the Petri-net semantics described below are the design; today's log keeps only the latest instance per edge type, so a cycle fires once rather than running to quiescence ([spec](docs/superpowers/specs/2026-09-24-instance-retention-and-iteration.md)). The host language is also undecided — `spikes/ts-prototype/` is a spike and the current lean is OCaml — so treat the TypeScript as evidence the design holds together rather than as the implementation.
+> Not built yet: the planner and the rest of the `sys` queries, zones and classification, composite nodes, and any log that outlives the process. The host language is also undecided — `spikes/ts-prototype/` is a spike and the current lean is OCaml — so treat the TypeScript as evidence the design holds together rather than as the implementation.
 >
 > The design is being pressure-tested against [blue-ribbon-properties](https://github.com/jordanskole/blue-ribbon-properties), a separate project whose independent constraints keep surfacing edge cases here.
 
@@ -106,20 +106,20 @@ gatherIngredients:
 
 ## What a run leaves behind
 
-Elaboration turns those files into a netlist — concrete nodes, concrete edges, no type variables. Execution appends to a log. For this recipe, the log opens like this:
+Elaboration turns those files into a netlist — concrete nodes, concrete edges, no type variables. Execution appends to a log. For this recipe, the log opens like this (`envelope` also carries `timestamp`, `identity`, `node` and `contractHash`, and each instance its own `schemaHash` — trimmed here to the fields that matter for this walkthrough):
 
 ```json
 { "instance": "gatherIngredients#1", "edge": "Recipe", "payload": { "title": "Chocolate Chip Cookies", "servings": 24 },
-  "envelope": { "id": "env-1", "correlationId": "run-1", "causationId": null,    "step": 0 } }
+  "envelope": { "id": "env-1", "correlationId": "run-1", "causationId": null, "step": 1 } }
 
 { "instance": "mix#1",               "edge": "Dough",  "payload": { "title": "Chocolate Chip Cookies", "servings": 24 },
-  "envelope": { "id": "env-2", "correlationId": "run-1", "causationId": "env-1", "step": 1 } }
+  "envelope": { "id": "env-2", "correlationId": "run-1", "causationId": null, "step": 2 } }
 
 { "instance": "preheatOven#1",       "edge": "Oven",   "payload": { "temperature": 375, "preheated": true },
-  "envelope": { "id": "env-3", "correlationId": "run-1", "causationId": "env-1", "step": 1 } }
+  "envelope": { "id": "env-3", "correlationId": "run-1", "causationId": null, "step": 2 } }
 ```
 
-Two entries at `step: 1`, both caused by the same `env-1` — `mix` and `preheatOven` are independent, concurrent applications of the same origin, not a sequence. `bake` waits for both before it can append its own entry.
+`causationId` is `null` throughout — causation isn't tracked yet, an honest placeholder awaiting its own spec, not a dropped value. `step` is the pulse number: `gatherIngredients` is the origin and fires in the first pulse, `step: 1`; `mix` and `preheatOven` become ready only once it has appended, so they fire the pulse after, `step: 2` — independent, concurrent applications of the same origin, not a sequence. `bake` waits for both before it can append its own entry, one pulse later still.
 
 That log is the source of truth. Node state is a fold over prior edges keyed by correlation id. The tables an application shows you are materialized views over it. Both the tables and any node's implementation can be deleted and rebuilt from it; the only durable artifacts are edge definitions and topology.
 

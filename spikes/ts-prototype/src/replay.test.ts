@@ -57,6 +57,18 @@ const whoAmI: NodeDecl<{ kind: "single"; edge: typeof Person }, { kind: "single"
   scope: ["read:Identity:sub"],
 };
 
+// A node whose Fn reads the invocation's `step` back out — the shape
+// needed to prove replay reproduces a recorded `step` rather than
+// silently reverting to `invokeWithInput`'s default of 0. Reuses `Person`
+// purely as a scalar carrier (`age` stands in for `step`); nothing about
+// its meaning matters here.
+const stepReader: NodeDecl<{ kind: "single"; edge: typeof Person }, { kind: "single"; edge: typeof Person }> = {
+  name: "stepReader",
+  description: "Returns the invocation's step, to prove replay reproduces it",
+  input: { kind: "single", edge: Person },
+  output: { kind: "single", edge: Person },
+};
+
 let dir: string | undefined;
 
 afterEach(async () => {
@@ -236,5 +248,32 @@ describe("replayInvocation", () => {
 
     // The recorded value ("alice"), not SYSTEM_IDENTITY's "system".
     expect(replayed).toEqual({ value: "alice" });
+  });
+
+  it("replays under the recorded step, not invokeWithInput's default of 0 (spec §6: step is identical on replay)", async () => {
+    dir = await mkdtemp(join(tmpdir(), "weir-replay-step-"));
+    const { short, hash } = await hashNode(stepReader);
+    await writeImpl(
+      dir,
+      "stepReader",
+      short,
+      `export default function stepReader(payload, env) { return { age: env.step }; }\n`,
+    );
+
+    const nodeDef = await resolveImplementationAt(stepReader, dir, hash);
+    // Recorded at a non-zero step, as a real pulse-loop invocation would be
+    // (runtime.ts's tryFire calls membrane() with the current pulse number).
+    const { result, envelope } = await membrane(nodeDef)({ age: 41 }, "c-step", undefined, 5);
+    if (!envelope) throw new Error("test setup: expected an envelope from a successful invocation");
+    expect(result).toEqual({ age: 5 });
+    expect(envelope.step).toBe(5);
+
+    const entry: TraceEntry = { envelope, input: { age: 41 }, result };
+    const replayed = await replayInvocation(entry, stepReader, dir);
+
+    // The recorded step (5), not the default 0 — if replayInvocation ever
+    // stops threading entry.envelope.step through invokeWithInput, this
+    // reads back { age: 0 } instead and the test reddens.
+    expect(replayed).toEqual({ age: 5 });
   });
 });

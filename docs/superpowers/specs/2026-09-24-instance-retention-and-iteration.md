@@ -1,6 +1,6 @@
 # Instance retention and iteration
 
-Status: specified, not yet built.
+Status: implemented.
 
 ## Motivation
 
@@ -86,13 +86,17 @@ The second clause covers staged inputs (`invoke.ts:84`, readiness fixtures) and 
 
 `birthday` therefore self-feeds only when the topology genuinely wires it back to itself — which is precisely when a loop is wanted. The canonical example is unaffected.
 
-**Origin nodes** keep firing at most once per run, consuming their `originPayloads` entry. Tracked by a separate `originsFired: Set<string>`, since an origin payload is not a logged instance and has no `seq`.
+**Origin nodes** keep firing at most once per run, consuming their `originPayloads` entry. Tracked by a separate `originsFired: Set<string>`, since an origin payload is not a logged instance and has no `seq`. This has a sharp edge, discovered building it rather than anticipated here: a node that is both an origin and a `feeds` target can never iterate. The runtime checks `origins.has(nodeName)` first and always routes an origin straight to its once-only branch, so it is never offered instance candidates even when wiring genuinely feeds it. This matches prior (pre-this-spec) behaviour and is not a regression, but it means a test fixture that wants to exercise a self-feeding node needs a separate seed node upstream of it, not the origin doubling as the looped node. Recorded in `docs/open-questions.md`, not fixed here.
+
+**Implementation note, not anticipated above: the pulse scan considers only reachable nodes.** "Every (node, eligible instance) pair" in §6 means every pair among the nodes the wiring actually reaches — the transitive closure of `wiring.feeds` from `wiring.origins` — not every node in `program.nodes`. Without that restriction, a node absent from the topology's wiring could still fire on a staged, envelope-less instance of its input edge (eligible by type alone, the second clause above), which is exactly the type-driven behaviour the arc rule exists to eliminate; it would also make a program's behaviour depend on which node definitions happen to be loaded rather than on its topology. `runtime.ts` computes this closure once per run and sorts it for reproducibility.
 
 ### 5. `allOf` is deliberately unchanged
 
 A node with `input.kind === "allOf"` keeps today's behaviour exactly: resolve each declared edge by `latest`, fire at most once per run. It keeps a `firedAllOf: Set<string>` guard — the narrow remnant of the old global `fired` Set.
 
 Joining is piece (3), and it needs lineage from piece (2). Designing a join here and replacing it two specs later would mean designing it twice. The cost of the deferral, stated plainly: an `allOf` node in a cycle still fires once, so iteration works for single-input chains only. That is the honest boundary of this piece.
+
+**Implementation note, not anticipated above: `allOf` candidates are gated at snapshot time.** Joining itself is genuinely unchanged — still latest-wins resolution of each declared edge, still firing at most once per run, exactly as stated. What changed, and had to, is *when* a candidate is offered: the pulse loop offers an `allOf` node as a candidate only once every declared edge already has a `latest` instance as the current pulse's snapshot is taken, rather than leaving readiness entirely to `membrane()`'s own check at fire time. Without this, a fan-in node whose inputs first appeared during the current pulse could fire inside that same pulse and inherit that pulse's number as its own `step` — the same `step` its inputs carry, rather than one past the longest path feeding it, which is what the Testing section below requires. `membrane()` stays the authority on whether the firing actually happens (its own bag-presence check can still decline a snapshot-gated candidate); this only decides whether to offer one.
 
 ### 6. The driver becomes a pulse loop, snapshot per pulse
 
@@ -147,6 +151,20 @@ export function runNetlist(program: Program, run: Run, host: Host): Promise<RunR
 
 The split is not arbitrary grouping. `Run` is what a trigger supplies — which run this is, what fired it, on whose behalf. `Host` is what the execution environment supplies — where instances live, where invocations are recorded, how much may be spent. Putting `budget` in `Host` makes the type encode the decision that bounding iteration belongs to the host rather than the language (design-history.md).
 
+**Implementation note, not anticipated above: `Host` also carries `maxPulses`, defaulting to 10,000.**
+
+```ts
+export interface Host {
+  log: Log;
+  trace?: Trace;
+  budget?: number;
+  /** Maximum pulses before the run stops. Backstop, not a feature. */
+  maxPulses?: number;
+}
+```
+
+`budget` counts firings, so it cannot bound a pulse that fires nothing: a graph where every pulse offers a candidate but `membrane()`'s own check declines it every time would otherwise loop forever without a single firing to count. `maxPulses` is the backstop for exactly that case, and it returns `stopped: "budget"` when it trips, the same as the firing budget — both are the host declining to let the run continue, just triggered by a different counter. Bounded in pulses rather than wall-clock so it stays deterministic.
+
 **`Host` is not `Zone`.** A zone (§7) is per-*node* — where a node executes, and what it is isolated from. A host is per-*run*. One run spans many zones, which is the whole premise of the client/server and PII-obfuscation-at-the-client open questions; naming this `Zone` would assert one zone per run and foreclose them. The two compose: the host supplies the run its log and budget, zones say which node runs where inside it.
 
 `env` is avoided as a name — it collides with the envelope parameter node authors already receive.
@@ -165,7 +183,7 @@ export interface RunResult {
 }
 ```
 
-A run that exhausts its budget is not a failure of any node, so it does not belong in `failures`; it is a property of the run. Tests pass a budget and assert `stopped`, so a runaway graph fails loudly instead of hanging the suite.
+A run that exhausts its budget is not a failure of any node, so it does not belong in `failures`; it is a property of the run. Tests pass a budget and assert `stopped`, so a runaway graph fails loudly instead of hanging the suite. `stopped: "budget"` covers both causes: the firing budget above, and `Host.maxPulses` — the backstop for a loop that spins while firing nothing, which the firing budget cannot see.
 
 ## Testing
 

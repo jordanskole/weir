@@ -11,12 +11,13 @@
  * boundary (design.md §3; design-history.md, "The membrane"). Builds a
  * real `Envelope` and passes it to `Fn` as its second argument when `Fn`
  * declares one (arity-detected, `fn.length >= 2` — same opt-in shape `env`
- * already has on `Fn`, made real here for the first time). Two of
- * `Envelope`'s fields are honest placeholders, not resolved: `causationId`
- * is always `null` (no causation-chain tracking exists yet — nothing
- * currently tells a node which specific upstream edge instance triggered
- * it) and `step` is always `0` (the pulse/wave model design-history.md
- * already decided isn't wired into the membrane yet). `identity` narrows
+ * already has on `Fn`, made real here for the first time). One of
+ * `Envelope`'s fields is still an honest placeholder, not resolved:
+ * `causationId` is always `null` (no causation-chain tracking exists yet —
+ * nothing currently tells a node which specific upstream edge instance
+ * triggered it). `step` used to be the other one; it is now the scheduler's
+ * pulse number, passed in by whoever invokes (see `SingleInvoke`) and
+ * defaulting to 0 for callers with no scheduler behind them. `identity` narrows
  * the caller-supplied `Identity` claims to exactly the fields a node's
  * `scope` declares (`{}` when no `scope` is declared) — only
  * `read:Identity:<field>` resolves to anything today; anything else in a
@@ -232,6 +233,22 @@ export interface InstanceEnvelope extends Envelope {
  * see `Log.append` — never for a real emitted instance a node produced.
  */
 export interface LoggedInstance {
+  /**
+   * Stable identity for this instance, minted at append. This is what
+   * causation will point at (docs/superpowers/specs/2026-09-24-instance-retention-and-iteration.md,
+   * piece 2), which is why it is a minted string rather than `seq`: a
+   * per-Log counter restarts and collides across runs, and the Trace
+   * outlives one Log.
+   */
+  id: string;
+  /**
+   * Write order within one Log — a logical clock, not a causal
+   * coordinate. `envelope.step` measures causal position and is shared by
+   * everything in a pulse; `seq` is unique per instance, and many `seq`
+   * values occur inside one pulse (design-history.md, "Three axes and a
+   * clock").
+   */
+  seq: number;
   payload: unknown;
   envelope?: InstanceEnvelope;
 }
@@ -252,8 +269,13 @@ export interface Log {
    * passes the resulting `InstanceEnvelope`; `envelope` is omitted for a
    * staged payload with no real invocation behind it (tests, readiness
    * fixtures for an `allOf`-input node).
+   *
+   * Returns the new instance's `id`. The runtime tracks consumption
+   * against instances it *reads*, so it does not need this today; piece 2
+   * does, and retrofitting a return type across every call site later is
+   * churn.
    */
-  append(edgeName: string, correlationId: string, payload: unknown, envelope?: InstanceEnvelope): void;
+  append(edgeName: string, correlationId: string, payload: unknown, envelope?: InstanceEnvelope): string;
   /**
    * Hazard to re-check if `Log` ever gains an async implementation:
    * `runtime.ts`'s `tryFire` calls this a second time for an `allOf` node,
@@ -271,22 +293,48 @@ export interface Log {
   latest(edgeName: string, correlationId: string): unknown | undefined;
   /** The full stored instance — payload plus provenance, when there is any (see `append`). */
   latestInstance(edgeName: string, correlationId: string): LoggedInstance | undefined;
+  /**
+   * Every retained instance of this edge type for this correlation,
+   * oldest first. Returns a copy: callers iterate it while firing nodes
+   * that append to the same log.
+   */
+  instances(edgeName: string, correlationId: string): LoggedInstance[];
 }
 
 /** An in-memory Log — the spike has no real store yet; this is enough to test readiness against. */
 export class InMemoryLog implements Log {
-  private readonly entries = new Map<string, LoggedInstance>();
+  private readonly entries = new Map<string, LoggedInstance[]>();
+  private nextSeq = 0;
   private key(edgeName: string, correlationId: string): string {
     return `${edgeName} ${correlationId}`;
   }
-  append(edgeName: string, correlationId: string, payload: unknown, envelope?: InstanceEnvelope): void {
-    this.entries.set(this.key(edgeName, correlationId), { payload, envelope });
+  append(
+    edgeName: string,
+    correlationId: string,
+    payload: unknown,
+    envelope?: InstanceEnvelope,
+  ): string {
+    const key = this.key(edgeName, correlationId);
+    const instance: LoggedInstance = {
+      id: crypto.randomUUID(),
+      seq: this.nextSeq++,
+      payload,
+      envelope,
+    };
+    const existing = this.entries.get(key);
+    if (existing) existing.push(instance);
+    else this.entries.set(key, [instance]);
+    return instance.id;
   }
   latest(edgeName: string, correlationId: string): unknown | undefined {
-    return this.entries.get(this.key(edgeName, correlationId))?.payload;
+    return this.latestInstance(edgeName, correlationId)?.payload;
   }
   latestInstance(edgeName: string, correlationId: string): LoggedInstance | undefined {
-    return this.entries.get(this.key(edgeName, correlationId));
+    const list = this.entries.get(this.key(edgeName, correlationId));
+    return list && list.length > 0 ? list[list.length - 1] : undefined;
+  }
+  instances(edgeName: string, correlationId: string): LoggedInstance[] {
+    return [...(this.entries.get(this.key(edgeName, correlationId)) ?? [])];
   }
 }
 
@@ -319,11 +367,18 @@ export interface Invocation<In extends InputSpec, O extends OutputSpec> {
  * narrowing is idempotent under an unchanged `scope`, which is exactly
  * what makes replay work (see replay.ts's header for the residual limit
  * when `scope` has since widened).
+ *
+ * `step` is the scheduler's pulse number, threaded in rather than stamped on
+ * afterwards: the envelope is built *before* `Fn` runs and handed to it, so a
+ * caller that patched the returned envelope would leave `Fn` seeing a value
+ * the log disagrees with. Optional and trailing, exactly as `identity` is —
+ * a caller with no scheduler behind it gets the documented default of 0.
  */
 type SingleInvoke<In extends InputSpec, O extends OutputSpec> = (
   payload: unknown,
   correlationId: string,
   identity?: Partial<PayloadOf<typeof Identity>>,
+  step?: number,
 ) => Promise<Invocation<In, O>>;
 
 /**
@@ -333,11 +388,15 @@ type SingleInvoke<In extends InputSpec, O extends OutputSpec> = (
  * all appeared yet; a caller (a scheduler, not built here) decides when to
  * try again. That bare `undefined` is a readiness signal, distinct from an
  * `Invocation` whose `envelope` happens to be absent.
+ *
+ * `step` carries the same meaning, and for the same reason, as on
+ * `SingleInvoke` — see that type's doc comment.
  */
 type AllOfInvoke<In extends InputSpec, O extends OutputSpec> = (
   correlationId: string,
   log: Log,
   identity?: Partial<PayloadOf<typeof Identity>>,
+  step?: number,
 ) => Promise<Invocation<In, O> | undefined>;
 
 type MembraneInvoke<In extends InputSpec, O extends OutputSpec> = In extends { kind: "single" }
@@ -384,23 +443,28 @@ function narrowIdentity(
 }
 
 /**
- * Builds this invocation's Envelope. `causationId` and `step` are honest
- * placeholders (see file header) — real values need mechanisms that don't
- * exist yet (causation-chain tracking, pulse scheduling), not a design
- * decision being punted silently. Can throw (a bad `scope` declaration) —
- * the caller is responsible for turning that into `Failed<In>`.
+ * Builds this invocation's Envelope. `causationId` is still an honest
+ * placeholder (see file header) — real causation needs a mechanism that
+ * does not exist yet. `step` is no longer one: under the runtime's pulse
+ * scheduling it is the pulse number, which is exactly causal position
+ * within the topology. Defaults to 0 for callers with no scheduler behind
+ * them (`invoke.ts`'s single invocation, tests).
+ *
+ * Can throw (a bad `scope` declaration) — the caller is responsible for
+ * turning that into `Failed<In>`.
  */
 async function buildEnvelope(
   nodeDef: NodeDecl,
   correlationId: string,
   identity: Partial<PayloadOf<typeof Identity>>,
+  step = 0,
 ): Promise<Envelope> {
   return {
     id: crypto.randomUUID(),
     correlationId,
     causationId: null,
     timestamp: new Date().toISOString(),
-    step: 0,
+    step,
     identity: narrowIdentity(nodeDef.scope, identity),
     node: nodeDef.name,
     contractHash: (await hashNode(nodeDef)).hash,
@@ -447,7 +511,7 @@ export function membrane<In extends InputSpec, O extends OutputSpec>(
 ): MembraneInvoke<In, O> {
   if (nodeDef.input.kind === "single") {
     const edge = nodeDef.input.edge;
-    const invoke: SingleInvoke<In, O> = async (payload, correlationId, identity) => {
+    const invoke: SingleInvoke<In, O> = async (payload, correlationId, identity, step) => {
       let validated: InputPayload<In>;
       try {
         validated = assertPayload(edge, payload) as InputPayload<In>;
@@ -456,7 +520,7 @@ export function membrane<In extends InputSpec, O extends OutputSpec>(
       }
       let envelope: Envelope;
       try {
-        envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY);
+        envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY, step);
       } catch (cause) {
         return { result: { input: validated, reason: reasonOf(cause) } };
       }
@@ -471,7 +535,7 @@ export function membrane<In extends InputSpec, O extends OutputSpec>(
 
   if (nodeDef.input.kind === "allOf") {
     const edges = nodeDef.input.edges;
-    const invoke: AllOfInvoke<In, O> = async (correlationId, log, identity) => {
+    const invoke: AllOfInvoke<In, O> = async (correlationId, log, identity, step) => {
       // Hazard, other end: `Log.latest`'s own doc comment above warns that
       // `runtime.ts`'s trace-rebuild read depends on nothing appending to
       // the Log between its read and this one — synchronous `latest`, no
@@ -501,7 +565,7 @@ export function membrane<In extends InputSpec, O extends OutputSpec>(
 
       let envelope: Envelope;
       try {
-        envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY);
+        envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY, step);
       } catch (cause) {
         return { result: { input: bag as InputPayload<In>, reason: reasonOf(cause) } };
       }

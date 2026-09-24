@@ -119,11 +119,19 @@ primitive an author declares (§1's Edge/Node/Envelope) — it's framework-owned
 machinery, generated purely from a node's own contract (`input`, `scope`), never
 hand-written and never exposed to a `.node` author to modify. Concretely:
 `membrane(nodeDef)` produces `(edges, identity) => Promise<Envelope>` — it resolves the
-edges `nodeDef.input` declares (reading each named edge type's latest instance for the
-current `correlation_id`), asserts them, checks `identity` against `nodeDef.scope`, and
-only then calls `Fn`. A membrane failure (a failed assert, an unsatisfied scope)
+edges `nodeDef.input` declares, asserts them, checks `identity` against `nodeDef.scope`,
+and only then calls `Fn`. A membrane failure (a failed assert, an unsatisfied scope)
 produces its own tagged edge (§3, "failure is an edge"), never an uncaught exception
 escaping the boundary.
+
+Resolution differs by input kind, and the difference is temporary. A `single`-input node
+fires once per unconsumed instance reaching it along a declared arc in the topology's
+wiring — not on its input edge's latest instance, which is what makes recurrence (§3)
+actually run rather than overwrite itself. An `allOf`-input node still resolves each
+declared edge by reading its latest instance for the current `correlation_id`, as this
+section originally described for every node; joining by lineage instead is a later piece
+of the same work
+([spec](superpowers/specs/2026-09-24-instance-retention-and-iteration.md)).
 
 Nothing polls. **Origin nodes** (cron, HTTP request, queue consumer, file watcher) are
 the only place nondeterminism enters; everything downstream is deterministic. An origin

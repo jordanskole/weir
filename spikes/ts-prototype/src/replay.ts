@@ -19,6 +19,13 @@
  * declare was never recorded, so a replay against a widened declaration
  * cannot recover it.
  *
+ * `entry.envelope.step` is re-fed the same way, and for a simpler reason:
+ * it isn't narrowed or derived, it's recorded verbatim, so replaying it
+ * means passing it straight back through (docs/superpowers/specs/2026-09-24-instance-retention-and-iteration.md
+ * §6: "`step` is a property of the program's shape and is identical on
+ * replay"). Without this, `invokeWithInput`'s default of 0 would silently
+ * overwrite whatever pulse the invocation actually ran in.
+ *
  * A widened `scope` is caught by the hash-drift refusal below, which is
  * where it belongs: `hash.ts`'s `fingerprintNode` covers `scope`, so the
  * declaration's hash no longer matches the recorded `contractHash` and the
@@ -56,6 +63,7 @@ export async function replayInvocation(
     entry.input,
     entry.envelope.correlationId,
     entry.envelope.identity,
+    entry.envelope.step,
   );
   return result;
 }
