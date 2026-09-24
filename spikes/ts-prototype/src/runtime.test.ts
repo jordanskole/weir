@@ -860,7 +860,12 @@ describe("eligibleInstances", () => {
   // stand in for a real wired-in producer node.
   const program = programWith(
     { downstream, someAllOfNode },
-    { origins: [], feeds: { upstream: ["downstream"] } },
+    // someAllOfNode is wired as a second consumer of "upstream" so the arc
+    // filter alone cannot empty eligibleInstances' result for it — the
+    // "returns nothing for an allOf-input node" test below needs the `kind
+    // !== "single"` guard to be the only thing doing the work, or it passes
+    // for the wrong reason (task-3-findings.md, round 1).
+    { origins: [], feeds: { upstream: ["downstream", "someAllOfNode"] } },
   );
 
   function envelopeFrom(node: string): InstanceEnvelope {
