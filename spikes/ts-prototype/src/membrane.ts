@@ -232,6 +232,22 @@ export interface InstanceEnvelope extends Envelope {
  * see `Log.append` — never for a real emitted instance a node produced.
  */
 export interface LoggedInstance {
+  /**
+   * Stable identity for this instance, minted at append. This is what
+   * causation will point at (docs/superpowers/specs/2026-09-24-instance-retention-and-iteration.md,
+   * piece 2), which is why it is a minted string rather than `seq`: a
+   * per-Log counter restarts and collides across runs, and the Trace
+   * outlives one Log.
+   */
+  id: string;
+  /**
+   * Write order within one Log — a logical clock, not a causal
+   * coordinate. `envelope.step` measures causal position and is shared by
+   * everything in a pulse; `seq` is unique per instance, and many `seq`
+   * values occur inside one pulse (design-history.md, "Three axes and a
+   * clock").
+   */
+  seq: number;
   payload: unknown;
   envelope?: InstanceEnvelope;
 }
@@ -252,8 +268,13 @@ export interface Log {
    * passes the resulting `InstanceEnvelope`; `envelope` is omitted for a
    * staged payload with no real invocation behind it (tests, readiness
    * fixtures for an `allOf`-input node).
+   *
+   * Returns the new instance's `id`. The runtime tracks consumption
+   * against instances it *reads*, so it does not need this today; piece 2
+   * does, and retrofitting a return type across every call site later is
+   * churn.
    */
-  append(edgeName: string, correlationId: string, payload: unknown, envelope?: InstanceEnvelope): void;
+  append(edgeName: string, correlationId: string, payload: unknown, envelope?: InstanceEnvelope): string;
   /**
    * Hazard to re-check if `Log` ever gains an async implementation:
    * `runtime.ts`'s `tryFire` calls this a second time for an `allOf` node,
@@ -271,22 +292,48 @@ export interface Log {
   latest(edgeName: string, correlationId: string): unknown | undefined;
   /** The full stored instance — payload plus provenance, when there is any (see `append`). */
   latestInstance(edgeName: string, correlationId: string): LoggedInstance | undefined;
+  /**
+   * Every retained instance of this edge type for this correlation,
+   * oldest first. Returns a copy: callers iterate it while firing nodes
+   * that append to the same log.
+   */
+  instances(edgeName: string, correlationId: string): LoggedInstance[];
 }
 
 /** An in-memory Log — the spike has no real store yet; this is enough to test readiness against. */
 export class InMemoryLog implements Log {
-  private readonly entries = new Map<string, LoggedInstance>();
+  private readonly entries = new Map<string, LoggedInstance[]>();
+  private nextSeq = 0;
   private key(edgeName: string, correlationId: string): string {
     return `${edgeName} ${correlationId}`;
   }
-  append(edgeName: string, correlationId: string, payload: unknown, envelope?: InstanceEnvelope): void {
-    this.entries.set(this.key(edgeName, correlationId), { payload, envelope });
+  append(
+    edgeName: string,
+    correlationId: string,
+    payload: unknown,
+    envelope?: InstanceEnvelope,
+  ): string {
+    const key = this.key(edgeName, correlationId);
+    const instance: LoggedInstance = {
+      id: crypto.randomUUID(),
+      seq: this.nextSeq++,
+      payload,
+      envelope,
+    };
+    const existing = this.entries.get(key);
+    if (existing) existing.push(instance);
+    else this.entries.set(key, [instance]);
+    return instance.id;
   }
   latest(edgeName: string, correlationId: string): unknown | undefined {
-    return this.entries.get(this.key(edgeName, correlationId))?.payload;
+    return this.latestInstance(edgeName, correlationId)?.payload;
   }
   latestInstance(edgeName: string, correlationId: string): LoggedInstance | undefined {
-    return this.entries.get(this.key(edgeName, correlationId));
+    const list = this.entries.get(this.key(edgeName, correlationId));
+    return list && list.length > 0 ? list[list.length - 1] : undefined;
+  }
+  instances(edgeName: string, correlationId: string): LoggedInstance[] {
+    return [...(this.entries.get(this.key(edgeName, correlationId)) ?? [])];
   }
 }
 
