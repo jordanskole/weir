@@ -35,9 +35,13 @@
 
 ## Task 0: Scaffold the `kleisli` repo
 
-> **Status 2026-09-24: Steps 1-8 complete**, executed by the separate `klelsi-project` session, not from weir. `/Users/jordan/code/kleisli` is a standalone git repo. Verified independently from a weir session: production build passes, and `/`, `/sign-in`, `/sign-up` all return 200 with clerk-js loading against a real `clerk.accounts.dev` instance. Installed stack is Next.js 16.3.6, React 19.2.8, Tailwind 4, `@clerk/nextjs` 7.9.5. A post-review fix wave was still landing when this note was written, so commit hashes are deliberately not pinned here.
+> **Status 2026-09-24: Steps 1-8 and 10 complete. Only Step 9 remains, and it's Jordan's.** Executed by the separate `klelsi-project` session, not from weir. `/Users/jordan/code/kleisli` is a standalone git repo, `main` at `b34d326`, four commits: scaffold → Clerk → review fix wave → gitignore `.worktrees/`. Verified independently from a weir session: production build passes; `/`, `/sign-in`, `/sign-up` all return 200 with clerk-js loading against a real `clerk.accounts.dev` instance; no AI-attribution trailers in the history. Installed stack is Next.js 16.3.6, React 19.2.8, Tailwind 4, `@clerk/nextjs` 7.9.5.
 >
-> **Steps 9-10 remain.** Step 9 is unstarted and is Jordan's — there is no git remote, nothing is pushed to the `getkleisli` org, and no Vercel project exists; it needs his Vercel account, org push rights and Namecheap DNS. Both sessions have explicitly scoped it out rather than acting unilaterally. Step 10 (the memory note) is being held until the fix wave closes, so it records the final state and the real deferred list — including `authorizedParties` on the Clerk middleware, intentionally left until Step 9 puts a real domain behind it.
+> **Phase 1+ work goes in the worktree**, not on `main`: `/Users/jordan/code/kleisli/.worktrees/phase1` on branch `phase1-work`, cut from `b34d326`, `.worktrees/` gitignored. `EnterWorktree` can't target kleisli — it's a sibling of weir, not nested under it — so the manual `git worktree` fallback is correct there.
+>
+> **Step 9 blocks Phase 0 and nothing else.** No git remote, nothing pushed to the `getkleisli` org, no Vercel project, `app.getkleisli.com` pointed nowhere. Needs Jordan's Vercel account, org push rights and Namecheap DNS. Two things ride along with it: real (non-dev) Clerk keys in Vercel's env — the current Clerk dev app is ephemeral — and setting `authorizedParties` on `clerkMiddleware()`, deliberately deferred because it needs the real domain to set correctly. Worth knowing when you do: the production build succeeds with blank Clerk keys, so a misconfigured deploy fails at runtime, not at build.
+>
+> **One decision the scaffold encodes, easy to undo by accident:** the four `NEXT_PUBLIC_CLERK_SIGN_{IN,UP}{,_FALLBACK_REDIRECT}_URL` vars are what make this app use its *own* `/sign-in` and `/sign-up` routes instead of Clerk's hosted Account Portal. Unset them and Clerk silently falls back to the portal, turning `src/app/sign-{in,up}/` into dead code that still builds and still serves 200s.
 >
 > **One deviation, and it's the intended kind.** Clerk's middleware is at `src/proxy.ts`, not the `src/middleware.ts` this plan names: Next.js 16 renamed it. Step 6 told the executor to pull Clerk's live quickstart rather than trust a snapshot in this file, precisely so this wouldn't go stale — so the file on disk is right and the plan text below is the stale half.
 
@@ -137,7 +141,7 @@ Manual step (not scriptable from here — requires Vercel account + DNS access):
 
 Expected: `https://app.getkleisli.com` loads the default Next.js/Clerk scaffold over HTTPS with working sign-in.
 
-- [ ] **Step 10: Record the decision in weir's memory**
+- [x] **Step 10: Record the decision in weir's memory**
 
 No code change — this step is a note to update `/Users/jordan/.claude/projects/-Users-jordan-code-weir/memory/project_getkleisli_hosted_platform.md` once Phase 0 is live, so future sessions know the scaffold exists and where (`/Users/jordan/code/kleisli`, `app.getkleisli.com`, Clerk) rather than re-deciding it.
 
