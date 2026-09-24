@@ -19,7 +19,7 @@ This is piece **(1)** of four, in dependency order:
 1. **The log becomes a log** — this spec. Instance retention, identity, per-node consumption, fire-per-unconsumed readiness. On its own it makes single-input recursion run.
 2. **Causation is real** — `causationId` threaded through membrane, trace and log. Today a hardcoded `null`.
 3. **`allOf` joins by lineage** — zip plus shared-ancestor key. Needs (1) and (2).
-4. **Composite nodes** — topology-as-node, "enroll in workflow". Needs (1).
+4. **Composite nodes** — topology-as-node, "enroll in workflow". Needs (1) **and (3)**: viewed from outside its membrane a topology *is* an `allOf` node, since its origin-shaped edges must all be satisfied together by one triggering event, so every composite entry point is `allOf`-shaped and inherits whatever (3) decides about joining (design-history.md, "Three axes and a clock"). (4) is not merely blocked on (1).
 
 Each produces working, testable software alone. Nothing below implements (2), (3) or (4).
 
@@ -29,16 +29,20 @@ Each produces working, testable software alone. Nothing below implements (2), (3
 
 ```ts
 export interface LoggedInstance {
-  /** Monotonic within one Log, assigned at append. Identity and total order in one field. */
+  /** Stable identity for this instance, minted at append. What causation points at. */
+  id: string;
+  /** Monotonic within one Log, assigned at append. Write order, not causal position. */
   seq: number;
   payload: unknown;
   envelope?: InstanceEnvelope;
 }
 ```
 
-Not `envelope.id`. That is the *invocation* id — shared by every branch an `allOf`-output node emits (`logOutput`'s own doc comment says so: "same `id` for every instance an `allOf`-output node emits"), and absent entirely on staged inputs and origin payloads, which have no invocation behind them. A counter owned by the Log is uniform across both cases and gives identity and ordering in one field, so "oldest first" is well-defined without a second timestamp comparison.
+**Two fields, not one, and the split is the point.** An earlier draft had `seq` carrying identity and ordering together; designing piece (2) found that out. Causation is `causationIds: string[]` on an envelope, and those ids have to survive beyond one Log — the Trace persists conceptually and replay resolves against it — while a counter that restarts per Log collides across runs. So identity is a minted string and ordering is a local counter, and neither is asked to be the other.
 
-`seq` is monotonic across the whole Log, not per edge type. That costs nothing and makes cross-edge ordering available to piece (3) without a format change.
+Identity is not `envelope.id` either. That is the *invocation* id — shared by every branch an `allOf`-output node emits (`logOutput`'s own doc comment: "same `id` for every instance an `allOf`-output node emits"), and absent entirely on staged inputs and origin payloads, which have no invocation behind them.
+
+`seq` is monotonic across the whole Log, not per edge type, which costs nothing and makes cross-edge ordering available to piece (3) without a format change. It is a logical clock in Lamport's sense — a total order consistent with causality — and deliberately *not* a coordinate in the causal structure (design-history.md, "Three axes and a clock"). `envelope.step` measures causal position; `seq` measures when something was written. Two tokens can agree on causal position across separate iterations and never share a `seq`, which is exactly why `seq` is right for "oldest unconsumed first" and wrong for lineage.
 
 ### 2. `append` retains; `latest` is unchanged
 
@@ -46,7 +50,8 @@ The backing map becomes `(edgeName, correlationId) → LoggedInstance[]`, append
 
 ```ts
 export interface Log {
-  append(edgeName: string, correlationId: string, payload: unknown, envelope?: InstanceEnvelope): void;
+  /** Returns the new instance's `id`, so a caller can record what it produced. */
+  append(edgeName: string, correlationId: string, payload: unknown, envelope?: InstanceEnvelope): string;
   latest(edgeName: string, correlationId: string): unknown | undefined;
   latestInstance(edgeName: string, correlationId: string): LoggedInstance | undefined;
   /** Every retained instance of this edge type for this correlation, oldest first. */
@@ -56,7 +61,7 @@ export interface Log {
 
 `latest` and `latestInstance` keep their exact current meaning — the most recently appended instance — so `design.md` §5's wording stays accurate and every existing reader is untouched. That matters because `membrane.ts`'s `allOf` resolution and `runtime.ts`'s `allOf` bag rebuild both call `latest`, and this spec deliberately does not change `allOf` behaviour.
 
-`append` stays `void`. The runtime tracks consumption against instances it *reads*, never against ones it writes, so nothing needs the `seq` back. Piece (2) may want it returned; adding a return type then is not a breaking change.
+`append` returns the minted `id`. Piece (1)'s own runtime does not need it — consumption is tracked against instances it *reads*, never ones it writes — but piece (2) does, since an invocation that emits a token must be able to say which token it emitted, and retrofitting a return type across every call site later is pure churn. Returning it now costs one word.
 
 ### 3. Consumption is tracked by the runtime, not the Log
 
