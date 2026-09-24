@@ -1156,6 +1156,61 @@ describe("runNetlist — iteration", () => {
     // The cycle is real: recycle did fire on the join's output and put a
     // fresh A back in front of join, which declined to fire again.
     expect(log.instances("A", "c1")).toHaveLength(2);
+    // Three pulses, not two: join is offered only once A and B are in the
+    // log at snapshot time, so it fires in the pulse after the one that
+    // produced them rather than inside it.
+    expect(result.pulses).toBe(3);
+    expect(log.instances("Joined", "c1")[0]?.envelope?.step).toBe(2);
+  });
+
+  it("gives a fan-in node a step one past the longest path feeding it, not the shortest", async () => {
+    // top → A (pulse 1); mid consumes A → B (pulse 2); zip joins A and B.
+    // A is one hop from the origin and B is two, so zip belongs at step 3.
+    // Node names matter here and are chosen deliberately: "zip" sorts after
+    // both producers, so within a pulse it is attempted *after* they have
+    // appended. A fan-in whose readiness is decided at fire time rather than
+    // at snapshot time therefore fires in pulse 2 and lands at step 2 — the
+    // same step as the B it just consumed. Renaming zip to something that
+    // sorts first would hide that, and the test would pass for free.
+    const Joined2 = defineEdge({
+      name: "Joined",
+      label: "Joined",
+      description: "d",
+      fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+    });
+    const program = programWith(
+      {
+        top: defineNode({ name: "top", input: single(Start), output: single(CycleA), fn: (s) => ({ value: s.value }) }),
+        mid: defineNode({ name: "mid", input: single(CycleA), output: single(CycleB), fn: (a) => ({ value: a.value }) }),
+        zip: defineNode({
+          name: "zip",
+          input: allOf(CycleA, CycleB),
+          output: single(Joined2),
+          fn: ({ A, B }) => ({ value: `${A.value}+${B.value}` }),
+        }),
+      },
+      { origins: ["top"], feeds: { top: ["mid", "zip"], mid: ["zip"] } },
+    );
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      program,
+      { correlationId: "c1", originPayloads: { top: { value: "a" } } },
+      { log, budget: 50 },
+    );
+
+    expect(result.stopped).toBe("quiescence");
+    expect(log.latest("Joined", "c1")).toEqual({ value: "a+a" });
+
+    const consumedSteps = [
+      log.latestInstance("A", "c1")?.envelope?.step,
+      log.latestInstance("B", "c1")?.envelope?.step,
+    ];
+    expect(consumedSteps).toEqual([1, 2]); // the short path and the long one
+    const fanIn = log.latestInstance("Joined", "c1")?.envelope?.step;
+    expect(fanIn).toBe(3);
+    for (const step of consumedSteps) expect(fanIn!).toBeGreaterThan(step!);
+    expect(result.pulses).toBe(3);
   });
 
   it("never fires a node the wiring does not reach, even with a staged instance of its input edge", async () => {

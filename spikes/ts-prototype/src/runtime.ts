@@ -56,7 +56,11 @@
  *   `budget` as the backstop for a graph that never reaches it.
  * - **`allOf`-input nodes still fire at most once per run** (`firedAllOf`,
  *   the narrow remnant of the old global `fired` set), resolving their bag
- *   by `latest` as before. Joining by lineage is a later spec and needs
+ *   by `latest` as before. What did change is *when* they are offered: an
+ *   `allOf` node is a candidate only once every edge it declared has a
+ *   `latest` at snapshot time, so like every other node it fires in the
+ *   pulse *after* its inputs appeared and its `step` is one past the longest
+ *   path feeding it. Joining by lineage is a later spec and needs
  *   causation, which does not exist yet; iteration therefore works for
  *   single-input chains only. That is the honest boundary.
  */
@@ -204,7 +208,21 @@ export interface Host {
   log: Log;
   trace?: Trace;
   budget?: number;
+  /**
+   * Maximum *pulses* before the run stops, defaulting to
+   * `DEFAULT_MAX_PULSES`. A backstop, not a feature: `budget` counts
+   * firings, so a loop that spins while firing nothing is unbounded by
+   * construction, and that hole is invisible exactly while the quiescence
+   * check is correct. A regression there should fail a suite, not wedge it —
+   * an await loop that fires nothing starves the macrotask queue a test
+   * timeout lives on, so it hangs rather than timing out. Bound in pulses
+   * rather than wall-clock so it stays deterministic.
+   */
+  maxPulses?: number;
 }
+
+/** Generous enough that no correct run reaches it; small enough to fail a spin fast. See `Host.maxPulses`. */
+export const DEFAULT_MAX_PULSES = 10_000;
 
 /**
  * Which instances a `single`-input node may fire on right now.
@@ -246,7 +264,7 @@ export function eligibleInstances(
 
 export async function runNetlist(program: Program, run: Run, host: Host): Promise<RunResult> {
   const { correlationId, originPayloads, identity } = run;
-  const { log, trace, budget } = host;
+  const { log, trace, budget, maxPulses = DEFAULT_MAX_PULSES } = host;
   const failures: RunResult["failures"] = [];
   const consumed = new Map<string, Set<number>>();
   const originsFired = new Set<string>();
@@ -398,7 +416,21 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
     for (const nodeName of scanned) {
       const nodeDef = program.nodes[nodeName];
       if (nodeDef.input.kind !== "single") {
-        if (!firedAllOf.has(nodeName)) candidates.push({ nodeName });
+        if (firedAllOf.has(nodeName)) continue;
+        // `allOf` readiness is evaluated *here*, against the same snapshot
+        // every other candidate is computed against, rather than left
+        // entirely to membrane's fire-time check. Otherwise a node whose
+        // inputs only appeared during this pulse fires inside it and takes
+        // that pulse's number as its `step` — the same `step` its own inputs
+        // carry, when §8 requires one past the longest path feeding it.
+        // membrane's check stays where it is and stays the authority on
+        // whether the firing happens; this only decides whether to offer it.
+        // Resolution is still latest-wins and firing is still at most once
+        // per run (§5) — neither is touched.
+        const ready = nodeDef.input.edges.every(
+          (edge) => log.latest(edge.name, correlationId) !== undefined,
+        );
+        if (ready) candidates.push({ nodeName });
         continue;
       }
       if (origins.has(nodeName)) {
@@ -430,6 +462,12 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
     // node would spin the loop forever.
     if (firedThisPulse === 0) {
       return { failures, firings, pulses: pulse - 1, stopped: "quiescence" };
+    }
+
+    // The pulse backstop (see `Host.maxPulses`). Distinct from the firing
+    // budget above, which cannot bound a pulse that fires nothing.
+    if (pulse >= maxPulses) {
+      return { failures, firings, pulses: pulse, stopped: "budget" };
     }
   }
 }
