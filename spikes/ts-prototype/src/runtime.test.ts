@@ -496,6 +496,15 @@ describe("runNetlist", () => {
     expect(invoiceInstance?.envelope?.schemaHash).toBe((await hashEdge(InvoiceRequested)).hash);
     expect(inventoryInstance?.envelope?.schemaHash).toBe((await hashEdge(InventoryReserved)).hash);
     expect(invoiceInstance?.envelope?.schemaHash).not.toBe(inventoryInstance?.envelope?.schemaHash);
+    // envelope.id can't distinguish these two instances — same invocation,
+    // so same id — which is exactly the case the spec calls out `seq` for
+    // (docs/superpowers/specs/2026-09-24-instance-retention-and-iteration.md,
+    // Testing: "`seq` distinct for two instances an `allOf`-output node
+    // emits from one invocation"). `seq` is minted per append, so it must
+    // differ even though `id` doesn't.
+    expect(invoiceInstance?.seq).toBeDefined();
+    expect(inventoryInstance?.seq).toBeDefined();
+    expect(invoiceInstance?.seq).not.toBe(inventoryInstance?.seq);
   });
 
   it("routes a many output — logs the whole collection as one edge instance", async () => {
@@ -729,7 +738,7 @@ describe("runNetlist", () => {
     }
   });
 
-  it("real: an anyOf-desugared shadow fires through the worklist via an aliased .topology reference", async () => {
+  it("real: an anyOf-desugared shadow fires through the pulse loop via an aliased .topology reference", async () => {
     const dir = await mkdtemp(join(tmpdir(), "weir-runtime-"));
     const root = await mkdtemp(join(tmpdir(), "weir-decl-"));
     try {
@@ -831,7 +840,7 @@ describe("runNetlist", () => {
     // read via log.latest — runNetlist requires an origin's payload to come
     // from originPayloads (it returns false early otherwise, never touching
     // the log), so this is the correct way to seed two independent origins
-    // in one worklist run, not a simplification of the real scenario.
+    // in one pulse-loop run, not a simplification of the real scenario.
     const program = programWith(shadows, { origins: ["Handle__A", "Handle__B"], feeds: {} });
     const log = new InMemoryLog();
 
@@ -853,6 +862,20 @@ describe("runNetlist", () => {
  * `birthday` is deliberately *not* wired back to itself, so its own output is
  * ineligible for it under arc-based readiness. Readiness by edge *type* would
  * let it eat its own `Person` forever.
+ *
+ * Deliberately hand-built rather than loaded from the real
+ * `examples/person-birthday` files — do not "upgrade" this to elaborate the
+ * real ones, even though that would look like a simplification. In the real
+ * `.node`/`.topology` files `birthday` *is* the origin, and an origin fires
+ * at most once per run regardless of readiness (`originsFired`) — that
+ * once-only branch would mask a type-based-readiness runaway entirely,
+ * since `birthday` would never get a second chance to eat its own output no
+ * matter which readiness rule is in effect. This fixture adds a separate
+ * `origin` node precisely so `birthday` is a non-origin, which is what makes
+ * "leaves the canonical example unchanged" below a genuine §4 regression
+ * test rather than one that would pass under the old, broken by-type
+ * readiness too. The real topology is exercised separately, end-to-end, by
+ * "runs the real person-birthday topology end-to-end" above.
  */
 const Person = defineEdge({
   name: "Person",
@@ -920,6 +943,32 @@ const countToThreeProgram = programWith(
 const foreverProgram = programWith(
   { seed, forever },
   { origins: ["seed"], feeds: { seed: ["forever"], forever: ["forever"] } },
+);
+
+/**
+ * `forever`'s endless self-feeding loop plus one unrelated node that is
+ * ready from pulse 1 and shares none of `forever`'s edges. The "no
+ * starvation" test (spec Testing section) needs exactly this shape: a
+ * self-feeding node and an independent ready node in one topology, so a
+ * scheduler that only re-offers whichever node is already looping —
+ * instead of scanning every reachable node every pulse — has something to
+ * starve.
+ */
+const Independent = defineEdge({
+  name: "Independent",
+  label: "Independent",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const sideOrigin = defineNode({
+  name: "sideOrigin",
+  input: single(Independent),
+  output: single(Independent),
+  fn: (v) => v,
+});
+const foreverWithSideProgram = programWith(
+  { seed, forever, sideOrigin },
+  { origins: ["seed", "sideOrigin"], feeds: { seed: ["forever"], forever: ["forever"] } },
 );
 
 /**
@@ -1048,6 +1097,33 @@ describe("runNetlist — iteration", () => {
 
     expect(result.stopped).toBe("budget");
     expect(result.firings).toBe(10);
+  });
+
+  it("does not starve an unrelated ready node behind a self-feeding one", async () => {
+    // forever never quiesces; sideOrigin is ready once, independently, from
+    // pulse 1. Snapshot semantics say every reachable node is scanned for
+    // candidates every pulse — not just whichever node is already looping —
+    // so sideOrigin gets its turn on pulse 1 regardless of how long forever
+    // keeps the run going after that. A scheduler that instead gave only
+    // one node a turn per pulse (the "one firing per node per round"
+    // fairness rule the spec explicitly rejects as unnecessary) would still
+    // let this pass by accident; a scheduler that stopped scanning once it
+    // found a ready candidate would starve sideOrigin outright — this test
+    // would then see zero Independent instances rather than one.
+    const log = new InMemoryLog();
+    const result = await runNetlist(
+      foreverWithSideProgram,
+      { correlationId: "c1", originPayloads: { seed: { n: 0 }, sideOrigin: { value: "x" } } },
+      { log, budget: 10 },
+    );
+
+    expect(result.stopped).toBe("budget");
+    expect(log.instances("Independent", "c1")).toHaveLength(1);
+    expect(log.latestInstance("Independent", "c1")?.envelope?.step).toBe(1);
+    // The run kept firing forever well past sideOrigin's one turn — proof
+    // sideOrigin firing wasn't just a lucky side effect of the run ending
+    // early.
+    expect(result.pulses).toBeGreaterThan(1);
   });
 
   it("does not consume within the pulse that produced — snapshot isolation", async () => {

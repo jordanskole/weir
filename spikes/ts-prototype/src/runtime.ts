@@ -455,11 +455,17 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
       }
     }
 
-    // Counting actual firings rather than candidates matters: an `allOf`
-    // node is a candidate whenever it has not fired, but `membrane()`'s
-    // own readiness check may still decline it. Quiescence has to mean
-    // "nothing fired", not "nothing was offered", or an unready `allOf`
-    // node would spin the loop forever.
+    // Counting actual firings rather than candidates, even though the two
+    // are currently equivalent: the `allOf` snapshot gate above (`ready`)
+    // uses the same `latest !== undefined` predicate membrane's own
+    // readiness check uses, so `tryFire` can no longer return `false` and
+    // an empty candidate list is exactly when nothing fires. Kept anyway,
+    // deliberately, as a structural guard rather than a currently-necessary
+    // one: a future readiness rule that diverges from membrane's own check
+    // — the gate above and membrane's check drifting out of sync — could
+    // reintroduce a declined-but-offered candidate, and counting firings
+    // rather than candidates is what keeps quiescence correct if that ever
+    // happens again.
     if (firedThisPulse === 0) {
       return { failures, firings, pulses: pulse - 1, stopped: "quiescence" };
     }
