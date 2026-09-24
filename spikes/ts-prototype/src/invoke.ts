@@ -22,21 +22,24 @@ import type { Envelope, NodeDef, PayloadOf } from "./types.js";
  * resolve from a plain, doubly-defaulted `NodeDef` even after
  * `nodeDef.input.kind` has been checked at the value level — a real TS
  * narrowing limitation, not a genuine call-shape ambiguity (the `kind`
- * branch checks it at runtime). Both call shapes carry the same third,
- * optional `identity` argument `membrane.ts`'s real `SingleInvoke`/
- * `AllOfInvoke` accept — typed `Partial`, matching `Envelope.identity`
- * itself, because replay's caller (see `replayInvocation`) can only ever
- * supply a previously *narrowed* identity, never the full claims set.
+ * branch checks it at runtime). Both call shapes carry the same third and
+ * fourth, optional `identity`/`step` arguments `membrane.ts`'s real
+ * `SingleInvoke`/`AllOfInvoke` accept — `identity` typed `Partial`,
+ * matching `Envelope.identity` itself, because replay's caller (see
+ * `replayInvocation`) can only ever supply a previously *narrowed*
+ * identity, never the full claims set.
  */
 type AnySingleInvoke = (
   payload: unknown,
   correlationId: string,
   identity?: Partial<PayloadOf<typeof Identity>>,
+  step?: number,
 ) => Promise<{ result: unknown; envelope?: Envelope }>;
 type AnyAllOfInvoke = (
   correlationId: string,
   log: Log,
   identity?: Partial<PayloadOf<typeof Identity>>,
+  step?: number,
 ) => Promise<{ result: unknown; envelope?: Envelope } | undefined>;
 
 /**
@@ -67,15 +70,25 @@ type AnyAllOfInvoke = (
  * supplies one, re-feeding a recorded `Envelope.identity` back in so a
  * scoped node's replayed result reflects who actually invoked it rather
  * than always falling through to the system default.
+ *
+ * `step` is threaded the same way, for the same reason: optional, trailing,
+ * passed straight through to `membrane()`, defaulting to 0 for a caller
+ * with no scheduler behind it. `replay.ts` is again the caller that
+ * supplies one, re-feeding a recorded `Envelope.step` back in so a replayed
+ * invocation's envelope matches the one the original invocation recorded
+ * rather than silently reverting to 0 (docs/superpowers/specs/2026-09-24-instance-retention-and-iteration.md
+ * §6: "`step` is a property of the program's shape and is identical on
+ * replay").
  */
 export async function invokeWithInput(
   nodeDef: NodeDef,
   input: unknown,
   correlationId: string,
   identity?: Partial<PayloadOf<typeof Identity>>,
+  step?: number,
 ): Promise<{ result: unknown; envelope?: Envelope }> {
   if (nodeDef.input.kind === "single") {
-    return await (membrane(nodeDef) as AnySingleInvoke)(input, correlationId, identity);
+    return await (membrane(nodeDef) as AnySingleInvoke)(input, correlationId, identity, step);
   }
 
   const log = new InMemoryLog();
@@ -83,6 +96,6 @@ export async function invokeWithInput(
   for (const edge of nodeDef.input.edges) {
     log.append(edge.name, correlationId, bag[edge.name]);
   }
-  const invocation = await (membrane(nodeDef) as AnyAllOfInvoke)(correlationId, log, identity);
+  const invocation = await (membrane(nodeDef) as AnyAllOfInvoke)(correlationId, log, identity, step);
   return invocation ?? { result: undefined };
 }
