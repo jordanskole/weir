@@ -35,6 +35,12 @@
 
 ## Task 0: Scaffold the `kleisli` repo
 
+> **Status 2026-09-24: Steps 1-8 complete**, executed by the separate `klelsi-project` session, not from weir. `/Users/jordan/code/kleisli` is a standalone git repo. Verified independently from a weir session: production build passes, and `/`, `/sign-in`, `/sign-up` all return 200 with clerk-js loading against a real `clerk.accounts.dev` instance. Installed stack is Next.js 16.3.6, React 19.2.8, Tailwind 4, `@clerk/nextjs` 7.9.5. A post-review fix wave was still landing when this note was written, so commit hashes are deliberately not pinned here.
+>
+> **Steps 9-10 remain.** Step 9 is unstarted and is Jordan's — there is no git remote, nothing is pushed to the `getkleisli` org, and no Vercel project exists; it needs his Vercel account, org push rights and Namecheap DNS. Both sessions have explicitly scoped it out rather than acting unilaterally. Step 10 (the memory note) is being held until the fix wave closes, so it records the final state and the real deferred list — including `authorizedParties` on the Clerk middleware, intentionally left until Step 9 puts a real domain behind it.
+>
+> **One deviation, and it's the intended kind.** Clerk's middleware is at `src/proxy.ts`, not the `src/middleware.ts` this plan names: Next.js 16 renamed it. Step 6 told the executor to pull Clerk's live quickstart rather than trust a snapshot in this file, precisely so this wouldn't go stale — so the file on disk is right and the plan text below is the stale half.
+
 **Files:**
 - Create: `/Users/jordan/code/kleisli/` (new sibling directory to `weir`, new git repo)
 - Create: `/Users/jordan/code/kleisli/package.json`
@@ -46,7 +52,7 @@
 - Consumes: nothing (first task in a new repo)
 - Produces: a deployed Next.js app at a real URL, with Clerk auth wired (sign-in works, no protected content behind it yet) — later phases build on this scaffold and its Clerk session object, not on any specific page/route added here.
 
-- [ ] **Step 1: Create the repo**
+- [x] **Step 1: Create the repo**
 
 ```bash
 mkdir -p /Users/jordan/code/kleisli
@@ -54,14 +60,14 @@ cd /Users/jordan/code/kleisli
 git init
 ```
 
-- [ ] **Step 2: Scaffold Next.js (TypeScript, App Router, Tailwind — matches weir's own TS-first lean)**
+- [x] **Step 2: Scaffold Next.js (TypeScript, App Router, Tailwind — matches weir's own TS-first lean)**
 
 ```bash
 cd /Users/jordan/code/kleisli
 npx create-next-app@latest . --typescript --app --tailwind --eslint --src-dir --import-alias "@/*" --use-npm --yes
 ```
 
-- [ ] **Step 3: Verify the default app builds and runs**
+- [x] **Step 3: Verify the default app builds and runs**
 
 ```bash
 npm run build
@@ -73,7 +79,7 @@ kill %1
 
 Expected: `OK: app responds`
 
-- [ ] **Step 4: Commit the scaffold**
+- [x] **Step 4: Commit the scaffold**
 
 ```bash
 cd /Users/jordan/code/kleisli
@@ -81,7 +87,7 @@ git add -A
 git commit -m "Scaffold kleisli Next.js app"
 ```
 
-- [ ] **Step 5: Add Clerk**
+- [x] **Step 5: Add Clerk**
 
 ```bash
 cd /Users/jordan/code/kleisli
@@ -95,13 +101,13 @@ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
 CLERK_SECRET_KEY=
 ```
 
-- [ ] **Step 6: Wire Clerk's provider and middleware**
+- [x] **Step 6: Wire Clerk's provider and middleware**
 
 Modify `/Users/jordan/code/kleisli/src/app/layout.tsx` to wrap the app in `<ClerkProvider>`, following Clerk's current Next.js App Router quickstart (`npx clerk-quickstart` or the docs at the time this is executed — Clerk's exact API surface changes often enough that hand-copying steps into this plan would go stale; the executor should pull the live quickstart rather than trust a snapshot here).
 
 Create `/Users/jordan/code/kleisli/src/middleware.ts` per the same quickstart, protecting no routes yet (auth wired, nothing gated).
 
-- [ ] **Step 7: Verify sign-in works locally**
+- [x] **Step 7: Verify sign-in works locally**
 
 ```bash
 cd /Users/jordan/code/kleisli
@@ -113,7 +119,7 @@ kill %1
 
 Expected: `OK: sign-in route responds`
 
-- [ ] **Step 8: Commit Clerk integration**
+- [x] **Step 8: Commit Clerk integration**
 
 ```bash
 cd /Users/jordan/code/kleisli
