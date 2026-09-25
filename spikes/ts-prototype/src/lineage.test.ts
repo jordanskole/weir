@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { defineEdge, defineField, defineNode, allOf, single } from "./define.js";
 import { InMemoryLog } from "./membrane.js";
 import { runNetlist } from "./runtime.js";
-import { ancestorsOf, selfAndAncestorIds } from "./lineage.js";
+import { ancestorsOf, joinRows, selfAndAncestorIds } from "./lineage.js";
 import type { Program } from "./implementation.js";
 import type { NodeDef } from "./types.js";
 
@@ -255,5 +255,331 @@ describe("Log.instanceById", () => {
 
   it("returns undefined for an unknown id rather than throwing", () => {
     expect(new InMemoryLog().instanceById("nope")).toBeUndefined();
+  });
+});
+
+// Two entities, each fanning out to Left/Right context. `source` is the one
+// origin (fires once); `branchA`/`branchB` are plain single-input
+// passthroughs whose only job is to give `extractEntities` two independent
+// unconsumed `FanSeed` instances to fire on, so the two entities are
+// siblings under `source` rather than a chain where the second descends
+// from the first — a chained design would make entity 2 a descendant of
+// entity 1, and a *wrong* pairing (Left from entity 1, Right from entity 2)
+// would still share entity 1 as a common ancestor.
+//
+// Siblings alone are not enough, though. `leftCtx` and `rightCtx` would
+// both read the same `FanEntity` log in the same append order (entity A
+// before entity B, since `branchA` fires before `branchB`), so a flat
+// positional zip across *all* candidates — exactly what the ascending-seq
+// bug produces once it lumps everything into the origin's group — would
+// pair index 0 with index 0 and land on the *same* two rows a correct
+// per-entity grouping would. The mispairing test would pass against the
+// broken implementation for the wrong reason.
+//
+// `rightGate` breaks that coincidence on purpose: it stalls entity A two
+// extra pulses (keyed off the "-A" suffix already in its payload) before
+// forwarding it to `rightCtx`, while entity B passes straight through. So
+// `Right` ends up logged as [entity B, entity A] — reversed from `Left`'s
+// [entity A, entity B]. A correct nearest-ancestor grouping still pairs
+// each entity with itself; a flat positional zip now pairs entity A's Left
+// with entity B's Right instead, which is exactly the wrong pairing the
+// per-row assertion below is positioned to catch.
+const FanSeed = defineEdge({
+  name: "FanSeed",
+  label: "FanSeed",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const FanEntity = defineEdge({
+  name: "FanEntity",
+  label: "FanEntity",
+  description: "d",
+  fields: {
+    value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }),
+    spins: defineField({ type: "uint8", label: "spins", description: "d", nullable: false }),
+  },
+});
+const RightEntity = defineEdge({
+  name: "RightEntity",
+  label: "RightEntity",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const FanLeft = defineEdge({
+  name: "Left",
+  label: "Left",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const FanRight = defineEdge({
+  name: "Right",
+  label: "Right",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const fanSource = defineNode({
+  name: "source",
+  input: single(FanSeed),
+  output: single(FanSeed),
+  fn: (s) => s,
+});
+const branchA = defineNode({
+  name: "branchA",
+  input: single(FanSeed),
+  output: single(FanSeed),
+  fn: (s) => ({ value: `${s.value}-A` }),
+});
+const branchB = defineNode({
+  name: "branchB",
+  input: single(FanSeed),
+  output: single(FanSeed),
+  fn: (s) => ({ value: `${s.value}-B` }),
+});
+const extractEntities = defineNode({
+  name: "extractEntities",
+  input: single(FanSeed),
+  output: single(FanEntity),
+  fn: (s) => ({ value: s.value, spins: 0 }),
+});
+const leftCtx = defineNode({
+  name: "leftCtx",
+  input: single(FanEntity),
+  output: single(FanLeft),
+  fn: (e) => ({ value: `left-${e.value}` }),
+});
+// Self-loops on FanEntity, stalling entity A ("-A" suffix) two extra pulses
+// before handing off to RightEntity; entity B passes through with zero
+// spins. See the block comment above for why this asymmetry matters.
+const rightGate = defineNode({
+  name: "rightGate",
+  input: single(FanEntity),
+  output: { kind: "oneOf", edges: [FanEntity, RightEntity] },
+  fn: (e) => {
+    const needsSpins = e.value.endsWith("-A") ? 2 : 0;
+    if (e.spins < needsSpins) {
+      return { edge: "FanEntity" as const, payload: { value: e.value, spins: e.spins + 1 } };
+    }
+    return { edge: "RightEntity" as const, payload: { value: e.value } };
+  },
+});
+const rightCtx = defineNode({
+  name: "rightCtx",
+  input: single(RightEntity),
+  output: single(FanRight),
+  fn: (e) => ({ value: `right-${e.value}` }),
+});
+const twoEntityFanOutProgram = programWith(
+  { source: fanSource, branchA, branchB, extractEntities, leftCtx, rightGate, rightCtx },
+  {
+    origins: ["source"],
+    feeds: {
+      source: ["branchA", "branchB"],
+      branchA: ["extractEntities"],
+      branchB: ["extractEntities"],
+      extractEntities: ["leftCtx", "rightGate"],
+      rightGate: ["rightGate", "rightCtx"],
+    },
+  },
+);
+
+// bake: Recipe comes straight off the origin (ancestors(Recipe) is empty),
+// heat consumes Recipe and emits Oven. No allOf node needed — joinRows is
+// called directly against the gathered candidates.
+const Recipe = defineEdge({
+  name: "Recipe",
+  label: "Recipe",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const Oven = defineEdge({
+  name: "Oven",
+  label: "Oven",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const bakeSource = defineNode({
+  name: "source",
+  input: single(Recipe),
+  output: single(Recipe),
+  fn: (r) => r,
+});
+const heat = defineNode({
+  name: "heat",
+  input: single(Recipe),
+  output: single(Oven),
+  fn: (r) => ({ value: `baked-${r.value}` }),
+});
+const originEdgeProgram = programWith(
+  { source: bakeSource, heat },
+  { origins: ["source"], feeds: { source: ["heat"] } },
+);
+
+// One entity; Left and Right each get two sibling producers (leftFirst/
+// leftSecond, rightFirst/rightSecond) so the edge has two instances, and Mid
+// gets one. All five descend directly from the same Entity instance, so
+// they land in one lineage group; zip depth is min(2, 2, 1) = 1, and the
+// second Left/Right go unconsumed.
+const RaggedEntity = defineEdge({
+  name: "RaggedEntity",
+  label: "RaggedEntity",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const RaggedLeft = defineEdge({
+  name: "Left",
+  label: "Left",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const RaggedRight = defineEdge({
+  name: "Right",
+  label: "Right",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const Mid = defineEdge({
+  name: "Mid",
+  label: "Mid",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const raggedSource = defineNode({
+  name: "source",
+  input: single(RaggedEntity),
+  output: single(RaggedEntity),
+  fn: (e) => e,
+});
+const leftFirst = defineNode({
+  name: "leftFirst",
+  input: single(RaggedEntity),
+  output: single(RaggedLeft),
+  fn: (e) => ({ value: `left1-${e.value}` }),
+});
+const leftSecond = defineNode({
+  name: "leftSecond",
+  input: single(RaggedEntity),
+  output: single(RaggedLeft),
+  fn: (e) => ({ value: `left2-${e.value}` }),
+});
+const rightFirst = defineNode({
+  name: "rightFirst",
+  input: single(RaggedEntity),
+  output: single(RaggedRight),
+  fn: (e) => ({ value: `right1-${e.value}` }),
+});
+const rightSecond = defineNode({
+  name: "rightSecond",
+  input: single(RaggedEntity),
+  output: single(RaggedRight),
+  fn: (e) => ({ value: `right2-${e.value}` }),
+});
+const mid = defineNode({
+  name: "mid",
+  input: single(RaggedEntity),
+  output: single(Mid),
+  fn: (e) => ({ value: `mid-${e.value}` }),
+});
+const raggedGroupProgram = programWith(
+  { source: raggedSource, leftFirst, leftSecond, rightFirst, rightSecond, mid },
+  {
+    origins: ["source"],
+    feeds: { source: ["leftFirst", "leftSecond", "rightFirst", "rightSecond", "mid"] },
+  },
+);
+
+describe("joinRows", () => {
+  it("pairs instances by their nearest common ancestor, never across groups", async () => {
+    // Two entities, each fanning out to two context edges. The WRONG
+    // pairing must be available for this test to mean anything: all four
+    // context instances share the origin, so a rule keyed on "shares an
+    // ancestor" would happily pair left_1 with right_2.
+    const log = new InMemoryLog();
+    await runNetlist(
+      twoEntityFanOutProgram,
+      { correlationId: "c1", originPayloads: { source: { value: "seed" } } },
+      { log, budget: 40 },
+    );
+
+    const lefts = log.instances("Left", "c1");
+    const rights = log.instances("Right", "c1");
+    expect(lefts).toHaveLength(2);
+    expect(rights).toHaveLength(2);
+
+    const rows = joinRows(log, new Map([["Left", lefts], ["Right", rights]]));
+
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      const left = row.get("Left")!;
+      const right = row.get("Right")!;
+      const shared = [...selfAndAncestorIds(log, left.id)].filter((id) =>
+        selfAndAncestorIds(log, right.id).has(id),
+      );
+      const nearest = shared
+        .map((id) => log.instanceById(id)!)
+        .sort((a, b) => b.seq - a.seq)[0];
+      // The nearest shared ancestor must be an Entity, not the origin.
+      expect(nearest.envelope?.node).toBe("extractEntities");
+    }
+  });
+
+  it("joins an instance with its own descendant — self counts as an ancestor", async () => {
+    // bake: allOf[Recipe, Oven] where Recipe comes straight off the origin.
+    // ancestors(Recipe) is empty, so a pure-ancestors rule never joins.
+    const log = new InMemoryLog();
+    await runNetlist(
+      originEdgeProgram,
+      { correlationId: "c1", originPayloads: { source: { value: "a" } } },
+      { log, budget: 20 },
+    );
+
+    const recipes = log.instances("Recipe", "c1");
+    const ovens = log.instances("Oven", "c1");
+
+    const rows = joinRows(log, new Map([["Recipe", recipes], ["Oven", ovens]]));
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].get("Recipe")).toEqual(recipes[0]);
+  });
+
+  it("returns nothing when an edge has no candidate", () => {
+    const log = new InMemoryLog();
+    const a = log.instanceById(log.append("A", "c1", { v: 1 }))!;
+
+    expect(joinRows(log, new Map([["A", [a]], ["B", []]]))).toEqual([]);
+  });
+
+  it("zips within a group, leaving ragged leftovers unconsumed", async () => {
+    // One entity, two Lefts and two Rights and one Mid: zip depth is 1.
+    const log = new InMemoryLog();
+    await runNetlist(raggedGroupProgram, { correlationId: "c1", originPayloads: { source: { value: "a" } } }, { log, budget: 40 });
+
+    const rows = joinRows(
+      log,
+      new Map([
+        ["Left", log.instances("Left", "c1")],
+        ["Right", log.instances("Right", "c1")],
+        ["Mid", log.instances("Mid", "c1")],
+      ]),
+    );
+
+    expect(rows).toHaveLength(1);
+    // Oldest of each edge is taken first.
+    expect(rows[0].get("Left")).toEqual(log.instances("Left", "c1")[0]);
+  });
+
+  it("falls back to latest-wins when no candidate has lineage", () => {
+    // The externally-invoked tier: a staged bag, as invoke.ts builds.
+    const log = new InMemoryLog();
+    log.append("A", "c1", { v: 1 });
+    const newerA = log.instanceById(log.append("A", "c1", { v: 2 }))!;
+    const b = log.instanceById(log.append("B", "c1", { v: 3 }))!;
+
+    const rows = joinRows(
+      log,
+      new Map([["A", log.instances("A", "c1")], ["B", [b]]]),
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].get("A")).toEqual(newerA);
   });
 });
