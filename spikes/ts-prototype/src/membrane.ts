@@ -300,11 +300,20 @@ export interface Log {
    * that append to the same log.
    */
   instances(edgeName: string, correlationId: string): LoggedInstance[];
+  /**
+   * The instance with this id, from any edge type or correlation — ids are
+   * minted per append and globally unique, so no correlation is needed to
+   * disambiguate. Exists so recorded `causationIds` can be resolved back
+   * to instances; provenance nobody can read is provenance not worth
+   * storing (the same objection that added `latestInstance`).
+   */
+  instanceById(id: string): LoggedInstance | undefined;
 }
 
 /** An in-memory Log — the spike has no real store yet; this is enough to test readiness against. */
 export class InMemoryLog implements Log {
   private readonly entries = new Map<string, LoggedInstance[]>();
+  private readonly byId = new Map<string, LoggedInstance>();
   private nextSeq = 0;
   private key(edgeName: string, correlationId: string): string {
     return `${edgeName} ${correlationId}`;
@@ -325,6 +334,7 @@ export class InMemoryLog implements Log {
     const existing = this.entries.get(key);
     if (existing) existing.push(instance);
     else this.entries.set(key, [instance]);
+    this.byId.set(instance.id, instance);
     return instance.id;
   }
   latest(edgeName: string, correlationId: string): unknown | undefined {
@@ -336,6 +346,9 @@ export class InMemoryLog implements Log {
   }
   instances(edgeName: string, correlationId: string): LoggedInstance[] {
     return [...(this.entries.get(this.key(edgeName, correlationId)) ?? [])];
+  }
+  instanceById(id: string): LoggedInstance | undefined {
+    return this.byId.get(id);
   }
 }
 
