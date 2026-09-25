@@ -110,16 +110,16 @@ Elaboration turns those files into a netlist — concrete nodes, concrete edges,
 
 ```json
 { "instance": "gatherIngredients#1", "edge": "Recipe", "payload": { "title": "Chocolate Chip Cookies", "servings": 24 },
-  "envelope": { "id": "env-1", "correlationId": "run-1", "causationId": null, "step": 1 } }
+  "envelope": { "id": "env-1", "correlationId": "run-1", "causationIds": [], "step": 1 } }
 
 { "instance": "mix#1",               "edge": "Dough",  "payload": { "title": "Chocolate Chip Cookies", "servings": 24 },
-  "envelope": { "id": "env-2", "correlationId": "run-1", "causationId": null, "step": 2 } }
+  "envelope": { "id": "env-2", "correlationId": "run-1", "causationIds": ["gatherIngredients#1"], "step": 2 } }
 
 { "instance": "preheatOven#1",       "edge": "Oven",   "payload": { "temperature": 375, "preheated": true },
-  "envelope": { "id": "env-3", "correlationId": "run-1", "causationId": null, "step": 2 } }
+  "envelope": { "id": "env-3", "correlationId": "run-1", "causationIds": ["gatherIngredients#1"], "step": 2 } }
 ```
 
-`causationId` is `null` throughout — causation isn't tracked yet, an honest placeholder awaiting its own spec, not a dropped value. `step` is the pulse number: `gatherIngredients` is the origin and fires in the first pulse, `step: 1`; `mix` and `preheatOven` become ready only once it has appended, so they fire the pulse after, `step: 2` — independent, concurrent applications of the same origin, not a sequence. `bake` waits for both before it can append its own entry, one pulse later still.
+`causationIds` names the specific instances this invocation consumed, not merely their edge types. `gatherIngredients` is the origin, so it consumed nothing — `[]`. `mix` and `preheatOven` are each `single`-input, so each names the one `Recipe` instance it read: `["gatherIngredients#1"]`. `bake`, further downstream, is a fan-in — `input: allOf: [Dough, Oven]` — so its own entry would name both `mix#1` and `preheatOven#1`, one per declared edge, in declaration order: empty for an origin, one entry for a single-input node, several for a fan-in. `step` is the pulse number: `gatherIngredients` is the origin and fires in the first pulse, `step: 1`; `mix` and `preheatOven` become ready only once it has appended, so they fire the pulse after, `step: 2` — independent, concurrent applications of the same origin, not a sequence. `bake` waits for both before it can append its own entry, one pulse later still.
 
 That log is the source of truth. Node state is a fold over prior edges keyed by correlation id. The tables an application shows you are materialized views over it. Both the tables and any node's implementation can be deleted and rebuilt from it; the only durable artifacts are edge definitions and topology.
 

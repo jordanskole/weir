@@ -372,6 +372,6 @@ paper over it with more storage. Nothing is destructively regenerated; every acc
 implementation a node ever had stays reachable.
 
 **Replay.** An invocation records which implementation version it actually ran under,
-immutable once written, alongside `causation_id` and `schema_hash` in the envelope.
+immutable once written, alongside `causation_ids` and `schema_hash` in the envelope.
 Redeploying a node's implementation never touches invocations already in flight — they
 stay pinned to the version they started under; only new invocations pick up the new one.

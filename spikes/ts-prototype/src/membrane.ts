@@ -12,11 +12,12 @@
  * boundary (design.md §3; design-history.md, "The membrane"). Builds a
  * real `Envelope` and passes it to `Fn` as its second argument when `Fn`
  * declares one (arity-detected, `fn.length >= 2` — same opt-in shape `env`
- * already has on `Fn`, made real here for the first time). One of
- * `Envelope`'s fields is still an honest placeholder, not resolved:
- * `causationIds` is always `[]` (no causation-chain tracking exists yet —
- * nothing currently tells a node which specific upstream edge instances
- * triggered it). `step` used to be the other one; it is now the scheduler's
+ * already has on `Fn`, made real here for the first time). `causationIds`
+ * is resolved here for `allOf` inputs — one entry per declared edge, in
+ * declaration order — during this membrane's own resolution; a
+ * `single`-input node instead gets whatever the runtime supplied (see
+ * `MembraneArgs`), since the membrane has no upstream edges of its own to
+ * derive it from. `step` used to be a placeholder too; it is now the scheduler's
  * pulse number, passed in by whoever invokes (see `MembraneArgs`) and
  * defaulting to 0 for callers with no scheduler behind them. `identity` narrows
  * the caller-supplied `Identity` claims to exactly the fields a node's
@@ -483,12 +484,13 @@ function narrowIdentity(
 }
 
 /**
- * Builds this invocation's Envelope. `causationIds` is still an honest
- * placeholder (see file header) when the caller supplies none — real
- * causation needs a mechanism that does not exist yet. `step` is no longer
- * one: under the runtime's pulse scheduling it is the pulse number, which is
- * exactly causal position within the topology. Defaults to 0 for callers
- * with no scheduler behind them (`invoke.ts`'s single invocation, tests).
+ * Builds this invocation's Envelope. `causationIds` defaults to `[]` when
+ * the caller supplies none in `context` — true for an origin invocation,
+ * and for any caller with no notion of a consumed instance (`invoke.ts`'s
+ * single invocation, tests); the `allOf` branch below always supplies one
+ * it derived itself. `step` is the pulse number under the runtime's pulse
+ * scheduling, which is exactly causal position within the topology.
+ * Defaults to 0 for callers with no scheduler behind them.
  *
  * Can throw (a bad `scope` declaration) — the caller is responsible for
  * turning that into `Failed<In>`.
