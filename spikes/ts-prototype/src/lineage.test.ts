@@ -172,6 +172,10 @@ describe("ancestorsOf", () => {
 
     const ids = ancestorsOf(log, joined.id).map((i) => i.id);
     expect(new Set(ids).size).toBe(ids.length);
+    // Not just deduped but present: left, right, and the shared source —
+    // three, not fewer. A dedup so aggressive it dropped a branch entirely
+    // would still pass the Set-size check above without this.
+    expect(ids.length).toBe(3);
   });
 
   it("terminates on a topology with a cycle, returning each ancestor once", async () => {

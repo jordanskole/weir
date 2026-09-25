@@ -27,12 +27,17 @@
  * overwrite whatever pulse the invocation actually ran in.
  *
  * `entry.envelope.causationIds` is re-fed for the same reason `step` is: it
- * isn't narrowed or derived either, it's recorded verbatim (`membrane.ts`'s
- * `buildEnvelope` takes whatever the caller supplied, or the `allOf` branch's
- * own resolved instance ids — either way, by the time it's on the envelope
- * it's just data), so replaying it means passing it straight back through.
- * Without this, `invokeWithInput`'s default of `[]` would silently overwrite
- * whatever the invocation actually recorded as having caused it.
+ * isn't narrowed, it's recorded verbatim. For a `single`-input node that was
+ * always true. For an `allOf` node it additionally requires membrane.ts's
+ * `allOf` branch to prefer this re-fed value over its own resolution —
+ * `invoke.ts` rebuilds readiness against a fresh, scratch `InMemoryLog` for
+ * replay, so the instance ids that scratch log would resolve are not the
+ * ones the original invocation actually consumed; only the re-fed recorded
+ * value is. Either way, replaying it means passing it straight back
+ * through. Without this, `invokeWithInput`'s default of `[]` would silently
+ * overwrite whatever the invocation actually recorded as having caused it —
+ * and for `allOf`, membrane resolving its own ids instead of deferring to
+ * the re-fed value would silently fabricate ids that exist in no real log.
  *
  * A widened `scope` is caught by the hash-drift refusal below, which is
  * where it belongs: `hash.ts`'s `fingerprintNode` covers `scope`, so the

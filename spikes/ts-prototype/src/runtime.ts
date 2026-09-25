@@ -483,9 +483,19 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
 
     // Counting actual firings rather than candidates, even though the two
     // are currently equivalent: the `allOf` snapshot gate above (`ready`)
-    // uses the same `latest !== undefined` predicate membrane's own
-    // readiness check uses, so `tryFire` can no longer return `false` and
-    // an empty candidate list is exactly when nothing fires. Kept anyway,
+    // checks `log.latest(...) !== undefined` — the *payload*. Membrane's
+    // own readiness check (`membrane.ts`'s `allOf` branch) instead checks
+    // `log.latestInstance(...) !== undefined` — whether an instance was
+    // appended at all, since Task 4 switched it from `latest` so a
+    // consumed instance's id is always resolvable. The two diverge on
+    // exactly one input: an instance whose payload happens to be
+    // `undefined`. `latest` reads that the same as no instance at all and
+    // declines to offer it; `latestInstance` finds the instance and would
+    // accept it. So this gate is now strictly *stricter* than membrane's —
+    // it can only under-offer, never offer something membrane would then
+    // decline — which is what still guarantees `tryFire` can't return
+    // `false` for a candidate this gate produced, and why an empty
+    // candidate list is exactly when nothing fires. Kept anyway,
     // deliberately, as a structural guard rather than a currently-necessary
     // one: a future readiness rule that diverges from membrane's own check
     // — the gate above and membrane's check drifting out of sync — could

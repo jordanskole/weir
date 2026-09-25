@@ -608,7 +608,16 @@ export async function membrane<In extends InputSpec, O extends OutputSpec>(
 
     let envelope: Envelope;
     try {
-      envelope = await buildEnvelope(nodeDef, { ...context, causationIds: resolvedIds });
+      // `context.causationIds` is only ever defined here when a caller
+      // re-feeds a recorded value — replay.ts, reproducing an entry's
+      // original causation. No live call site (runtime.ts's tryFire,
+      // fuzz.ts, accept.ts) supplies one for an allOf node, so `??` falls
+      // through to `resolvedIds` and Task 4's live-run behaviour —
+      // "whoever resolved the input records what it consumed" — is
+      // unchanged. On replay, resolvedIds would instead be freshly-minted
+      // ids from invoke.ts's scratch InMemoryLog, which exist in no real
+      // log; the recorded value must win.
+      envelope = await buildEnvelope(nodeDef, { ...context, causationIds: context.causationIds ?? resolvedIds });
     } catch (cause) {
       return { result: { input: rawBag as InputPayload<In>, reason: reasonOf(cause) } } as MembraneResult<In, O>;
     }
