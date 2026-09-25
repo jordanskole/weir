@@ -126,14 +126,34 @@ and only then calls `Fn`. A membrane failure (a failed assert, an unsatisfied sc
 produces its own tagged edge (§3, "failure is an edge"), never an uncaught exception
 escaping the boundary.
 
-Resolution differs by input kind, and the difference is temporary. A `single`-input node
-fires once per unconsumed instance reaching it along a declared arc in the topology's
-wiring — not on its input edge's latest instance, which is what makes recurrence (§3)
-actually run rather than overwrite itself. An `allOf`-input node still resolves each
-declared edge by reading its latest instance for the current `correlation_id`, as this
-section originally described for every node; joining by lineage instead is a later piece
-of the same work
-([spec](superpowers/specs/2026-09-24-instance-retention-and-iteration.md)).
+Resolution differs by input kind. A `single`-input node fires once per unconsumed
+instance reaching it along a declared arc in the topology's wiring — not on its input
+edge's latest instance, which is what makes recurrence (§3) actually run rather than
+overwrite itself. An `allOf`-input node fires once per **lineage group**: the runtime
+gathers each declared edge's unconsumed candidates, groups them by their nearest common
+ancestor — the highest-`seq` member of the intersection of each candidate's
+self-and-ancestor set — and zips a complete group's candidates positionally by `seq`,
+firing once per row and leaving ragged leftovers unconsumed until partners arrive. The
+membrane no longer resolves the bag itself; it receives the row the runtime already
+chose and only asserts it. A candidate is also **held** rather than grouped when it has a
+strictly nearer ancestor that is currently incomplete — candidates on some of the node's
+declared edges but not all — and a peer instance of that ancestor's own node holds one of
+the missing edges: two items mid-flight in opposite directions, which would otherwise
+fall through to a shared ancestor and pair with each other. When no candidate on any
+declared edge has been produced by a node invocation at all, there is no lineage to group
+on, so resolution falls back to reading each edge's latest instance and fires once, same
+as a `single`-input node's readiness used to work for every kind. No production caller
+reaches that fallback today — direct invocation hands its bag straight to the membrane and
+never joins at all — so it is the answer for a host that stages envelope-less instances
+into a real log, which today means tests
+([spec](superpowers/specs/2026-09-25-allof-joins-by-lineage.md)).
+
+**A fan-in fed by two independent origin nodes does not fire.** Origin outputs carry
+`causation_ids: []`, so two separate origins' descendants share no common ancestor, no
+lineage group ever forms, and the node sits unfired at quiescence — silently, with no
+error. This is a real gap against the very shape this section blesses below (one
+external event, several origin-shaped inputs resolved from it at once); see
+[open-questions.md](open-questions.md).
 
 Nothing polls. **Origin nodes** (cron, HTTP request, queue consumer, file watcher) are
 the only place nondeterminism enters; everything downstream is deterministic. An origin
@@ -147,11 +167,12 @@ outer membrane per external event, and every origin-shaped edge it declares need
 resolves from that single payload at once.
 
 **Multi-input nodes** declare `input: { allOf: [A, B] }` rather than a bare edge name.
-This is a readiness condition, not a wire: the membrane resolves it by checking whether
-an `A`-shaped and a `B`-shaped edge both exist yet in the current `correlation_id`'s
-logs, and calls `Fn` once both are present, however many other invocations separate
-their arrival. No synchronous join, no accumulator — presence in the log is itself the
-signal, the same way awaiting several promises doesn't care what order they resolve in.
+This is a readiness condition, not a wire: the runtime resolves it by checking whether
+an `A`-shaped and a `B`-shaped instance both exist yet, belonging to the same lineage
+group, and calls `Fn` once a complete group is present, however many other invocations
+separate their arrival. No synchronous join, no accumulator — presence in the log is
+itself the signal, the same way awaiting several promises doesn't care what order they
+resolve in. (The membrane itself only asserts the bag the runtime hands it; see above.)
 A node that itself required `A` to produce `B` (`A -> B -> C` alongside `A -> C`
 directly) doesn't need `C` to redeclare that dependency: reading `B`'s log entry already
 implies `A` was available when `B` ran.

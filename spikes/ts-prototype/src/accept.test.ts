@@ -306,7 +306,20 @@ describe("acceptImplementation", () => {
     if (result.accepted) throw new Error("unreachable");
     expect(result.reason).toBe("checks-failed");
     if (result.reason !== "checks-failed") throw new Error("unreachable");
-    expect(result.exampleFailures).toEqual([{ given: null, expected: { age: 7 }, actual: undefined }]);
+    // Before Task 4 this was membrane's readiness `undefined`, folded into
+    // `actual`; the membrane no longer resolves this node's input at all, so
+    // a malformed `given` reads as every declared edge missing and lands on
+    // `Failed<In>` instead — still an ExampleFailure, never a crash.
+    expect(result.exampleFailures).toEqual([
+      {
+        given: null,
+        expected: { age: 7 },
+        actual: {
+          input: {},
+          reason: "Person: expected an object, got undefined.; Pet: expected an object, got undefined.",
+        },
+      },
+    ]);
     expect(await readdir(dir)).toEqual([]);
   });
 

@@ -22,8 +22,8 @@
  *
  * The loop ends on quiescence (a pulse in which nothing fired) or on the
  * host's `budget` (a firing count). Quiescence counts *firings*, not
- * candidates: an `allOf` node is a candidate on every pulse until it fires,
- * and `membrane()`'s own readiness check may decline it on all of them.
+ * candidates — see the comment on that check for why the distinction is
+ * kept even while the two are equivalent.
  *
  * Deliberately narrow, stated here rather than left implicit:
  * - **`Failed<In>` routing exists for `single`- and `allOf`-input nodes —
@@ -54,19 +54,23 @@
  *   second birthday" at all (docs/open-questions.md). Termination there
  *   would be by construction; here it is by quiescence, with the host's
  *   `budget` as the backstop for a graph that never reaches it.
- * - **`allOf`-input nodes still fire at most once per run** (`firedAllOf`,
- *   the narrow remnant of the old global `fired` set), resolving their bag
- *   by `latest` as before. What did change is *when* they are offered: an
- *   `allOf` node is a candidate only once every edge it declared has a
- *   `latest` at snapshot time, so like every other node it fires in the
- *   pulse *after* its inputs appeared and its `step` is one past the longest
- *   path feeding it. Joining by lineage is a later spec and needs
- *   causation, which does not exist yet; iteration therefore works for
- *   single-input chains only. That is the honest boundary.
+ * - **`allOf`-input nodes fire once per lineage group, not once per run.**
+ *   The runtime gathers the unconsumed candidates for each declared edge
+ *   (`eligibleForEdge`, the same arc rule a `single`-input node uses), asks
+ *   `joinRows` which combinations belong together, and offers one candidate
+ *   per row. A fan-out to several context nodes and a fan-in that assesses
+ *   them together therefore works per item, which is the whole point:
+ *   `firedAllOf` used to cap the fan-in at one firing, so it saw one item.
+ *   That cap was deliberate while lineage did not exist — it does now
+ *   (`lineage.ts`). Readiness still lands at snapshot time, since a row can
+ *   only be built from instances already in the log, so an `allOf` node
+ *   still fires in the pulse *after* its inputs appeared and its `step` is
+ *   still one past the longest path feeding it.
  */
 
 import { membrane } from "./membrane.js";
 import type { InstanceEnvelope, InvocationContext, Log, LoggedInstance } from "./membrane.js";
+import { joinRows } from "./lineage.js";
 import type { Program } from "./implementation.js";
 import type { AnyEdgeDef, Envelope, Failed, InputSpec, NodeDef, OutputSpec, PayloadOf } from "./types.js";
 import { Identity, failedEdgeName, failedAllOfEdgeName } from "./types.js";
@@ -82,7 +86,9 @@ import type { Trace } from "./trace.js";
  * narrowing limitation, not a genuine call-shape ambiguity (checked at
  * runtime by the `kind` branch itself). These two aliases name the cast
  * instead of hiding it. `AnyAllOfInvoke` names the cast for `allOf`-input
- * nodes' call shape (`nodeDef, log, context`); `In` is erased here too.
+ * nodes' call shape (`nodeDef, bag, context` — the membrane no longer
+ * resolves this bag itself; the runtime builds it and hands it in, same as
+ * `AnySingleInvoke`'s payload one level down); `In` is erased here too.
  */
 type AnySingleInvoke = (
   nodeDef: NodeDef,
@@ -91,9 +97,26 @@ type AnySingleInvoke = (
 ) => Promise<{ result: unknown; envelope?: Envelope }>;
 type AnyAllOfInvoke = (
   nodeDef: NodeDef,
-  log: Log,
+  bag: Record<string, unknown>,
   context: InvocationContext,
-) => Promise<{ result: unknown; envelope?: Envelope } | undefined>;
+) => Promise<{ result: unknown; envelope?: Envelope }>;
+
+/**
+ * One (node, input) pair a pulse may fire, as the snapshot found it.
+ *
+ * Which field is populated follows the node's InputSpec, not the caller's
+ * convenience: a `single`-input node consumes one `instance` (absent for an
+ * origin, whose payload comes from `originPayloads` and is not a logged
+ * instance); an `allOf` node consumes a whole `row`, one instance per
+ * declared edge, as chosen by `joinRows`. Modelled as two optional fields
+ * rather than a discriminated union because `tryFire` already re-reads
+ * `nodeDef.input.kind` — the real discriminant — to decide how to invoke.
+ */
+interface Candidate {
+  nodeName: string;
+  instance?: LoggedInstance;
+  row?: Map<string, LoggedInstance>;
+}
 
 export interface RunResult {
   /** Currently always empty — the only InputSpec kind whose failures ever landed here (the removed `any` kind) no longer exists. Retained rather than removed, since deleting it would be a separate public-API change. */
@@ -233,6 +256,31 @@ export interface Host {
 export const DEFAULT_MAX_PULSES = 10_000;
 
 /**
+ * Unconsumed instances of one edge that may fire one node, oldest first.
+ *
+ * The arc rule lives here rather than in either caller: a `single`-input
+ * node asks about its one declared edge, an `allOf` node asks about each
+ * of its declared edges in turn, and both want exactly the same answer.
+ * Two copies would be two places for the rule to drift.
+ */
+export function eligibleForEdge(
+  program: Program,
+  log: Log,
+  consumed: ReadonlySet<number>,
+  nodeName: string,
+  edgeName: string,
+  correlationId: string,
+): LoggedInstance[] {
+  const consumers = (producer: string): string[] => program.wiring.feeds[producer] ?? [];
+  return log.instances(edgeName, correlationId).filter((instance) => {
+    if (consumed.has(instance.seq)) return false;
+    const producer = instance.envelope?.node;
+    if (producer === undefined) return true;
+    return consumers(producer).includes(nodeName);
+  });
+}
+
+/**
  * Which instances a `single`-input node may fire on right now.
  *
  * Readiness is `(arc, unconsumed instance)`, not `(edge type, unconsumed
@@ -261,13 +309,7 @@ export function eligibleInstances(
   correlationId: string,
 ): LoggedInstance[] {
   if (nodeDef.input.kind !== "single") return [];
-  const consumers = (producer: string): string[] => program.wiring.feeds[producer] ?? [];
-  return log.instances(nodeDef.input.edge.name, correlationId).filter((instance) => {
-    if (consumed.has(instance.seq)) return false;
-    const producer = instance.envelope?.node;
-    if (producer === undefined) return true;
-    return consumers(producer).includes(nodeDef.name);
-  });
+  return eligibleForEdge(program, log, consumed, nodeDef.name, nodeDef.input.edge.name, correlationId);
 }
 
 export async function runNetlist(program: Program, run: Run, host: Host): Promise<RunResult> {
@@ -276,7 +318,6 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
   const failures: RunResult["failures"] = [];
   const consumed = new Map<string, Set<number>>();
   const originsFired = new Set<string>();
-  const firedAllOf = new Set<string>();
   const origins = new Set(program.wiring.origins);
 
   /** The seqs `nodeName` has already eaten. Per node, never global: two nodes consuming the same instance each get their own turn at it (the fan-out case). */
@@ -290,19 +331,20 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
   };
 
   /**
-   * Fires one (node, instance) pair. `instance` is the specific token this
-   * firing consumes — a `single`-input node fires on *that* instance, not on
-   * whatever `log.latest` happens to hold by the time it runs, which under
-   * iteration is a different thing entirely. It is absent for an origin node
-   * (its payload comes from `originPayloads`, which is not a logged instance
-   * and has no `seq`) and for an `allOf` node (membrane resolves that bag
-   * itself). Returns whether `Fn` actually ran: `membrane()`'s own readiness
-   * check can still decline an `allOf` candidate, and quiescence is counted
-   * from this answer rather than from the candidate list.
+   * Fires one candidate. A `single`-input node fires on one specific token —
+   * *that* instance, not on whatever `log.latest` happens to hold by the time
+   * it runs, which under iteration is a different thing entirely; `instance`
+   * is absent for an origin node, whose payload comes from `originPayloads`
+   * and is not a logged instance at all. An `allOf` node fires on one `row`:
+   * the lineage group `joinRows` chose for it, one instance per declared
+   * edge. The two are exclusive — `Candidate` carries whichever kind its
+   * node's InputSpec calls for. Returns whether `Fn` actually ran: the
+   * explicit `undefined` checks below can still decline a candidate this
+   * function's caller offered, and quiescence is counted from this answer
+   * rather than from the candidate list.
    */
   async function tryFire(
-    nodeName: string,
-    instance: LoggedInstance | undefined,
+    { nodeName, instance, row }: Candidate,
     pulse: number,
   ): Promise<boolean> {
     const nodeDef = program.nodes[nodeName];
@@ -330,24 +372,41 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
       result = invocation.result;
       envelope = invocation.envelope;
     } else {
-      // membrane()'s allOf invoke resolves the bag internally and never
-      // hands it back — rebuild it the same way (one log.latest per
-      // declared edge) so the trace entry's `input` is the actual bag Fn
-      // ran on, not a re-derivation that could drift from it.
+      // The bag and the causation both come from the row. The membrane no
+      // longer resolves this bag itself (it only asserts it), and the row is
+      // no longer latest-wins: `joinRows` chose these specific instances as
+      // one lineage group, so reading `log.latest` here would silently
+      // discard that choice and reintroduce exactly the cross-entity
+      // mispairing the join exists to prevent. Causation is whoever resolved
+      // the input recording what it consumed — the same rule the
+      // `single`-input branch above follows, and the reason a row's
+      // membership is recoverable from the log afterwards at all.
+      if (row === undefined) return false;
       const bag: Record<string, unknown> = {};
+      const causationIds: string[] = [];
       for (const edge of nodeDef.input.edges) {
-        bag[edge.name] = log.latest(edge.name, correlationId);
+        const instance = row.get(edge.name)!;
+        bag[edge.name] = instance.payload;
+        causationIds.push(instance.id);
       }
       input = bag;
-      const invocation = await (membrane as AnyAllOfInvoke)(nodeDef, log, { correlationId, identity, step: pulse });
-      if (invocation === undefined) return false;
+      const invocation = await (membrane as AnyAllOfInvoke)(nodeDef, bag, {
+        correlationId,
+        identity,
+        step: pulse,
+        causationIds,
+      });
       result = invocation.result;
       envelope = invocation.envelope;
     }
 
     // Mark what this firing consumed, now that it is known to have happened.
-    if (nodeDef.input.kind !== "single") firedAllOf.add(nodeName);
-    else if (origins.has(nodeName)) originsFired.add(nodeName);
+    // Every instance in the row, for an `allOf` node: consumption is what
+    // stops the next pulse rebuilding the same group and firing it again,
+    // now that nothing caps the node at one firing per run.
+    if (nodeDef.input.kind !== "single") {
+      for (const consumedInstance of row!.values()) consumedBy(nodeName).add(consumedInstance.seq);
+    } else if (origins.has(nodeName)) originsFired.add(nodeName);
     else if (instance !== undefined) consumedBy(nodeName).add(instance.seq);
 
     // `envelope` is present for every well-declared attempt now —
@@ -438,25 +497,31 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
     // until the next one. That is what makes `step` equal the pulse
     // number, and what stops a self-feeding node draining its own output
     // inside one pulse without needing a fairness rule.
-    const candidates: { nodeName: string; instance?: LoggedInstance }[] = [];
+    const candidates: Candidate[] = [];
     for (const nodeName of scanned) {
       const nodeDef = program.nodes[nodeName];
       if (nodeDef.input.kind !== "single") {
-        if (firedAllOf.has(nodeName)) continue;
-        // `allOf` readiness is evaluated *here*, against the same snapshot
-        // every other candidate is computed against, rather than left
-        // entirely to membrane's fire-time check. Otherwise a node whose
-        // inputs only appeared during this pulse fires inside it and takes
-        // that pulse's number as its `step` — the same `step` its own inputs
-        // carry, when §8 requires one past the longest path feeding it.
-        // membrane's check stays where it is and stays the authority on
-        // whether the firing happens; this only decides whether to offer it.
-        // Resolution is still latest-wins and firing is still at most once
-        // per run (§5) — neither is touched.
-        const ready = nodeDef.input.edges.every(
-          (edge) => log.latest(edge.name, correlationId) !== undefined,
-        );
-        if (ready) candidates.push({ nodeName });
+        // An `allOf` node contributes one candidate per joined row. Gathering
+        // is per *declared edge* — the same arc rule a `single`-input node
+        // gets, so a node's own output is no more eligible for it here than
+        // there — and `joinRows` decides which combinations across those
+        // edges belong together. Both steps run against this pulse's
+        // snapshot, which is what keeps `step` one past the longest path
+        // feeding the node: a row can only be built from instances already
+        // in the log, so a node whose inputs appeared during this pulse is
+        // not offered until the next one. An incomplete group simply yields
+        // no row, which is also how a group that never completes reaches
+        // quiescence instead of spinning.
+        const perEdge = new Map<string, LoggedInstance[]>();
+        for (const edge of nodeDef.input.edges) {
+          perEdge.set(
+            edge.name,
+            eligibleForEdge(program, log, consumedBy(nodeName), nodeName, edge.name, correlationId),
+          );
+        }
+        for (const row of joinRows(log, perEdge)) {
+          candidates.push({ nodeName, row });
+        }
         continue;
       }
       if (origins.has(nodeName)) {
@@ -472,7 +537,7 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
 
     let firedThisPulse = 0;
     for (const candidate of candidates) {
-      const didFire = await tryFire(candidate.nodeName, candidate.instance, pulse);
+      const didFire = await tryFire(candidate, pulse);
       if (!didFire) continue;
       firedThisPulse += 1;
       firings += 1;
@@ -482,26 +547,16 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
     }
 
     // Counting actual firings rather than candidates, even though the two
-    // are currently equivalent: the `allOf` snapshot gate above (`ready`)
-    // checks `log.latest(...) !== undefined` — the *payload*. Membrane's
-    // own readiness check (`membrane.ts`'s `allOf` branch) instead checks
-    // `log.latestInstance(...) !== undefined` — whether an instance was
-    // appended at all, since Task 4 switched it from `latest` so a
-    // consumed instance's id is always resolvable. The two diverge on
-    // exactly one input: an instance whose payload happens to be
-    // `undefined`. `latest` reads that the same as no instance at all and
-    // declines to offer it; `latestInstance` finds the instance and would
-    // accept it. So this gate is now strictly *stricter* than membrane's —
-    // it can only under-offer, never offer something membrane would then
-    // decline — which is what still guarantees `tryFire` can't return
-    // `false` for a candidate this gate produced, and why an empty
-    // candidate list is exactly when nothing fires. Kept anyway,
-    // deliberately, as a structural guard rather than a currently-necessary
-    // one: a future readiness rule that diverges from membrane's own check
-    // — the gate above and membrane's check drifting out of sync — could
-    // reintroduce a declined-but-offered candidate, and counting firings
-    // rather than candidates is what keeps quiescence correct if that ever
-    // happens again.
+    // are currently equivalent: every `allOf` candidate carries the row it
+    // will fire on, built by the snapshot, so `tryFire`'s `row === undefined`
+    // check cannot decline one the scan produced, and nothing membrane does
+    // is in the loop for readiness at all (it only asserts the bag `tryFire`
+    // resolved). Kept anyway, deliberately, as a structural guard rather
+    // than a currently-necessary one: a firing that declines after being
+    // offered — a future rule re-checking the group at fire time, say —
+    // would otherwise make an unsatisfiable candidate look like progress,
+    // and a run that can never fire again would spin instead of reaching
+    // quiescence.
     if (firedThisPulse === 0) {
       return { failures, firings, pulses: pulse - 1, stopped: "quiescence" };
     }

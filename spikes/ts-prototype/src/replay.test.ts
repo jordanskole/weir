@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { hashNode } from "./hash.js";
 import { resolveImplementationAt } from "./implementation.js";
 import { invokeWithInput } from "./invoke.js";
-import { InMemoryLog, membrane } from "./membrane.js";
+import { membrane } from "./membrane.js";
 import { replayInvocation } from "./replay.js";
 import type { TraceEntry } from "./trace.js";
 import type { AnyEdgeDef, NodeDecl } from "./types.js";
@@ -89,10 +89,9 @@ const causationReader: NodeDecl<{ kind: "single"; edge: typeof Person }, { kind:
   output: { kind: "single", edge: CausationEcho },
 };
 
-// Two distinct edges so an allOf node has more than one declared input to
-// resolve — the shape needed to reproduce the allOf branch's causation bug
-// (membrane.ts overriding a replayed value with the fresh ids its scratch
-// InMemoryLog resolves, rather than deferring to the recorded ones).
+// Two distinct edges so an allOf node has more than one declared input —
+// the shape needed to prove a replayed allOf invocation's causationIds
+// pass straight through, the same as a single-input node's do.
 const A: AnyEdgeDef = {
   name: "A",
   label: "A",
@@ -108,8 +107,8 @@ const B: AnyEdgeDef = {
 
 // An allOf-input node whose Fn reads the invocation's causationIds back
 // out — the shape needed to prove replay of an allOf node reproduces its
-// recorded causation rather than resolving fresh instance ids from
-// invoke.ts's scratch Log.
+// recorded causation rather than silently reverting to `invokeWithInput`'s
+// default of `[]`.
 const allOfCausationReader: NodeDecl = {
   name: "allOfCausationReader",
   description: "Returns an allOf invocation's causationIds, to prove replay reproduces them",
@@ -384,7 +383,7 @@ describe("replayInvocation", () => {
     expect(replayed).toEqual({ value: "inst-upstream" });
   });
 
-  it("replays an allOf node under its recorded causationIds, not fresh ids resolved from replay's scratch Log", async () => {
+  it("replays an allOf node under its recorded causationIds, passed straight through both times", async () => {
     dir = await mkdtemp(join(tmpdir(), "weir-replay-allof-causation-"));
     const { short, hash } = await hashNode(allOfCausationReader);
     await writeImpl(
@@ -395,28 +394,29 @@ describe("replayInvocation", () => {
     );
 
     const nodeDef = await resolveImplementationAt(allOfCausationReader, dir, hash);
-    const log = new InMemoryLog();
-    const idA = log.append("A", "c-allof-causation", { value: "a" });
-    const idB = log.append("B", "c-allof-causation", { value: "b" });
-    const invocation = await membrane(nodeDef, log, { correlationId: "c-allof-causation" });
-    if (!invocation || !invocation.envelope) {
+    // Specific, non-empty ids a caller (the runtime, resolving readiness
+    // against a real Log) would have supplied — membrane no longer derives
+    // these itself, for `allOf` any more than for `single` (Task 4).
+    const idA = "inst-a";
+    const idB = "inst-b";
+    const invocation = await membrane(nodeDef, { A: { value: "a" }, B: { value: "b" } }, {
+      correlationId: "c-allof-causation",
+      causationIds: [idA, idB],
+    });
+    if (!invocation.envelope) {
       throw new Error("test setup: expected an envelope from a successful invocation");
     }
     const { result, envelope } = invocation;
-    // Recorded at the real instance ids the original allOf resolution
-    // produced — non-empty, and specific, so a replay that resolved *some*
-    // other non-empty pair could not pass this by accident.
     expect(result).toEqual({ value: `${idA},${idB}` });
     expect(envelope.causationIds).toEqual([idA, idB]);
 
     const entry: TraceEntry = { envelope, input: { A: { value: "a" }, B: { value: "b" } }, result };
     const replayed = await replayInvocation(entry, allOfCausationReader, dir);
 
-    // The recorded causationIds ([idA, idB]) — real ids from the original
-    // Log — not fresh UUIDs invoke.ts's scratch InMemoryLog would mint
-    // while rebuilding readiness for replay. Before membrane.ts's allOf
-    // branch preferred a re-fed causationIds, this read back two ids that
-    // exist in no real log and disagreed with idA/idB on every replay.
+    // The recorded causationIds ([idA, idB]) come back unchanged: neither
+    // the original invocation above nor `replayInvocation` resolves
+    // causation internally any more, so there is nothing left to disagree
+    // with the recorded value — both just pass through what they're given.
     expect(replayed).toEqual({ value: `${idA},${idB}` });
   });
 });
