@@ -90,7 +90,15 @@ export async function invokeWithInput(
   const log = new InMemoryLog();
   const bag = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
   for (const edge of nodeDef.input.edges) {
-    log.append(edge.name, correlationId, bag[edge.name]);
+    // Appending only when the bag actually carries this edge preserves the
+    // readiness equivalence membrane.ts's allOf branch now depends on:
+    // `latestInstance` distinguishes "no instance" from "an instance whose
+    // payload happens to be undefined," where `latest` used to collapse
+    // both to `undefined`. Appending a sentinel `undefined`-payload
+    // instance for a missing edge would make it read as present here.
+    if (bag[edge.name] !== undefined) {
+      log.append(edge.name, correlationId, bag[edge.name]);
+    }
   }
   const invocation = await (membrane as AnyAllOfInvoke)(nodeDef, log, context);
   return invocation ?? { result: undefined };

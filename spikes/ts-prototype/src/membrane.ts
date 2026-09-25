@@ -575,17 +575,25 @@ export async function membrane<In extends InputSpec, O extends OutputSpec>(
     // `await` in between. That same invariant breaks identically if an
     // `await` is ever introduced into *this* loop before it finishes
     // reading every declared edge — this read is the other end of that
-    // same gap, not a separate hazard.
+    // same gap, not a separate hazard. This loop is also now the sole
+    // authority on recorded causation: it records the id of each instance
+    // it actually resolved, which is exactly why `runtime.ts` does not
+    // separately derive causation from its own trace-rebuild read — a
+    // second derivation would be a third consumer of the same
+    // synchronous-adjacency coincidence, and drifting from this loop's
+    // answer would fail silently rather than erroring.
     const rawBag: Record<string, unknown> = {};
+    const resolvedIds: string[] = [];
     for (const edge of edges) {
-      const value = log.latest(edge.name, correlationId);
-      if (value === undefined) return undefined as MembraneResult<In, O>;
-      rawBag[edge.name] = value;
+      const found = log.latestInstance(edge.name, correlationId);
+      if (found === undefined) return undefined as MembraneResult<In, O>;
+      rawBag[edge.name] = found.payload;
+      resolvedIds.push(found.id);
     }
 
     let envelope: Envelope;
     try {
-      envelope = await buildEnvelope(nodeDef, context);
+      envelope = await buildEnvelope(nodeDef, { ...context, causationIds: resolvedIds });
     } catch (cause) {
       return { result: { input: rawBag as InputPayload<In>, reason: reasonOf(cause) } } as MembraneResult<In, O>;
     }

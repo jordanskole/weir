@@ -477,6 +477,27 @@ describe("membrane — allOf", () => {
     expect(invocation?.result).toEqual({ input: { A: { value: "a" }, B: { value: "b" } }, reason: "kaboom" });
     expect(invocation?.envelope).toBeDefined();
   });
+
+  it("records one causation id per declared input edge, from the instances it resolved", async () => {
+    const log = new InMemoryLog();
+    const a = log.append("A", "c1", { value: "a" });
+    const b = log.append("B", "c1", { value: "b" });
+
+    const invocation = await membrane(nodeC, log, { correlationId: "c1" });
+
+    expect(invocation?.envelope?.causationIds).toEqual([a, b]);
+  });
+
+  it("records the newest instance of each edge when several exist", async () => {
+    const log = new InMemoryLog();
+    log.append("A", "c1", { value: "old" });
+    const newerA = log.append("A", "c1", { value: "new" });
+    const b = log.append("B", "c1", { value: "b" });
+
+    const invocation = await membrane(nodeC, log, { correlationId: "c1" });
+
+    expect(invocation?.envelope?.causationIds).toEqual([newerA, b]);
+  });
 });
 
 describe("membrane — envelope", () => {
