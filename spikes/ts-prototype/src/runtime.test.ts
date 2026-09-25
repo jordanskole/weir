@@ -1935,6 +1935,126 @@ const socShapeProgram = programWith(
 );
 
 /**
+ * The same SOC shape with the two arms stalled in **opposite** directions —
+ * the case `socShapeProgram` cannot reach, and the one that falsified the
+ * spec's "nearer ancestors have claimed their instances" safeguard.
+ *
+ * `leftGate` stalls entity **B** two pulses; `rightGate` stalls entity **A**
+ * two pulses. So the first pulse on which `assess` is offered anything at all
+ * has `Left = [L_A]` and `Right = [R_B]` — one candidate per edge, from
+ * *different* entities. Neither entity's group is complete: `E_A` has a Left
+ * and no Right, `E_B` has a Right and no Left. Under a scan that only looks
+ * for "the highest-`seq` ancestor with a candidate on every edge", the scan
+ * falls through both of them to `alert` — a genuine common ancestor of both —
+ * and fires `left-a-A|right-a-B`. Two pulses later the leftovers `L_B` and
+ * `R_A` do the same in mirror image, so the run reaches quiescence with two
+ * assessments, both cross-entity, both wrong.
+ *
+ * `socShapeProgram` stalls only one arm, so its slower entity always
+ * *completes* before the scan reaches the origin, and the origin never gets a
+ * turn. That is what made a genuinely broken join look correct there: the
+ * asymmetry runs one direction only. Here it runs both, which is the whole
+ * point of the fixture — the per-entity pairing is the *only* thing that
+ * distinguishes a correct join from a positional zip at the origin, because
+ * the counts are identical either way (two assessments either way).
+ *
+ * Both gates key off the `-A`/`-B` suffix already in the entity payload and
+ * self-loop on `Entity`; the arc rule keeps each gate eating only its own
+ * spins, since eligibility is `(arc, instance)` rather than `(edge type,
+ * instance)`.
+ */
+const OppLeftEntity = defineEdge({
+  name: "LeftEntity",
+  label: "LeftEntity",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const oppositeStallProgram = programWith(
+  {
+    alert: defineNode({
+      name: "alert",
+      input: single(Alert),
+      output: single(SocSeed),
+      fn: (a) => ({ value: a.value }),
+    }),
+    branchA: defineNode({
+      name: "branchA",
+      input: single(SocSeed),
+      output: single(SocSeed),
+      fn: (s) => ({ value: `${s.value}-A` }),
+    }),
+    branchB: defineNode({
+      name: "branchB",
+      input: single(SocSeed),
+      output: single(SocSeed),
+      fn: (s) => ({ value: `${s.value}-B` }),
+    }),
+    extractEntities: defineNode({
+      name: "extractEntities",
+      input: single(SocSeed),
+      output: single(SocEntity),
+      fn: (s) => ({ value: s.value, spins: 0 }),
+    }),
+    // Stalls entity B — the mirror of rightGate, which stalls entity A.
+    leftGate: defineNode({
+      name: "leftGate",
+      input: single(SocEntity),
+      output: { kind: "oneOf", edges: [SocEntity, OppLeftEntity] },
+      fn: (e) => {
+        const needsSpins = e.value.endsWith("-B") ? 2 : 0;
+        if (e.spins < needsSpins) {
+          return { edge: "Entity" as const, payload: { value: e.value, spins: e.spins + 1 } };
+        }
+        return { edge: "LeftEntity" as const, payload: { value: e.value } };
+      },
+    }),
+    leftCtx: defineNode({
+      name: "leftCtx",
+      input: single(OppLeftEntity),
+      output: single(SocLeft),
+      fn: (e) => ({ value: `left-${e.value}` }),
+    }),
+    rightGate: defineNode({
+      name: "rightGate",
+      input: single(SocEntity),
+      output: { kind: "oneOf", edges: [SocEntity, SocRightEntity] },
+      fn: (e) => {
+        const needsSpins = e.value.endsWith("-A") ? 2 : 0;
+        if (e.spins < needsSpins) {
+          return { edge: "Entity" as const, payload: { value: e.value, spins: e.spins + 1 } };
+        }
+        return { edge: "RightEntity" as const, payload: { value: e.value } };
+      },
+    }),
+    rightCtx: defineNode({
+      name: "rightCtx",
+      input: single(SocRightEntity),
+      output: single(SocRight),
+      fn: (e) => ({ value: `right-${e.value}` }),
+    }),
+    assess: defineNode({
+      name: "assess",
+      input: allOf(SocLeft, SocRight),
+      output: single(Assessment),
+      fn: ({ Left, Right }) => ({ value: `${Left.value}|${Right.value}` }),
+    }),
+  },
+  {
+    origins: ["alert"],
+    feeds: {
+      alert: ["branchA", "branchB"],
+      branchA: ["extractEntities"],
+      branchB: ["extractEntities"],
+      extractEntities: ["leftGate", "rightGate"],
+      leftGate: ["leftGate", "leftCtx"],
+      leftCtx: ["assess"],
+      rightGate: ["rightGate", "rightCtx"],
+      rightCtx: ["assess"],
+    },
+  },
+);
+
+/**
  * One arm two hops longer than the other. `source` emits `Left` directly, so
  * the short arm is zero hops; `mid1`/`mid2` carry that same `Left` through
  * `Mid` to `Right`, two hops behind. `join` is therefore offered — and
@@ -2079,6 +2199,38 @@ describe("runNetlist — allOf joins by lineage", () => {
     for (const assessment of assessments) {
       const consumed = assessment.envelope!.causationIds.map((id) => log.instanceById(id)!);
       expect(consumed).toHaveLength(2);
+      const shared = [...selfAndAncestorIds(log, consumed[0].id)].filter((id) =>
+        selfAndAncestorIds(log, consumed[1].id).has(id),
+      );
+      const nearest = shared.map((id) => log.instanceById(id)!).sort((a, b) => b.seq - a.seq)[0];
+      expect(nearest.envelope?.node).toBe("extractEntities");
+    }
+  });
+
+  it("never pairs across entities when the two arms stall in opposite directions", async () => {
+    // The pairing, not the count, is what this asserts: a scan that falls
+    // through to the origin also produces exactly two assessments, so a
+    // length check proves nothing. Only the values distinguish a per-entity
+    // join from a positional zip at the origin.
+    const log = new InMemoryLog();
+    const result = await runNetlist(
+      oppositeStallProgram,
+      { correlationId: "c1", originPayloads: { alert: { value: "a" } } },
+      { log, budget: 40 },
+    );
+
+    expect(result.stopped).toBe("quiescence");
+    const values = log
+      .instances("Assessment", "c1")
+      .map((i) => (i.payload as { value: string }).value)
+      .sort();
+    expect(values).toEqual(["left-a-A|right-a-A", "left-a-B|right-a-B"]);
+
+    // And the same property stated structurally rather than by payload:
+    // each assessment consumed two instances whose nearest shared ancestor
+    // is an Entity, never the alert.
+    for (const assessment of log.instances("Assessment", "c1")) {
+      const consumed = assessment.envelope!.causationIds.map((id) => log.instanceById(id)!);
       const shared = [...selfAndAncestorIds(log, consumed[0].id)].filter((id) =>
         selfAndAncestorIds(log, consumed[1].id).has(id),
       );

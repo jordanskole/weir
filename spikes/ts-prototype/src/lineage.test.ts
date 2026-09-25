@@ -487,6 +487,102 @@ const raggedGroupProgram = programWith(
   },
 );
 
+// The state the final review believed could not occur: a nearer ancestor that
+// is *incomplete* not because its other arm has yet to run, but because the
+// other edge's only candidate under it was already claimed by a nearer group.
+// The review's reasoning was "if `R_A` exists then `E_A` is its nearest
+// ancestor too, so nothing nearer could have claimed it". A ragged zip breaks
+// that: a nearer group claims matched pairs and leaves the surplus behind, so
+// one edge under the ancestor can be drained while the other still has a
+// leftover.
+//
+// `stem` is the ancestor in question. Below it, `twig` produces one Left and
+// one Right, which pair at `Twig` — the nearer group. `stemLeft` produces a
+// second Left directly off `Stem`, which that group does not claim. So once
+// the `Twig` row is taken, `Stem` reads as "a Left, no Right" — some declared
+// edges but not all — exactly the incomplete-by-claiming state. The surviving
+// Left's real partner is `seedRight`'s instance, whose nearest common ancestor
+// with it is the seed, one step further out.
+const ClaimSeed = defineEdge({
+  name: "ClaimSeed",
+  label: "ClaimSeed",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const Stem = defineEdge({
+  name: "Stem",
+  label: "Stem",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const Twig = defineEdge({
+  name: "Twig",
+  label: "Twig",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const ClaimLeft = defineEdge({
+  name: "Left",
+  label: "Left",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const ClaimRight = defineEdge({
+  name: "Right",
+  label: "Right",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const claimedAwayProgram = programWith(
+  {
+    source: defineNode({
+      name: "source",
+      input: single(ClaimSeed),
+      output: single(ClaimSeed),
+      fn: (s) => s,
+    }),
+    stem: defineNode({
+      name: "stem",
+      input: single(ClaimSeed),
+      output: single(Stem),
+      fn: () => ({ value: "stem" }),
+    }),
+    twig: defineNode({ name: "twig", input: single(Stem), output: single(Twig), fn: () => ({ value: "twig" }) }),
+    twigLeft: defineNode({
+      name: "twigLeft",
+      input: single(Twig),
+      output: single(ClaimLeft),
+      fn: () => ({ value: "twig-left" }),
+    }),
+    twigRight: defineNode({
+      name: "twigRight",
+      input: single(Twig),
+      output: single(ClaimRight),
+      fn: () => ({ value: "twig-right" }),
+    }),
+    stemLeft: defineNode({
+      name: "stemLeft",
+      input: single(Stem),
+      output: single(ClaimLeft),
+      fn: () => ({ value: "stem-left" }),
+    }),
+    seedRight: defineNode({
+      name: "seedRight",
+      input: single(ClaimSeed),
+      output: single(ClaimRight),
+      fn: () => ({ value: "seed-right" }),
+    }),
+  },
+  {
+    origins: ["source"],
+    feeds: {
+      source: ["stem", "seedRight"],
+      stem: ["twig", "stemLeft"],
+      twig: ["twigLeft", "twigRight"],
+    },
+  },
+);
+
 describe("joinRows", () => {
   it("pairs instances by their nearest common ancestor, never across groups", async () => {
     // Two entities, each fanning out to two context edges. The WRONG
@@ -567,8 +663,45 @@ describe("joinRows", () => {
     expect(rows[0].get("Left")).toEqual(log.instances("Left", "c1")[0]);
   });
 
+  it("still joins a candidate whose nearer ancestor was emptied by an earlier group's claim", async () => {
+    // The edge case the review asked to be tested rather than assumed. It IS
+    // constructible — see the fixture comment — and the answer is that the
+    // stranded candidate still joins at its own nearest common ancestor: the
+    // hold only applies when a *peer* instance of the incomplete ancestor's
+    // node holds the missing edge, and `stem` fired once, so it has no peer.
+    const log = new InMemoryLog();
+    await runNetlist(
+      claimedAwayProgram,
+      { correlationId: "c1", originPayloads: { source: { value: "a" } } },
+      { log, budget: 20 },
+    );
+
+    const lefts = log.instances("Left", "c1");
+    const rights = log.instances("Right", "c1");
+    const stem = log.instances("Stem", "c1")[0];
+    const twigRight = rights.find((r) => (r.payload as { value: string }).value === "twig-right")!;
+    // The precondition: the Right that the nearer group claims descends from
+    // `Stem`, so claiming it is what leaves `Stem` looking incomplete.
+    expect(selfAndAncestorIds(log, twigRight.id).has(stem.id)).toBe(true);
+
+    const rows = joinRows(log, new Map([["Left", lefts], ["Right", rights]]));
+
+    const paired = rows.map(
+      (row) =>
+        `${(row.get("Left")!.payload as { value: string }).value}+${
+          (row.get("Right")!.payload as { value: string }).value
+        }`,
+    );
+    // Nearest group first (Twig), then the leftover Left with the only Right
+    // it shares an ancestor with — never held, never mispaired.
+    expect(paired).toEqual(["twig-left+twig-right", "stem-left+seed-right"]);
+  });
+
   it("falls back to latest-wins when no candidate has lineage", () => {
-    // The externally-invoked tier: a staged bag, as invoke.ts builds.
+    // The no-lineage tier: instances staged into a real Log with no
+    // invocation behind them. NOT "as invoke.ts builds" — invoke.ts stages
+    // nothing since the membrane started taking the bag as an argument
+    // (spec §5), so nothing in production reaches this tier at all.
     const log = new InMemoryLog();
     log.append("A", "c1", { v: 1 });
     const newerA = log.instanceById(log.append("A", "c1", { v: 2 }))!;
