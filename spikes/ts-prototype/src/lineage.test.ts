@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { defineEdge, defineField, defineNode, allOf, single } from "./define.js";
 import { InMemoryLog } from "./membrane.js";
 import { runNetlist } from "./runtime.js";
-import { ancestorsOf } from "./lineage.js";
+import { ancestorsOf, selfAndAncestorIds } from "./lineage.js";
 import type { Program } from "./implementation.js";
 import type { NodeDef } from "./types.js";
 
@@ -193,6 +193,55 @@ describe("ancestorsOf", () => {
     const id = log.append("Value", "c1", { value: "a" });
 
     expect(ancestorsOf(log, id)).toEqual([]);
+  });
+});
+
+describe("selfAndAncestorIds", () => {
+  it("includes the instance itself", () => {
+    const log = new InMemoryLog();
+    const id = log.append("Value", "c1", { value: "a" });
+
+    expect(selfAndAncestorIds(log, id)).toEqual(new Set([id]));
+  });
+
+  it("includes every transitive ancestor as well as self", async () => {
+    const log = new InMemoryLog();
+    await runNetlist(
+      chainProgram,
+      { correlationId: "c1", originPayloads: { chainOrigin: { value: "a" } } },
+      { log, budget: 20 },
+    );
+    const last = log.instances("Tripled", "c1")[0];
+    const mid = log.instances("Doubled", "c1")[0];
+    const first = log.instances("Value", "c1")[0];
+
+    expect(selfAndAncestorIds(log, last.id)).toEqual(new Set([last.id, mid.id, first.id]));
+  });
+
+  it("returns a diamond's shared ancestor once", async () => {
+    const log = new InMemoryLog();
+    await runNetlist(
+      diamondProgram,
+      { correlationId: "c1", originPayloads: { diamondSource: { value: "a" } } },
+      { log, budget: 20 },
+    );
+    const joined = log.instances("Joined", "c1")[0];
+
+    const ids = selfAndAncestorIds(log, joined.id);
+    // 1 joined + left + right + source = 4, with source reached by two paths.
+    expect(ids.size).toBe(4);
+  });
+
+  it("returns just the instance for one with no envelope", () => {
+    // A staged instance has no invocation behind it, so no lineage.
+    const log = new InMemoryLog();
+    const id = log.append("Value", "c1", { value: "a" });
+
+    expect(selfAndAncestorIds(log, id)).toEqual(new Set([id]));
+  });
+
+  it("returns just the id for an instance not in the log", () => {
+    expect(selfAndAncestorIds(new InMemoryLog(), "nope")).toEqual(new Set(["nope"]));
   });
 });
 
