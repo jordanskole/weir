@@ -233,6 +233,31 @@ export interface Host {
 export const DEFAULT_MAX_PULSES = 10_000;
 
 /**
+ * Unconsumed instances of one edge that may fire one node, oldest first.
+ *
+ * The arc rule lives here rather than in either caller: a `single`-input
+ * node asks about its one declared edge, an `allOf` node asks about each
+ * of its declared edges in turn, and both want exactly the same answer.
+ * Two copies would be two places for the rule to drift.
+ */
+export function eligibleForEdge(
+  program: Program,
+  log: Log,
+  consumed: ReadonlySet<number>,
+  nodeName: string,
+  edgeName: string,
+  correlationId: string,
+): LoggedInstance[] {
+  const consumers = (producer: string): string[] => program.wiring.feeds[producer] ?? [];
+  return log.instances(edgeName, correlationId).filter((instance) => {
+    if (consumed.has(instance.seq)) return false;
+    const producer = instance.envelope?.node;
+    if (producer === undefined) return true;
+    return consumers(producer).includes(nodeName);
+  });
+}
+
+/**
  * Which instances a `single`-input node may fire on right now.
  *
  * Readiness is `(arc, unconsumed instance)`, not `(edge type, unconsumed
@@ -261,13 +286,7 @@ export function eligibleInstances(
   correlationId: string,
 ): LoggedInstance[] {
   if (nodeDef.input.kind !== "single") return [];
-  const consumers = (producer: string): string[] => program.wiring.feeds[producer] ?? [];
-  return log.instances(nodeDef.input.edge.name, correlationId).filter((instance) => {
-    if (consumed.has(instance.seq)) return false;
-    const producer = instance.envelope?.node;
-    if (producer === undefined) return true;
-    return consumers(producer).includes(nodeDef.name);
-  });
+  return eligibleForEdge(program, log, consumed, nodeDef.name, nodeDef.input.edge.name, correlationId);
 }
 
 export async function runNetlist(program: Program, run: Run, host: Host): Promise<RunResult> {
