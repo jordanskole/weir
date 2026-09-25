@@ -8,6 +8,7 @@ import { elaborate } from "./elaborate.js";
 import { hashEdge, hashNode } from "./hash.js";
 import { elaborateWithImplementations } from "./implementation.js";
 import { InMemoryLog } from "./membrane.js";
+import { selfAndAncestorIds } from "./lineage.js";
 import { eligibleInstances, runNetlist } from "./runtime.js";
 import { InMemoryTrace } from "./trace.js";
 import type { Program } from "./implementation.js";
@@ -1088,9 +1089,16 @@ const fanOutProgram = programWith(
 );
 
 /**
- * An `allOf` node inside a genuine cycle: `join` emits `Joined`, `recycle`
- * turns that back into a fresh `A`, which feeds `join` again. Only the
- * `firedAllOf` guard stops that looping — remove it and this runs to budget.
+ * An `allOf` node whose two arms come from two *independent* origins: `a`
+ * emits `A`, `b` emits `B`, and neither descends from the other or from
+ * anything shared. `join` declares both, `recycle` would turn its output
+ * back into a fresh `A`.
+ *
+ * Under lineage joining nothing here ever fires: `joinRows` groups by
+ * nearest common ancestor, and two origin instances have no common ancestor
+ * at all, so no row can be built. This fixture is kept pointing at exactly
+ * that — the shared-origin cycle is `sharedSeedCycleProgram` below, which is
+ * what now covers "an allOf node inside a genuine cycle".
  */
 const CycleA = defineEdge({
   name: "A",
@@ -1130,6 +1138,49 @@ const allOfInCycleProgram = programWith(
   {
     origins: ["a", "b"],
     feeds: { a: ["join"], b: ["join"], join: ["recycle"], recycle: ["join"] },
+  },
+);
+
+/**
+ * The same cycle, with both arms descending from one origin so the join can
+ * actually happen: `seedBoth` emits `Start`, `toA`/`toB` turn it into `A` and
+ * `B`, `join` consumes them, and `recycle` feeds `join`'s output back as a
+ * fresh `A`.
+ *
+ * This is where "an `allOf` node inside a genuine cycle" is now tested. The
+ * cycle really does come back around — `recycle` fires and puts an unconsumed
+ * `A` in front of `join` — and `join` still fires exactly once, but for a
+ * different reason than before: not a once-per-run cap, but because the row
+ * it fired on consumed the only `B`, and a group with no `B` is not a group.
+ * Remove the consumption bookkeeping in `tryFire` and this runs to budget.
+ */
+const sharedSeedCycleProgram = programWith(
+  {
+    seedBoth: defineNode({ name: "seedBoth", input: single(Start), output: single(Start), fn: (s) => s }),
+    toA: defineNode({ name: "toA", input: single(Start), output: single(CycleA), fn: (s) => ({ value: s.value }) }),
+    toB: defineNode({ name: "toB", input: single(Start), output: single(CycleB), fn: (s) => ({ value: s.value }) }),
+    join: defineNode({
+      name: "join",
+      input: allOf(CycleA, CycleB),
+      output: single(Joined),
+      fn: ({ A, B }) => ({ value: `${A.value}+${B.value}` }),
+    }),
+    recycle: defineNode({
+      name: "recycle",
+      input: single(Joined),
+      output: single(CycleA),
+      fn: (j) => ({ value: j.value }),
+    }),
+  },
+  {
+    origins: ["seedBoth"],
+    feeds: {
+      seedBoth: ["toA", "toB"],
+      toA: ["join"],
+      toB: ["join"],
+      join: ["recycle"],
+      recycle: ["join"],
+    },
   },
 );
 
@@ -1298,9 +1349,18 @@ describe("runNetlist — iteration", () => {
     expect(new Set(out.map((i) => i.seq)).size).toBe(3);
   });
 
-  it("still fires an allOf node at most once — deliberately unchanged here", async () => {
-    // Joining is a later spec. Pinned so that change is visible when it
-    // comes rather than silent.
+  it("never fires an allOf node whose arms come from two independent origins — no shared lineage, no group", async () => {
+    // This test used to pin "still fires an allOf node at most once", which
+    // was the `firedAllOf` cap: joining was a later spec, so the cap was
+    // pinned to make its removal visible rather than silent. It is removed
+    // now, and the *reason* this fixture's join does not fire has changed
+    // with it. `a` and `b` are two separate origins, so `A` and `B` have no
+    // common ancestor — not even the run's own start, since a correlation
+    // has no single origin instance here. joinRows groups by nearest common
+    // ancestor and there is none, so no row exists to fire on: zero
+    // firings, not one. A lineage-blind latest-wins bag would still pair
+    // these two, which is exactly the pairing the join now declines to
+    // invent.
     const log = new InMemoryLog();
     const result = await runNetlist(
       allOfInCycleProgram,
@@ -1309,15 +1369,36 @@ describe("runNetlist — iteration", () => {
     );
 
     expect(result.stopped).toBe("quiescence");
+    expect(log.instances("Joined", "c1")).toEqual([]);
+    // Both arms really did produce their instance — the join declined a
+    // group it could see, rather than passing because nothing ran.
+    expect(result.firings).toBe(2);
+    expect(log.instances("A", "c1")).toHaveLength(1);
+    expect(log.instances("B", "c1")).toHaveLength(1);
+  });
+
+  it("fires an allOf node once inside a genuine cycle — the row consumed the only B", async () => {
+    // The cycle coverage the fixture above used to carry, on a topology
+    // whose two arms share an origin so a group can actually form. join
+    // fires once and recycle really does put a fresh A back in front of it;
+    // the second firing does not happen because the row consumed the only
+    // B, not because a cap forbade it.
+    const log = new InMemoryLog();
+    const result = await runNetlist(
+      sharedSeedCycleProgram,
+      { correlationId: "c1", originPayloads: { seedBoth: { value: "a" } } },
+      { log, budget: 50 },
+    );
+
+    expect(result.stopped).toBe("quiescence");
     expect(log.instances("Joined", "c1")).toHaveLength(1);
-    // The cycle is real: recycle did fire on the join's output and put a
-    // fresh A back in front of join, which declined to fire again.
+    // The cycle is real: recycle fired on the join's output and put a fresh
+    // A back in front of join, which found no B to pair it with.
     expect(log.instances("A", "c1")).toHaveLength(2);
-    // Three pulses, not two: join is offered only once A and B are in the
-    // log at snapshot time, so it fires in the pulse after the one that
-    // produced them rather than inside it.
-    expect(result.pulses).toBe(3);
-    expect(log.instances("Joined", "c1")[0]?.envelope?.step).toBe(2);
+    expect(log.instances("B", "c1")).toHaveLength(1);
+    // step 3, not 2: A and B appear in pulse 2, so the join is first offered
+    // in pulse 3 — one past the longest path feeding it.
+    expect(log.instances("Joined", "c1")[0]?.envelope?.step).toBe(3);
   });
 
   it("gives a fan-in node a step one past the longest path feeding it, not the shortest", async () => {
@@ -1673,5 +1754,377 @@ describe("runNetlist — causation", () => {
 
     const entry = trace.entries("c1").at(-1);
     expect(entry?.envelope.causationIds).toEqual([bad]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixtures for lineage joining. An `allOf` node now fires once per lineage
+// group rather than once per run, so each of these is shaped around a
+// *grouping* question rather than a readiness one.
+// ---------------------------------------------------------------------------
+
+/**
+ * The SOC shape: one alert fans out to two entities, each entity fans out to
+ * two context nodes, and one fan-in assesses each entity's pair together.
+ *
+ * Three properties make this fixture mean something, and all three are
+ * deliberate:
+ *
+ * 1. **The wrong pairing is available.** `branchA`/`branchB` are plain
+ *    passthroughs whose only job is to give `extractEntities` two independent
+ *    unconsumed `Seed` instances, so the two entities are *siblings* under the
+ *    alert rather than a chain. In a chain, entity 2 would descend from entity
+ *    1 and a wrong pairing would still share entity 1 as a common ancestor —
+ *    the test would pass under a merely-shares-an-ancestor rule. Here the
+ *    nearest shared ancestor of a wrong pair is the alert itself, which is
+ *    exactly what the per-row assertion rejects.
+ *
+ * 2. **The two arms log their entities in reversed relative order.**
+ *    `rightGate` self-loops, stalling entity A ("-A" suffix) two extra pulses
+ *    before handing off to `rightCtx`, while entity B passes straight through
+ *    — so `Right` is logged as [B, A] where `Left` is logged as [A, B]. A
+ *    latest-wins (or flat positional) bag therefore pairs A's Left with B's
+ *    Right. Without this asymmetry the two arms advance in lockstep and a
+ *    deliberately broken join coincidentally reproduces the correct pairing,
+ *    which is the trap task 3's first fixture fell into.
+ *
+ * 3. **Both rows are available in the same pulse.** The left arm is stalled
+ *    by three plain hops (`leftHop1`→`leftHop2`→`leftHop3`, symmetric across
+ *    both entities, so they stay in order) so that `Left` only becomes
+ *    visible on the pulse *after* the slower `Right` (entity A's) has landed.
+ *    Asymmetry alone is not enough: if `assess` could fire while only one
+ *    `Right` were in the log, latest-wins would pick that one `Right` and
+ *    pair it correctly by accident, and the break-proof would not redden.
+ *
+ * Each hop reuses the one `Hop` edge rather than minting `Hop1`/`Hop2`/`Hop3`:
+ * the arc rule already keeps each hop eating only its own predecessor's
+ * output, since eligibility is `(arc, instance)` and not `(edge type,
+ * instance)`.
+ */
+const Alert = defineEdge({
+  name: "Alert",
+  label: "Alert",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const SocSeed = defineEdge({
+  name: "Seed",
+  label: "Seed",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const SocEntity = defineEdge({
+  name: "Entity",
+  label: "Entity",
+  description: "d",
+  fields: {
+    value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }),
+    spins: defineField({ type: "uint8", label: "spins", description: "d", nullable: false }),
+  },
+});
+const SocHop = defineEdge({
+  name: "Hop",
+  label: "Hop",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const SocRightEntity = defineEdge({
+  name: "RightEntity",
+  label: "RightEntity",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const SocLeft = defineEdge({
+  name: "Left",
+  label: "Left",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const SocRight = defineEdge({
+  name: "Right",
+  label: "Right",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const Assessment = defineEdge({
+  name: "Assessment",
+  label: "Assessment",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const socShapeProgram = programWith(
+  {
+    alert: defineNode({
+      name: "alert",
+      input: single(Alert),
+      output: single(SocSeed),
+      fn: (a) => ({ value: a.value }),
+    }),
+    branchA: defineNode({
+      name: "branchA",
+      input: single(SocSeed),
+      output: single(SocSeed),
+      fn: (s) => ({ value: `${s.value}-A` }),
+    }),
+    branchB: defineNode({
+      name: "branchB",
+      input: single(SocSeed),
+      output: single(SocSeed),
+      fn: (s) => ({ value: `${s.value}-B` }),
+    }),
+    extractEntities: defineNode({
+      name: "extractEntities",
+      input: single(SocSeed),
+      output: single(SocEntity),
+      fn: (s) => ({ value: s.value, spins: 0 }),
+    }),
+    leftHop1: defineNode({
+      name: "leftHop1",
+      input: single(SocEntity),
+      output: single(SocHop),
+      fn: (e) => ({ value: e.value }),
+    }),
+    leftHop2: defineNode({ name: "leftHop2", input: single(SocHop), output: single(SocHop), fn: (h) => h }),
+    leftHop3: defineNode({ name: "leftHop3", input: single(SocHop), output: single(SocHop), fn: (h) => h }),
+    leftCtx: defineNode({
+      name: "leftCtx",
+      input: single(SocHop),
+      output: single(SocLeft),
+      fn: (h) => ({ value: `left-${h.value}` }),
+    }),
+    rightGate: defineNode({
+      name: "rightGate",
+      input: single(SocEntity),
+      output: { kind: "oneOf", edges: [SocEntity, SocRightEntity] },
+      fn: (e) => {
+        const needsSpins = e.value.endsWith("-A") ? 2 : 0;
+        if (e.spins < needsSpins) {
+          return { edge: "Entity" as const, payload: { value: e.value, spins: e.spins + 1 } };
+        }
+        return { edge: "RightEntity" as const, payload: { value: e.value } };
+      },
+    }),
+    rightCtx: defineNode({
+      name: "rightCtx",
+      input: single(SocRightEntity),
+      output: single(SocRight),
+      fn: (e) => ({ value: `right-${e.value}` }),
+    }),
+    assess: defineNode({
+      name: "assess",
+      input: allOf(SocLeft, SocRight),
+      output: single(Assessment),
+      fn: ({ Left, Right }) => ({ value: `${Left.value}|${Right.value}` }),
+    }),
+  },
+  {
+    origins: ["alert"],
+    feeds: {
+      alert: ["branchA", "branchB"],
+      branchA: ["extractEntities"],
+      branchB: ["extractEntities"],
+      extractEntities: ["leftHop1", "rightGate"],
+      leftHop1: ["leftHop2"],
+      leftHop2: ["leftHop3"],
+      leftHop3: ["leftCtx"],
+      leftCtx: ["assess"],
+      rightGate: ["rightGate", "rightCtx"],
+      rightCtx: ["assess"],
+    },
+  },
+);
+
+/**
+ * One arm two hops longer than the other. `source` emits `Left` directly, so
+ * the short arm is zero hops; `mid1`/`mid2` carry that same `Left` through
+ * `Mid` to `Right`, two hops behind. `join` is therefore offered — and
+ * declines, its group incomplete — on the pulses where only `Left` exists,
+ * and fires on the first pulse where both are in the log: step 4, one past
+ * the longest path feeding it rather than the shortest.
+ *
+ * It also exercises the self-counts-as-ancestor case: `Right` descends from
+ * the very `Left` it is joined with, so a pure-ancestors intersection would
+ * be empty and nothing would ever fire.
+ */
+const JoinLeft = defineEdge({
+  name: "Left",
+  label: "Left",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const JoinRight = defineEdge({
+  name: "Right",
+  label: "Right",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const SlowMid = defineEdge({
+  name: "Mid",
+  label: "Mid",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const DeadEnd = defineEdge({
+  name: "Dead",
+  label: "Dead",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const LineageJoined = defineEdge({
+  name: "Joined",
+  label: "Joined",
+  description: "d",
+  fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+});
+const lineageJoin = defineNode({
+  name: "join",
+  input: allOf(JoinLeft, JoinRight),
+  output: single(LineageJoined),
+  fn: ({ Left, Right }) => ({ value: `${Left.value}+${Right.value}` }),
+});
+const slowArmProgram = programWith(
+  {
+    source: defineNode({
+      name: "source",
+      input: single(Start),
+      output: single(JoinLeft),
+      fn: (s) => ({ value: `left-${s.value}` }),
+    }),
+    mid1: defineNode({
+      name: "mid1",
+      input: single(JoinLeft),
+      output: single(SlowMid),
+      fn: (l) => ({ value: l.value }),
+    }),
+    mid2: defineNode({
+      name: "mid2",
+      input: single(SlowMid),
+      output: single(JoinRight),
+      fn: (m) => ({ value: `right-${m.value}` }),
+    }),
+    join: lineageJoin,
+  },
+  { origins: ["source"], feeds: { source: ["mid1", "join"], mid1: ["mid2"], mid2: ["join"] } },
+);
+
+/**
+ * The same shape with the slow arm severed: `broken` always emits its `Dead`
+ * branch, which nothing routes onward, so `Right` never appears and `join`'s
+ * group can never complete. The run has to reach quiescence rather than
+ * offering an unsatisfiable candidate forever.
+ */
+const brokenArmProgram = programWith(
+  {
+    source: defineNode({
+      name: "source",
+      input: single(Start),
+      output: single(JoinLeft),
+      fn: (s) => ({ value: `left-${s.value}` }),
+    }),
+    broken: defineNode({
+      name: "broken",
+      input: single(JoinLeft),
+      output: { kind: "oneOf", edges: [JoinRight, DeadEnd] },
+      fn: (l) => ({ edge: "Dead" as const, payload: { value: l.value } }),
+    }),
+    join: lineageJoin,
+  },
+  { origins: ["source"], feeds: { source: ["broken", "join"], broken: ["join"] } },
+);
+
+/**
+ * The plain diamond — one source, two arms, one fan-in — with no timing or
+ * grouping subtlety at all. There is exactly one row to find, so this
+ * isolates the causation question: whatever the fan-in records as consumed
+ * must be the two instances the row actually held.
+ */
+const simpleDiamondProgram = programWith(
+  {
+    source: defineNode({ name: "source", input: single(Start), output: single(Start), fn: (s) => s }),
+    toLeft: defineNode({
+      name: "toLeft",
+      input: single(Start),
+      output: single(JoinLeft),
+      fn: (s) => ({ value: `left-${s.value}` }),
+    }),
+    toRight: defineNode({
+      name: "toRight",
+      input: single(Start),
+      output: single(JoinRight),
+      fn: (s) => ({ value: `right-${s.value}` }),
+    }),
+    join: lineageJoin,
+  },
+  { origins: ["source"], feeds: { source: ["toLeft", "toRight"], toLeft: ["join"], toRight: ["join"] } },
+);
+
+describe("runNetlist — allOf joins by lineage", () => {
+  it("fires a fan-in once per entity, never pairing across entities", async () => {
+    // The fixture must make the mispairing AVAILABLE: all four context
+    // instances share the origin, so a rule keyed on any shared ancestor
+    // would pair left_1 with right_2 and this test would catch it.
+    const log = new InMemoryLog();
+    const result = await runNetlist(
+      socShapeProgram,
+      { correlationId: "c1", originPayloads: { alert: { value: "a" } } },
+      { log, budget: 40 },
+    );
+
+    expect(result.stopped).toBe("quiescence");
+    const assessments = log.instances("Assessment", "c1");
+    expect(assessments).toHaveLength(2);
+    // Each assessment's causation names one Left and one Right from the
+    // same entity — proven by their nearest shared ancestor being an
+    // Entity rather than the alert.
+    for (const assessment of assessments) {
+      const consumed = assessment.envelope!.causationIds.map((id) => log.instanceById(id)!);
+      expect(consumed).toHaveLength(2);
+      const shared = [...selfAndAncestorIds(log, consumed[0].id)].filter((id) =>
+        selfAndAncestorIds(log, consumed[1].id).has(id),
+      );
+      const nearest = shared.map((id) => log.instanceById(id)!).sort((a, b) => b.seq - a.seq)[0];
+      expect(nearest.envelope?.node).toBe("extractEntities");
+    }
+  });
+
+  it("waits a pulse for an incomplete group, then fires when it completes", async () => {
+    const log = new InMemoryLog();
+    const result = await runNetlist(
+      slowArmProgram,
+      { correlationId: "c1", originPayloads: { source: { value: "a" } } },
+      { log, budget: 40 },
+    );
+
+    expect(result.stopped).toBe("quiescence");
+    const joined = log.instances("Joined", "c1");
+    expect(joined).toHaveLength(1);
+    // step is one past the LONGEST path feeding it, not the shortest.
+    expect(joined[0].envelope?.step).toBe(4);
+  });
+
+  it("reaches quiescence without firing when a group never completes", async () => {
+    const log = new InMemoryLog();
+    const result = await runNetlist(
+      brokenArmProgram,
+      { correlationId: "c1", originPayloads: { source: { value: "a" } } },
+      { log, budget: 40 },
+    );
+
+    expect(result.stopped).toBe("quiescence");
+    expect(log.instances("Joined", "c1")).toEqual([]);
+  });
+
+  it("records the ids of the instances in the row it fired on", async () => {
+    const log = new InMemoryLog();
+    await runNetlist(
+      simpleDiamondProgram,
+      { correlationId: "c1", originPayloads: { source: { value: "a" } } },
+      { log, budget: 20 },
+    );
+
+    const joined = log.instances("Joined", "c1")[0];
+    const left = log.instances("Left", "c1")[0];
+    const right = log.instances("Right", "c1")[0];
+    expect(new Set(joined.envelope!.causationIds)).toEqual(new Set([left.id, right.id]));
   });
 });
