@@ -391,9 +391,13 @@ const C = defineEdge({
   fields: { value: defineField({ type: "utf8", label: "Value", description: "C's value", nullable: false }) },
 });
 
-// docs/design.md §5's diamond: a node depending on `allOf: [A, B]` is a
-// readiness check against each edge's own log for one correlation_id, not a
-// synchronous join — matches the pulse model (docs/design-history.md).
+// docs/design.md §5's diamond: a node depending on `allOf: [A, B]` takes a
+// bag keyed by both edge names. Since Task 4 (docs/superpowers/specs/
+// 2026-09-25-allof-joins-by-lineage.md §5) the membrane no longer resolves
+// readiness or a specific combination against each edge's own log itself —
+// that's the caller's job (the runtime, by lineage, a later task) — the
+// membrane here only asserts the bag it's handed, same as `single`'s
+// payload one level down.
 const nodeC = defineNode({
   name: "C",
   input: allOf(A, B),
@@ -402,65 +406,26 @@ const nodeC = defineNode({
 });
 
 describe("membrane — allOf", () => {
-  it("is not ready when only some declared edges are present for this correlation_id", async () => {
-    const log = new InMemoryLog();
-    log.append("A", "thread-1", { value: "a" });
-    await expect(membrane(nodeC, log, { correlationId: "thread-1" })).resolves.toBeUndefined();
+  it("calls fn with the supplied bag, keyed by edge name", async () => {
+    const invocation = await membrane(nodeC, { A: { value: "a" }, B: { value: "b" } }, { correlationId: "thread-1" });
+    expect(invocation.result).toEqual({ value: "a+b" });
+    expect(invocation.envelope).toBeDefined();
   });
 
-  it("is not ready with no edges present at all", async () => {
-    const log = new InMemoryLog();
-    await expect(membrane(nodeC, log, { correlationId: "thread-1" })).resolves.toBeUndefined();
-  });
-
-  it("calls fn once all declared edges are present, keyed by edge name", async () => {
-    const log = new InMemoryLog();
-    log.append("A", "thread-1", { value: "a" });
-    log.append("B", "thread-1", { value: "b" });
-    const invocation = await membrane(nodeC, log, { correlationId: "thread-1" });
-    expect(invocation?.result).toEqual({ value: "a+b" });
-    expect(invocation?.envelope).toBeDefined();
-  });
-
-  it("doesn't care which order the edges arrived in", async () => {
-    const log = new InMemoryLog();
-    log.append("B", "thread-1", { value: "b" });
-    log.append("A", "thread-1", { value: "a" });
-    const invocation = await membrane(nodeC, log, { correlationId: "thread-1" });
-    expect(invocation?.result).toEqual({ value: "a+b" });
-  });
-
-  it("keeps different correlation_ids independent", async () => {
-    const log = new InMemoryLog();
-    log.append("A", "thread-1", { value: "a" });
-    log.append("A", "thread-2", { value: "a2" });
-    log.append("B", "thread-2", { value: "b2" });
-    await expect(membrane(nodeC, log, { correlationId: "thread-1" })).resolves.toBeUndefined();
-    const invocation = await membrane(nodeC, log, { correlationId: "thread-2" });
-    expect(invocation?.result).toEqual({ value: "a2+b2" });
-  });
-
-  it("reading is not consuming — a second call resolves the same way", async () => {
-    const log = new InMemoryLog();
-    log.append("A", "thread-1", { value: "a" });
-    log.append("B", "thread-1", { value: "b" });
-    const first = await membrane(nodeC, log, { correlationId: "thread-1" });
-    const second = await membrane(nodeC, log, { correlationId: "thread-1" });
-    expect(first?.result).toEqual({ value: "a+b" });
-    expect(second?.result).toEqual({ value: "a+b" });
+  it("resolves to Failed<In> for an incomplete bag — no readiness check left to wait on (Task 4)", async () => {
+    const invocation = await membrane(nodeC, { A: { value: "a" } }, { correlationId: "thread-1" });
+    expect(invocation.result).toMatchObject({ reason: expect.any(String) });
+    expect(invocation.envelope).toBeDefined();
   });
 
   it("resolves to Failed<In>, carrying the raw bag, when one edge's payload fails assertion — envelope present, since buildEnvelope now runs before the assert", async () => {
-    const log = new InMemoryLog();
-    log.append("A", "thread-1", { value: 5 });
-    log.append("B", "thread-1", { value: "b" });
-    const invocation = await membrane(nodeC, log, { correlationId: "thread-1" });
-    expect(invocation?.result).toEqual({
+    const invocation = await membrane(nodeC, { A: { value: 5 }, B: { value: "b" } }, { correlationId: "thread-1" });
+    expect(invocation.result).toEqual({
       input: { A: { value: 5 }, B: { value: "b" } },
       reason: expect.stringMatching(/A/),
     });
-    expect(invocation?.envelope).toBeDefined();
-    expect(invocation?.envelope?.node).toBe(nodeC.name);
+    expect(invocation.envelope).toBeDefined();
+    expect(invocation.envelope?.node).toBe(nodeC.name);
   });
 
   it("resolves to Failed<In> with the thrown message as reason, when fn throws — envelope present, since Fn ran", async () => {
@@ -470,33 +435,21 @@ describe("membrane — allOf", () => {
         throw new Error("kaboom");
       },
     });
-    const log = new InMemoryLog();
-    log.append("A", "thread-1", { value: "a" });
-    log.append("B", "thread-1", { value: "b" });
-    const invocation = await membrane(throwing, log, { correlationId: "thread-1" });
-    expect(invocation?.result).toEqual({ input: { A: { value: "a" }, B: { value: "b" } }, reason: "kaboom" });
-    expect(invocation?.envelope).toBeDefined();
+    const invocation = await membrane(throwing, { A: { value: "a" }, B: { value: "b" } }, {
+      correlationId: "thread-1",
+    });
+    expect(invocation.result).toEqual({ input: { A: { value: "a" }, B: { value: "b" } }, reason: "kaboom" });
+    expect(invocation.envelope).toBeDefined();
   });
 
-  it("records one causation id per declared input edge, from the instances it resolved", async () => {
-    const log = new InMemoryLog();
-    const a = log.append("A", "c1", { value: "a" });
-    const b = log.append("B", "c1", { value: "b" });
+  it("never derives causationIds itself — empty by default, exactly what the caller supplied otherwise", async () => {
+    const bag = { A: { value: "a" }, B: { value: "b" } };
 
-    const invocation = await membrane(nodeC, log, { correlationId: "c1" });
+    const withoutOne = await membrane(nodeC, bag, { correlationId: "c1" });
+    expect(withoutOne.envelope?.causationIds).toEqual([]);
 
-    expect(invocation?.envelope?.causationIds).toEqual([a, b]);
-  });
-
-  it("records the newest instance of each edge when several exist", async () => {
-    const log = new InMemoryLog();
-    log.append("A", "c1", { value: "old" });
-    const newerA = log.append("A", "c1", { value: "new" });
-    const b = log.append("B", "c1", { value: "b" });
-
-    const invocation = await membrane(nodeC, log, { correlationId: "c1" });
-
-    expect(invocation?.envelope?.causationIds).toEqual([newerA, b]);
+    const withOne = await membrane(nodeC, bag, { correlationId: "c1", causationIds: ["inst-a", "inst-b"] });
+    expect(withOne.envelope?.causationIds).toEqual(["inst-a", "inst-b"]);
   });
 });
 
@@ -558,10 +511,7 @@ describe("membrane — envelope", () => {
         return { value: `${bag.A.value}+${bag.B.value}` };
       },
     });
-    const log = new InMemoryLog();
-    log.append("A", "thread-1", { value: "a" });
-    log.append("B", "thread-1", { value: "b" });
-    await membrane(node, log, { correlationId: "thread-1" });
+    await membrane(node, { A: { value: "a" }, B: { value: "b" } }, { correlationId: "thread-1" });
     expect(received?.correlationId).toBe("thread-1");
   });
 

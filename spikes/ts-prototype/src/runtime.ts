@@ -23,7 +23,7 @@
  * The loop ends on quiescence (a pulse in which nothing fired) or on the
  * host's `budget` (a firing count). Quiescence counts *firings*, not
  * candidates: an `allOf` node is a candidate on every pulse until it fires,
- * and `membrane()`'s own readiness check may decline it on all of them.
+ * and `tryFire`'s own readiness check may decline it on all of them.
  *
  * Deliberately narrow, stated here rather than left implicit:
  * - **`Failed<In>` routing exists for `single`- and `allOf`-input nodes —
@@ -82,7 +82,9 @@ import type { Trace } from "./trace.js";
  * narrowing limitation, not a genuine call-shape ambiguity (checked at
  * runtime by the `kind` branch itself). These two aliases name the cast
  * instead of hiding it. `AnyAllOfInvoke` names the cast for `allOf`-input
- * nodes' call shape (`nodeDef, log, context`); `In` is erased here too.
+ * nodes' call shape (`nodeDef, bag, context` — the membrane no longer
+ * resolves this bag itself; the runtime builds it and hands it in, same as
+ * `AnySingleInvoke`'s payload one level down); `In` is erased here too.
  */
 type AnySingleInvoke = (
   nodeDef: NodeDef,
@@ -91,9 +93,9 @@ type AnySingleInvoke = (
 ) => Promise<{ result: unknown; envelope?: Envelope }>;
 type AnyAllOfInvoke = (
   nodeDef: NodeDef,
-  log: Log,
+  bag: Record<string, unknown>,
   context: InvocationContext,
-) => Promise<{ result: unknown; envelope?: Envelope } | undefined>;
+) => Promise<{ result: unknown; envelope?: Envelope }>;
 
 export interface RunResult {
   /** Currently always empty — the only InputSpec kind whose failures ever landed here (the removed `any` kind) no longer exists. Retained rather than removed, since deleting it would be a separate public-API change. */
@@ -314,10 +316,13 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
    * whatever `log.latest` happens to hold by the time it runs, which under
    * iteration is a different thing entirely. It is absent for an origin node
    * (its payload comes from `originPayloads`, which is not a logged instance
-   * and has no `seq`) and for an `allOf` node (membrane resolves that bag
-   * itself). Returns whether `Fn` actually ran: `membrane()`'s own readiness
-   * check can still decline an `allOf` candidate, and quiescence is counted
-   * from this answer rather than from the candidate list.
+   * and has no `seq`) and for an `allOf` node (the runtime resolves that bag
+   * itself — `latest`-wins, one `log.latest` per declared edge — and the
+   * membrane only asserts it; Task 5 replaces this with a lineage-chosen
+   * group). Returns whether `Fn` actually ran: the explicit `undefined`
+   * check just below can still decline an `allOf` candidate this function's
+   * caller offered, and quiescence is counted from this answer rather than
+   * from the candidate list.
    */
   async function tryFire(
     nodeName: string,
@@ -349,17 +354,34 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
       result = invocation.result;
       envelope = invocation.envelope;
     } else {
-      // membrane()'s allOf invoke resolves the bag internally and never
-      // hands it back — rebuild it the same way (one log.latest per
-      // declared edge) so the trace entry's `input` is the actual bag Fn
-      // ran on, not a re-derivation that could drift from it.
+      // The membrane no longer resolves this bag itself (Task 4) — build it
+      // here, one `log.latestInstance` per declared edge, and hand it
+      // straight in. This *is* the bag `Fn` runs on now, not a rebuild
+      // liable to drift from a separate resolution membrane used to do
+      // internally. `latestInstance` rather than plain `latest` because
+      // causation moves here too now: allOf causation used to be resolved
+      // inside membrane, one entry per declared edge; now it's whoever
+      // resolved the input that records what it consumed (this file's
+      // header, "The membrane stops resolving allOf inputs"), same as a
+      // `single`-input firing's `causationIds` just above.
       const bag: Record<string, unknown> = {};
+      const causationIds: string[] = [];
       for (const edge of nodeDef.input.edges) {
-        bag[edge.name] = log.latest(edge.name, correlationId);
+        const found = log.latestInstance(edge.name, correlationId);
+        bag[edge.name] = found?.payload;
+        if (found !== undefined) causationIds.push(found.id);
       }
       input = bag;
-      const invocation = await (membrane as AnyAllOfInvoke)(nodeDef, log, { correlationId, identity, step: pulse });
-      if (invocation === undefined) return false;
+      // Replaces the readiness signal membrane used to provide: still
+      // latest-wins, still resolved here rather than by lineage — Task 5
+      // replaces this with a lineage-chosen group.
+      if (nodeDef.input.edges.some((edge) => bag[edge.name] === undefined)) return false;
+      const invocation = await (membrane as AnyAllOfInvoke)(nodeDef, bag, {
+        correlationId,
+        identity,
+        step: pulse,
+        causationIds,
+      });
       result = invocation.result;
       envelope = invocation.envelope;
     }
@@ -502,25 +524,22 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
 
     // Counting actual firings rather than candidates, even though the two
     // are currently equivalent: the `allOf` snapshot gate above (`ready`)
-    // checks `log.latest(...) !== undefined` — the *payload*. Membrane's
-    // own readiness check (`membrane.ts`'s `allOf` branch) instead checks
-    // `log.latestInstance(...) !== undefined` — whether an instance was
-    // appended at all, since Task 4 switched it from `latest` so a
-    // consumed instance's id is always resolvable. The two diverge on
-    // exactly one input: an instance whose payload happens to be
-    // `undefined`. `latest` reads that the same as no instance at all and
-    // declines to offer it; `latestInstance` finds the instance and would
-    // accept it. So this gate is now strictly *stricter* than membrane's —
-    // it can only under-offer, never offer something membrane would then
-    // decline — which is what still guarantees `tryFire` can't return
-    // `false` for a candidate this gate produced, and why an empty
-    // candidate list is exactly when nothing fires. Kept anyway,
+    // and `tryFire`'s own explicit check both test the same predicate —
+    // whether an edge's latest payload is `undefined` (`tryFire`'s version
+    // reads it off `log.latestInstance` rather than `log.latest` directly,
+    // to also capture the instance id for causation, but `InMemoryLog.latest`
+    // is defined as exactly that lookup, so the payload comparison is
+    // identical) — against the same declared edges, so a candidate this
+    // gate produces cannot be declined once `tryFire` re-checks it — nothing
+    // membrane does is in the loop for readiness at all since Task 4 (it
+    // only asserts the bag `tryFire` already resolved). Kept anyway,
     // deliberately, as a structural guard rather than a currently-necessary
-    // one: a future readiness rule that diverges from membrane's own check
-    // — the gate above and membrane's check drifting out of sync — could
+    // one: a future readiness rule that diverges from `tryFire`'s own check
+    // — the two drifting out of sync, e.g. once Task 5 makes `tryFire`
+    // choose a specific lineage group instead of latest-wins — could
     // reintroduce a declined-but-offered candidate, and counting firings
     // rather than candidates is what keeps quiescence correct if that ever
-    // happens again.
+    // happens.
     if (firedThisPulse === 0) {
       return { failures, firings, pulses: pulse - 1, stopped: "quiescence" };
     }

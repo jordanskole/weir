@@ -11,8 +11,8 @@
  * (docs/design.md §5).
  */
 
-import { InMemoryLog, membrane } from "./membrane.js";
-import type { InvocationContext, Log } from "./membrane.js";
+import { membrane } from "./membrane.js";
+import type { InvocationContext } from "./membrane.js";
 import type { Envelope, NodeDef } from "./types.js";
 
 /**
@@ -35,31 +35,28 @@ type AnySingleInvoke = (
 ) => Promise<{ result: unknown; envelope?: Envelope }>;
 type AnyAllOfInvoke = (
   nodeDef: NodeDef,
-  log: Log,
+  bag: Record<string, unknown>,
   context: InvocationContext,
-) => Promise<{ result: unknown; envelope?: Envelope } | undefined>;
+) => Promise<{ result: unknown; envelope?: Envelope }>;
 
 /**
  * Runs `nodeDef` once against one input case. A `single`-input node takes
- * its payload directly; an `allOf`-input node resolves readiness against a
- * Log instead, so the case's bag (keyed by edge name — `InputPayload`'s own
- * allOf shape) is appended to a fresh `InMemoryLog` under `correlationId`
- * first. One log per invocation, never shared, so nothing leaks between
- * cases. Resolves to `{ result: undefined }` for an `allOf` node whose bag
- * is missing a declared edge — `membrane()`'s own readiness `undefined` is
- * a bare not-ready signal there, but this function always resolves to the
- * `{ result, envelope? }` shape, so that signal is folded into `result`
- * rather than handed through as a bare `undefined` itself. A non-object
- * `input` (`null`, `undefined`, or any other non-object — what an
- * author-written example whose `given` is malformed, e.g. `given:` with
- * nothing after it in YAML, parses to) is treated the same way: every
- * declared edge simply reads as missing from it, landing on the same
- * not-ready `{ result: undefined }` rather than throwing a raw `TypeError`
- * trying to index into it. This module has two callers with two different
- * trust levels for `input` — `fuzz.ts`'s is always pre-validated generator
- * output, `accept.ts`'s is arbitrary author-written example data — and only
- * the latter can ever hand this a non-object, so the guard costs the former
- * nothing.
+ * its payload directly; an `allOf`-input node takes its bag directly too
+ * (keyed by edge name — `InputPayload`'s own allOf shape) — the membrane no
+ * longer resolves that bag from a Log (docs/superpowers/specs/
+ * 2026-09-25-allof-joins-by-lineage.md §5), so there is no readiness check
+ * left here to stage one against; the bag goes straight through. A
+ * non-object `input` (`null`, `undefined`, or any other non-object — what
+ * an author-written example whose `given` is malformed, e.g. `given:` with
+ * nothing after it in YAML, parses to) is normalized to `{}` rather than
+ * throwing a raw `TypeError` trying to index into it — every declared edge
+ * then simply reads as missing, which `membrane()`'s `assertPayload` call
+ * rejects the same way it rejects any other incomplete bag, landing on
+ * `Failed<In>` rather than a bare exception. This module has two callers
+ * with two different trust levels for `input` — `fuzz.ts`'s is always
+ * pre-validated generator output, `accept.ts`'s is arbitrary author-written
+ * example data — and only the latter can ever hand this a non-object, so
+ * the guard costs the former nothing.
  *
  * `context.identity` is optional and passed straight through to
  * `membrane()` — omitted, a node resolves under `SYSTEM_IDENTITY` exactly
@@ -86,20 +83,6 @@ export async function invokeWithInput(
     return await (membrane as AnySingleInvoke)(nodeDef, input, context);
   }
 
-  const { correlationId } = context;
-  const log = new InMemoryLog();
   const bag = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
-  for (const edge of nodeDef.input.edges) {
-    // Appending only when the bag actually carries this edge preserves the
-    // readiness equivalence membrane.ts's allOf branch now depends on:
-    // `latestInstance` distinguishes "no instance" from "an instance whose
-    // payload happens to be undefined," where `latest` used to collapse
-    // both to `undefined`. Appending a sentinel `undefined`-payload
-    // instance for a missing edge would make it read as present here.
-    if (bag[edge.name] !== undefined) {
-      log.append(edge.name, correlationId, bag[edge.name]);
-    }
-  }
-  const invocation = await (membrane as AnyAllOfInvoke)(nodeDef, log, context);
-  return invocation ?? { result: undefined };
+  return await (membrane as AnyAllOfInvoke)(nodeDef, bag, context);
 }

@@ -13,11 +13,13 @@
  * real `Envelope` and passes it to `Fn` as its second argument when `Fn`
  * declares one (arity-detected, `fn.length >= 2` — same opt-in shape `env`
  * already has on `Fn`, made real here for the first time). `causationIds`
- * is resolved here for `allOf` inputs — one entry per declared edge, in
- * declaration order — during this membrane's own resolution; a
- * `single`-input node instead gets whatever the runtime supplied (see
- * `MembraneArgs`), since the membrane has no upstream edges of its own to
- * derive it from. `step` used to be a placeholder too; it is now the scheduler's
+ * is never resolved here — for a `single`- or an `allOf`-input node alike,
+ * it is whatever the caller supplied in `context` (see `MembraneArgs`),
+ * defaulting to `[]`. The membrane has no upstream edges of its own to
+ * derive one from; for `allOf` that used to mean deriving it from the Log
+ * it resolved the bag against, but the membrane no longer resolves that
+ * bag (see `MembraneArgs`), so there is nothing left to derive it from
+ * there either. `step` used to be a placeholder too; it is now the scheduler's
  * pulse number, passed in by whoever invokes (see `MembraneArgs`) and
  * defaulting to 0 for callers with no scheduler behind them. `identity` narrows
  * the caller-supplied `Identity` claims to exactly the fields a node's
@@ -279,18 +281,17 @@ export interface Log {
    */
   append(edgeName: string, correlationId: string, payload: unknown, envelope?: InstanceEnvelope): string;
   /**
-   * Hazard to re-check if `Log` ever gains an async implementation:
-   * `runtime.ts`'s `tryFire` calls this a second time for an `allOf` node,
-   * rebuilding the same input bag `membrane()`'s own `allOf` invoke already
-   * read internally, so the trace entry it records carries the bag `Fn`
-   * actually ran on rather than a re-derivation that could silently drift
-   * from it. That's only safe today because this method is synchronous and
-   * there is no `await` between the runtime's read and `membrane()`'s own
-   * — nothing can append to the Log in the gap between the two reads. A
-   * backing store that made `latest` async (this file's own doc comment on
-   * `Log` already anticipates one replacing `InMemoryLog`) would reopen
-   * that window, and the trace could then record an input that was never
-   * the one actually invoked.
+   * `runtime.ts`'s `tryFire` is this method's one caller for an `allOf`
+   * node — it reads each declared edge's latest payload to build the bag it
+   * both records on the trace entry and hands to `membrane()`. Before Task
+   * 4 (docs/superpowers/specs/2026-09-25-allof-joins-by-lineage.md), the
+   * membrane's own `allOf` invoke read the Log a second time to resolve
+   * that same bag itself, which made this method's synchronicity
+   * load-bearing: nothing could append to the Log in the gap between the
+   * two reads, or the trace could record an input that was never the one
+   * actually invoked. The membrane no longer resolves `allOf` inputs — it
+   * takes the bag as an argument instead — so `tryFire` is the sole reader
+   * now, and there is no second read left to stay adjacent to.
    */
   latest(edgeName: string, correlationId: string): unknown | undefined;
   /** The full stored instance — payload plus provenance, when there is any (see `append`). */
@@ -420,29 +421,29 @@ export interface InvocationContext {
 /**
  * `membrane()`'s arguments after the declaration itself. A `single`-input
  * node takes a payload directly and the invocation's `InvocationContext`.
- * An `allOf`-input node takes the Log to resolve readiness against instead
- * of a payload, plus the same context — see `MembraneResult` for what that
- * readiness check resolves to.
+ * An `allOf`-input node takes a bag (keyed by edge name) instead of a
+ * payload, plus the same context — the same shape as `single`'s payload
+ * argument, one level up. The membrane does not resolve this bag itself
+ * (docs/superpowers/specs/2026-09-25-allof-joins-by-lineage.md §5): the
+ * caller — the runtime, choosing a specific combination by lineage —
+ * resolves it and hands it in already assembled, exactly as a `single`
+ * caller hands in an already-resolved payload.
  */
 type MembraneArgs<In extends InputSpec> = In extends { kind: "single" }
   ? [payload: unknown, context: InvocationContext]
-  : [log: Log, context: InvocationContext];
+  : [bag: Record<string, unknown>, context: InvocationContext];
 
 /**
- * What `membrane()` resolves to. A `single`-input node always resolves to
- * a real `Invocation`. An `allOf`-input node's result is a readiness check
- * against a correlationId's logs rather than a direct call: it resolves to
- * `undefined` — not an error — when the edges it declared needing haven't
- * all appeared yet; a caller (a scheduler, not built here) decides when to
- * try again. That bare `undefined` is a readiness signal, distinct from a
- * real `Invocation` whose own `envelope` field happens to be absent (see
- * `Invocation`'s own doc comment for when that narrower case still
- * happens) — which is exactly why only the `allOf` branch carries it: a
- * `single`-input call must not be typed as possibly-undefined.
+ * What `membrane()` resolves to: always a real `Invocation`, for either
+ * InputSpec kind. An `allOf`-input node used to resolve to `undefined` as a
+ * bare readiness signal when the edges it declared needing hadn't all
+ * appeared yet in the Log it read; now that the membrane takes an
+ * already-resolved bag instead of resolving one itself, there is no
+ * readiness left for it to check — an incomplete bag fails `assertPayload`
+ * like any other bad input and resolves to `Failed<In>`, the same as a
+ * `single`-input node's bad payload.
  */
-type MembraneResult<In extends InputSpec, O extends OutputSpec> = In extends { kind: "single" }
-  ? Invocation<In, O>
-  : Invocation<In, O> | undefined;
+type MembraneResult<In extends InputSpec, O extends OutputSpec> = Invocation<In, O>;
 
 function reasonOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
@@ -487,10 +488,12 @@ function narrowIdentity(
  * Builds this invocation's Envelope. `causationIds` defaults to `[]` when
  * the caller supplies none in `context` — true for an origin invocation,
  * and for any caller with no notion of a consumed instance (`invoke.ts`'s
- * single invocation, tests); the `allOf` branch below always supplies one
- * it derived itself. `step` is the pulse number under the runtime's pulse
- * scheduling, which is exactly causal position within the topology.
- * Defaults to 0 for callers with no scheduler behind them.
+ * single invocation, tests) — and, since Task 4, equally true for the
+ * `allOf` branch below: it no longer derives `causationIds` itself, so it
+ * takes whatever `context` supplies the same way the `single` branch above
+ * does. `step` is the pulse number under the runtime's pulse scheduling,
+ * which is exactly causal position within the topology. Defaults to 0 for
+ * callers with no scheduler behind them.
  *
  * Can throw (a bad `scope` declaration) — the caller is responsible for
  * turning that into `Failed<In>`.
@@ -534,21 +537,22 @@ function callFn<In extends InputSpec, O extends OutputSpec>(
 }
 
 /**
- * Wraps a node's Fn so it can never run against an unasserted or
- * not-yet-ready input. `membrane()` takes the declaration and the
- * invocation's own arguments — never separate configuration such as a sink
- * or a logger — and performs the invocation itself rather than handing
- * back a callable for the caller to invoke later: no detached invoker is
- * ever held outside this function. That means "if you call membrane, these
- * things happen" is guaranteed by this function's shape. It does not mean
- * "invocation only ever happens through membrane" — `nodeDef.fn` is still a
- * public field, reachable directly, so that stronger claim remains a matter
- * of convention, not something this refactor makes structural. Its call
- * shape (direct payload vs. correlation-id readiness check) is entirely a
- * product of what the NodeDef's `input` says, never separately configured.
- * A rejected assert or an uncaught throw from `Fn` resolves to `Failed<In>`
- * — `{ input, reason }` — rather than rejecting; nothing escapes the
- * boundary as an exception (design.md §3).
+ * Wraps a node's Fn so it can never run against an unasserted input.
+ * `membrane()` takes the declaration and the invocation's own arguments —
+ * never separate configuration such as a sink or a logger — and performs
+ * the invocation itself rather than handing back a callable for the caller
+ * to invoke later: no detached invoker is ever held outside this function.
+ * That means "if you call membrane, these things happen" is guaranteed by
+ * this function's shape. It does not mean "invocation only ever happens
+ * through membrane" — `nodeDef.fn` is still a public field, reachable
+ * directly, so that stronger claim remains a matter of convention, not
+ * something this refactor makes structural. Its call shape (a payload
+ * directly, or a bag keyed by edge name) is entirely a product of what the
+ * NodeDef's `input` says, never separately configured; both are already
+ * resolved by the caller, never re-resolved here. A rejected assert or an
+ * uncaught throw from `Fn` resolves to `Failed<In>` — `{ input, reason }` —
+ * rather than rejecting; nothing escapes the boundary as an exception
+ * (design.md §3).
  */
 export async function membrane<In extends InputSpec, O extends OutputSpec>(
   nodeDef: NodeDef<In, O>,
@@ -581,43 +585,18 @@ export async function membrane<In extends InputSpec, O extends OutputSpec>(
 
   if (nodeDef.input.kind === "allOf") {
     const edges = nodeDef.input.edges;
-    const [log, context] = args as unknown as [log: Log, context: InvocationContext];
-    const { correlationId } = context;
+    const [rawBag, context] = args as unknown as [rawBag: Record<string, unknown>, context: InvocationContext];
 
-    // Hazard, other end: `Log.latest`'s own doc comment above warns that
-    // `runtime.ts`'s trace-rebuild read depends on nothing appending to
-    // the Log between its read and this one — synchronous `latest`, no
-    // `await` in between. That same invariant breaks identically if an
-    // `await` is ever introduced into *this* loop before it finishes
-    // reading every declared edge — this read is the other end of that
-    // same gap, not a separate hazard. This loop is also now the sole
-    // authority on recorded causation: it records the id of each instance
-    // it actually resolved, which is exactly why `runtime.ts` does not
-    // separately derive causation from its own trace-rebuild read — a
-    // second derivation would be a third consumer of the same
-    // synchronous-adjacency coincidence, and drifting from this loop's
-    // answer would fail silently rather than erroring.
-    const rawBag: Record<string, unknown> = {};
-    const resolvedIds: string[] = [];
-    for (const edge of edges) {
-      const found = log.latestInstance(edge.name, correlationId);
-      if (found === undefined) return undefined as MembraneResult<In, O>;
-      rawBag[edge.name] = found.payload;
-      resolvedIds.push(found.id);
-    }
-
+    // The membrane no longer resolves this node's inputs. The runtime
+    // chose a specific combination by lineage (docs/superpowers/specs/
+    // 2026-09-25-allof-joins-by-lineage.md §5) and re-resolving here would
+    // discard that group and read the latest instead. It also retires the
+    // read-adjacency hazard this loop used to be one half of: one reader,
+    // so no window to be adjacent across. Causation is supplied by
+    // whoever resolved the input, which is now the runtime.
     let envelope: Envelope;
     try {
-      // `context.causationIds` is only ever defined here when a caller
-      // re-feeds a recorded value — replay.ts, reproducing an entry's
-      // original causation. No live call site (runtime.ts's tryFire,
-      // fuzz.ts, accept.ts) supplies one for an allOf node, so `??` falls
-      // through to `resolvedIds` and Task 4's live-run behaviour —
-      // "whoever resolved the input records what it consumed" — is
-      // unchanged. On replay, resolvedIds would instead be freshly-minted
-      // ids from invoke.ts's scratch InMemoryLog, which exist in no real
-      // log; the recorded value must win.
-      envelope = await buildEnvelope(nodeDef, { ...context, causationIds: context.causationIds ?? resolvedIds });
+      envelope = await buildEnvelope(nodeDef, context);
     } catch (cause) {
       return { result: { input: rawBag as InputPayload<In>, reason: reasonOf(cause) } } as MembraneResult<In, O>;
     }
@@ -639,15 +618,9 @@ export async function membrane<In extends InputSpec, O extends OutputSpec>(
     }
 
     try {
-      return { result: await callFn(nodeDef, bag as InputPayload<In>, envelope), envelope } as MembraneResult<
-        In,
-        O
-      >;
+      return { result: await callFn(nodeDef, bag as InputPayload<In>, envelope), envelope } as MembraneResult<In, O>;
     } catch (cause) {
-      return { result: { input: bag as InputPayload<In>, reason: reasonOf(cause) }, envelope } as MembraneResult<
-        In,
-        O
-      >;
+      return { result: { input: bag as InputPayload<In>, reason: reasonOf(cause) }, envelope } as MembraneResult<In, O>;
     }
   }
 
