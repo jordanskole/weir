@@ -135,11 +135,17 @@ ancestor — the highest-`seq` member of the intersection of each candidate's
 self-and-ancestor set — and zips a complete group's candidates positionally by `seq`,
 firing once per row and leaving ragged leftovers unconsumed until partners arrive. The
 membrane no longer resolves the bag itself; it receives the row the runtime already
-chose and only asserts it. When no candidate on any declared edge has been produced by a
-node invocation at all — the direct-invocation path, which supplies values with nothing
-upstream to derive an ancestor from — there is no lineage to group on, so resolution
-falls back to reading each edge's latest instance and fires once, same as a `single`-input
-node's readiness used to work for every kind
+chose and only asserts it. A candidate is also **held** rather than grouped when it has a
+strictly nearer ancestor that is currently incomplete — candidates on some of the node's
+declared edges but not all — and a peer instance of that ancestor's own node holds one of
+the missing edges: two items mid-flight in opposite directions, which would otherwise
+fall through to a shared ancestor and pair with each other. When no candidate on any
+declared edge has been produced by a node invocation at all, there is no lineage to group
+on, so resolution falls back to reading each edge's latest instance and fires once, same
+as a `single`-input node's readiness used to work for every kind. No production caller
+reaches that fallback today — direct invocation hands its bag straight to the membrane and
+never joins at all — so it is the answer for a host that stages envelope-less instances
+into a real log, which today means tests
 ([spec](superpowers/specs/2026-09-25-allof-joins-by-lineage.md)).
 
 **A fan-in fed by two independent origin nodes does not fire.** Origin outputs carry

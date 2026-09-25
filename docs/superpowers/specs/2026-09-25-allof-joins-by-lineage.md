@@ -29,9 +29,9 @@ What discriminates is the **nearest** shared ancestor: `Identity_1` and `Endpoin
 | Any has an envelope | group by nearest common ancestor, zip within the group (§2, §3) |
 | None has an envelope | latest-wins per edge, fire once — today's behaviour |
 
-An envelope records that a node invocation produced an instance. No envelope means nothing produced it: it was supplied from outside. That is the direct-invocation path — `invokeWithInput`, and therefore `fuzz.ts`, `accept.ts` and an agent tool call, all of which stage a bag into a scratch log with nothing to attach.
+An envelope records that a node invocation produced an instance. No envelope means nothing produced it: it was supplied from outside. The tier handles candidates with no lineage, and latest-wins is trivially correct for them — there is no lineage to join on because nothing upstream ran.
 
-The second tier is therefore **not a test concession**. It is the production path for tool calling, where an agent supplies one value per edge and there is no lineage to join on because nothing upstream ran. For that case latest-wins is trivially correct — there is exactly one candidate per edge.
+**Correction, 2026-09-25 (this branch's final review).** This paragraph used to continue: *"That is the direct-invocation path — `invokeWithInput`, and therefore `fuzz.ts`, `accept.ts` and an agent tool call, all of which stage a bag into a scratch log with nothing to attach,"* and concluded that the tier is *"not a test concession… the production path for tool calling."* **§5 falsified that while this same spec was being built.** Removing the membrane's bag resolution also removed `invoke.ts`'s scratch-`InMemoryLog` staging: `invokeWithInput` now hands the bag to `membrane` directly and never calls `joinRows` at all. So none of the four named callers reach this tier. The only route left is a host that stages envelope-less instances into a real `Log` and runs `runNetlist` over them — which today means tests. The tier is still correct, and still the right answer for such a host; what was false was the claim about which callers arrive at it. This is a consequence of §5 rather than an oversight in §1: the justification described a staging step that §5 deleted.
 
 An instance with no envelope can fill any edge in any group, for the same reason piece (1)'s arc rule lets it bypass the wiring check: it has no producer, so there is no lineage to contradict.
 
@@ -44,10 +44,32 @@ Each pulse, for an `allOf` node:
 1. Gather unconsumed candidates per declared edge, using the existing arc rule.
 2. If no candidate anywhere has an envelope, apply the second tier and stop.
 3. Otherwise map ancestor id → candidates descending from it, where descent uses **self-and-ancestors**.
-4. Scan that map in **descending `seq`**. The first ancestor with at least one candidate on *every* declared edge is a group.
+4. Scan that map in **descending `seq`**. The first ancestor with at least one candidate on *every* declared edge is a group, once held candidates are excluded (below).
 5. Fire the group (§3), mark its instances consumed, continue scanning.
 
-Descending `seq` is what makes this the *nearest* common ancestor rather than any common ancestor, and it is what stops the origin forming a wrong group: by the time the scan reaches it, nearer ancestors have claimed their instances.
+Descending `seq` is what makes this the *nearest* common ancestor rather than any common ancestor.
+
+**The safeguard this spec originally claimed, and why it was wrong.** The sentence that stood here was: *"and it is what stops the origin forming a wrong group: by the time the scan reaches it, nearer ancestors have claimed their instances."* It is stated as it was rather than quietly replaced, because the reasoning is exactly what a future reader would otherwise re-derive.
+
+It holds only when the nearer groups **complete**. A nearer ancestor that is still half-formed claims nothing, and the scan walks straight past it to the run origin — a genuine common ancestor of everything in the run. The branch's final review reproduced this by execution, not argument: take the SOC shape and stall the two arms in *opposite* directions (`leftGate` stalls entity B, `rightGate` stalls entity A). On the first pulse the fan-in is offered anything, `Left = [L_A]` and `Right = [R_B]`. `E_A` has a Left and no Right; `E_B` has a Right and no Left; neither group is complete; the scan reaches the alert and fires `left-a-A|right-a-B`. Two pulses later the leftovers mirror it. The run reaches quiescence having fired two rows, both cross-entity — the wrong answer at full confidence, which is precisely what the join exists to prevent. The one-direction fixture never exposes this because its slow entity always completes before the origin gets a turn.
+
+**The rule that replaces it.** A candidate may not join at ancestor `A` if it has a **strictly nearer** ancestor that is currently **incomplete** — that nearer ancestor has unclaimed candidates on some of the node's declared edges but not all.
+
+On the failing case: `L_A` is held because `E_A` has a Left and no Right, `R_B` because `E_B` has a Right and no Left. No group forms and the run waits. On the working case `L_B` and `R_B` still group at `E_B`, and `L_A` joins once `R_A` arrives; if `R_A` never arrives, `L_A` never fires, which is the "group never completes" case above and already accepted.
+
+**One qualification the implementation had to add, and it is not cosmetic.** Taken literally, that rule holds *everything* forever. A `Left` candidate's own id is an ancestor key carrying a Left and no Right, so every candidate always has a nearer incomplete ancestor — itself — and so does every intermediate hop on whichever arm arrived first. Implemented literally, 13 of the spike's tests fail, including the plain diamond: nothing ever fires. Nothing in lineage alone separates `E_A` (an entity whose other arm is still in flight) from `hop3_A` (a step on the arm that already landed) — both hold a Left and no Right.
+
+What does separate them is a **peer**: another instance of the *same producing node*, off the held candidate's own lineage, carrying an unclaimed candidate on an edge the nearer ancestor is missing. Two instances of one node are two items at the same stage of the graph; when they hold opposite halves of a fan-in, the arms are mid-flight in opposite directions and falling through to a common ancestor would pair the two items with each other. `hop3_A`'s peer `hop3_B` holds a Left too, not a Right, so it holds nothing back. So the implemented rule is the rule above with "and a peer of that ancestor holds an edge it is missing" appended.
+
+That qualification is an approximation, and the limit is worth stating: two arms that diverge at *different* nodes, rather than at two instances of one node, are not held and could still mispair. The sound test is "is work still in flight below this ancestor", which needs either an index of unconsumed descendants or the program's wiring; `joinRows` takes a `Log` and candidates and has neither. Recorded as the shape of the real fix rather than papered over.
+
+Three properties this rule preserves, all of them live in the implementation:
+
+- **Envelope-less candidates are never held.** They have no ancestors, so the test is vacuously false for them, and the latest-wins tier and the wildcard behaviour are untouched.
+- **Completeness is judged against currently-unconsumed candidates** — the same set the scan is already working from, which is what makes it evaluable per pulse. A candidate an earlier group claimed is not available.
+- **The behaviour is temporal, and that is intended.** A candidate held this pulse may join the next. The rule is not a function of lineage alone; it depends on what is currently unconsumed.
+
+One further consequence, tested rather than assumed: an ancestor *can* become incomplete because an earlier group claimed the other edge's candidate — the review expected this to be impossible. A ragged zip claims matched pairs and leaves the surplus, so one edge under an ancestor can be drained while the other keeps a leftover. The stranded leftover still joins at its own nearest common ancestor, because a once-fired node has no peer to hold it back (`lineage.test.ts`, "emptied by an earlier group's claim").
 
 **Readiness falls out.** If `Entity_1` has an `Identity` and an `Endpoint` but no `Network` yet, no ancestor has descendants on all three edges, so no group forms and nothing fires this pulse. The next pulse the `Network` lands and the group completes. No separate waiting mechanism, and no readiness signal to plumb.
 
@@ -108,6 +130,7 @@ Acceptable at spike scale, and deliberately unoptimized. Two outs exist when it 
 ## Testing
 
 - **The SOC shape.** Two entities, each fanning out to three context nodes, asserting the fan-in fires twice with correctly-matched rows. **The fixture must make the mispairing available** — a test asserting `{I1,E1,N1}` fired proves nothing if only one combination exists. Show the wrong pairing was possible and not taken.
+- **The SOC shape with the arms stalled in opposite directions** (added by the final review). Both entity groups are incomplete at once, so the wrong pairing is not merely available but is what an unguarded scan actually produces. The assertion is on the *pairing*, never the count: a fall-through to the origin fires two assessments too.
 - **An `allOf` node consuming an edge straight from the origin** fires. This is the case that forced self-and-ancestors; under pure ancestors it never fires at all.
 - **An incomplete group waits.** Two of three edges present, nothing fires; the third arrives next pulse and the group completes, with the fan-in's `step` one past the longest path feeding it.
 - **Zip.** A group with 2 × 2 × 1 fires once and leaves one candidate unconsumed on each of the first two edges.
