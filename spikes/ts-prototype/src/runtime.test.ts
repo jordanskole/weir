@@ -1532,3 +1532,146 @@ describe("eligibleInstances", () => {
     expect(eligibleInstances(program, log, new Set(), program.nodes.someAllOfNode, "c1")).toEqual([]);
   });
 });
+
+describe("runNetlist — causation", () => {
+  const Value = defineEdge({
+    name: "Value",
+    label: "Value",
+    description: "d",
+    fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+  });
+  const Doubled = defineEdge({
+    name: "Doubled",
+    label: "Doubled",
+    description: "d",
+    fields: { value: defineField({ type: "utf8", label: "v", description: "d", nullable: false }) },
+  });
+
+  function envelopeFrom(node: string): InstanceEnvelope {
+    return {
+      id: "inv-" + node,
+      correlationId: "c1",
+      causationIds: [],
+      timestamp: new Date().toISOString(),
+      step: 0,
+      identity: {},
+      node,
+      contractHash: "hash",
+      schemaHash: "edge-hash",
+    };
+  }
+
+  // The smallest chain: an origin node's own produced instance feeding a
+  // real (non-origin) single-input node.
+  const origin = defineNode({
+    name: "origin",
+    input: single(Value),
+    output: single(Value),
+    fn: (v) => v,
+  });
+  const doubled = defineNode({
+    name: "doubled",
+    input: single(Value),
+    output: single(Doubled),
+    fn: (v) => ({ value: `${v.value}${v.value}` }),
+  });
+  const chainProgram = programWith(
+    { origin, doubled },
+    { origins: ["origin"], feeds: { origin: ["doubled"] } },
+  );
+
+  // "seed" exists only so "doubler" is reachable from program.wiring.origins
+  // — it never fires (no originPayloads entry for it). "doubler" itself is
+  // deliberately NOT an origin: marking it one would route its payload
+  // through originPayloads instead of the queued log instances, defeating
+  // the point of this fixture (see runtime.ts's tryFire origins.has branch).
+  const seed = defineNode({
+    name: "seed",
+    input: single(Value),
+    output: single(Value),
+    fn: (v) => v,
+  });
+  const doubler = defineNode({
+    name: "doubler",
+    input: single(Value),
+    output: single(Doubled),
+    fn: (v) => ({ value: `${v.value}${v.value}` }),
+  });
+  const consumerProgram = programWith(
+    { seed, doubler },
+    { origins: ["seed"], feeds: { seed: ["doubler"], upstream: ["doubler"] } },
+  );
+
+  // Same shape as consumerProgram, but the queued instance's payload fails
+  // Value's own schema (a number where utf8 is declared) — this is the
+  // rejected path the fourth test exercises. No node here ever runs its Fn.
+  const strictSeed = defineNode({
+    name: "strictSeed",
+    input: single(Value),
+    output: single(Value),
+    fn: (v) => v,
+  });
+  const strictConsumer = defineNode({
+    name: "strictConsumer",
+    input: single(Value),
+    output: single(Value),
+    fn: (v) => v,
+  });
+  const strictConsumerProgram = programWith(
+    { strictSeed, strictConsumer },
+    { origins: ["strictSeed"], feeds: { strictSeed: ["strictConsumer"], upstream: ["strictConsumer"] } },
+  );
+
+  it("records the id of the instance a single-input node consumed", async () => {
+    const log = new InMemoryLog();
+    await runNetlist(
+      chainProgram,
+      { correlationId: "c1", originPayloads: { origin: { value: "a" } } },
+      { log, budget: 20 },
+    );
+
+    const produced = log.instances("Value", "c1")[0];
+    const downstream = log.instances("Doubled", "c1")[0];
+    expect(downstream?.envelope?.causationIds).toEqual([produced?.id]);
+  });
+
+  it("records the specific instance consumed, not merely the edge's latest", async () => {
+    // Two instances queued for one consumer: the first firing must name the
+    // OLDER one. A bug reading `latest` would name the newer and still
+    // produce a plausible-looking non-empty array.
+    const log = new InMemoryLog();
+    const first = log.append("Value", "c1", { value: "first" }, envelopeFrom("upstream"));
+    log.append("Value", "c1", { value: "second" }, envelopeFrom("upstream"));
+
+    await runNetlist(consumerProgram, { correlationId: "c1", originPayloads: {} }, { log, budget: 20 });
+
+    const outputs = log.instances("Doubled", "c1");
+    expect(outputs[0]?.envelope?.causationIds).toEqual([first]);
+  });
+
+  it("records an empty causationIds for an origin node", async () => {
+    const log = new InMemoryLog();
+    const result = await runNetlist(
+      chainProgram,
+      { correlationId: "c1", originPayloads: { origin: { value: "a" } } },
+      { log, budget: 20 },
+    );
+
+    // Assert the run actually fired, so `[]` cannot come from nothing happening.
+    expect(result.firings).toBeGreaterThan(0);
+    expect(log.instances("Value", "c1")[0]?.envelope?.causationIds).toEqual([]);
+  });
+
+  it("records causation for a rejected attempt too", async () => {
+    // The payoff of building the envelope before asserting: an attempt that
+    // fails validation still records what it tried to consume.
+    const log = new InMemoryLog();
+    const trace = new InMemoryTrace();
+    const bad = log.append("Value", "c1", { value: 12345 }, envelopeFrom("upstream"));
+
+    await runNetlist(strictConsumerProgram, { correlationId: "c1", originPayloads: {} }, { log, trace, budget: 20 });
+
+    const entry = trace.entries("c1").at(-1);
+    expect(entry?.envelope.causationIds).toEqual([bad]);
+  });
+});

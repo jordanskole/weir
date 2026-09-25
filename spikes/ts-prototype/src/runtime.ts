@@ -320,10 +320,12 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         payload = instance.payload;
       }
       input = payload;
+      const causationIds = instance === undefined ? [] : [instance.id];
       const invocation = await (membrane as AnySingleInvoke)(nodeDef, payload, {
         correlationId,
         identity,
         step: pulse,
+        causationIds,
       });
       result = invocation.result;
       envelope = invocation.envelope;
