@@ -48,13 +48,16 @@ file uses `birthday#1` as a placeholder scheme — nothing in the docs commits t
 §1 specifies UUIDv7/ULID. Swapped for legibility in this hand-written example; a real elaborator/
 runtime should use the real scheme.
 
-**7. `causationId` is `null` throughout; `correlationId` is shared across the whole run.**
-`buildEnvelope` (`spikes/ts-prototype/src/membrane.ts`) hardcodes `causationId: null` — causation
-isn't tracked yet, an honest placeholder awaiting its own spec, not a dropped value (see
-"Join keying" in `docs/open-questions.md`, still unresolved). `step` is the pulse number:
-`origin_Person_literal` is the origin and fires in the first pulse, `step: 1`; `birthday` becomes
-ready only once it has appended, so it fires the pulse after, `step: 2`; `expect_Person_age_42`
-follows one pulse later still, `step: 3`.
+**7. `causationIds` names the specific instances each invocation consumed; `correlationId` is
+shared across the whole run.** `origin_Person_literal` is the origin, so it consumed nothing:
+`causationIds: []`. `birthday` is `single`-input, so it names the one `Person` instance it read:
+`["origin#1"]`. `expect_Person_age_42` is likewise `single`-input, downstream of `birthday`:
+`["birthday#1"]`. This program never exercises `allOf`/fan-in, where an invocation would name
+several instances at once, one per declared edge — see `readme.md`'s own worked example ("What a
+run leaves behind") for that case. `step` is the pulse number: `origin_Person_literal` is the
+origin and fires in the first pulse, `step: 1`; `birthday` becomes ready only once it has
+appended, so it fires the pulse after, `step: 2`; `expect_Person_age_42` follows one pulse later
+still, `step: 3`.
 
 **8. `Pass` and `Fail` are edges with no fields.** Reasonable given `expect` outputs `one of {Pass,
 Fail}` and neither carries data in this example, but a real `Fail` almost certainly wants a reason/

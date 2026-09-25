@@ -60,7 +60,7 @@
         "envelope": {
           "id": "env-1",
           "correlationId": "run-1",
-          "causationId": null,
+          "causationIds": [],
           "step": 1,
           "schemaHash": "4b7c35de"
         }
@@ -72,7 +72,7 @@
         "envelope": {
           "id": "env-2",
           "correlationId": "run-1",
-          "causationId": null,
+          "causationIds": ["origin#1"],
           "step": 2,
           "schemaHash": "4b7c35de"
         }
@@ -84,7 +84,7 @@
         "envelope": {
           "id": "env-3",
           "correlationId": "run-1",
-          "causationId": null,
+          "causationIds": ["birthday#1"],
           "step": 3,
           "schemaHash": "c5d6ca8d"
         }
