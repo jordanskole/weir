@@ -58,12 +58,10 @@ export async function replayInvocation(
   }
 
   const nodeDef = await resolveImplementationAt(node, implRoot, entry.envelope.contractHash);
-  const { result } = await invokeWithInput(
-    nodeDef,
-    entry.input,
-    entry.envelope.correlationId,
-    entry.envelope.identity,
-    entry.envelope.step,
-  );
+  const { result } = await invokeWithInput(nodeDef, entry.input, {
+    correlationId: entry.envelope.correlationId,
+    identity: entry.envelope.identity,
+    step: entry.envelope.step,
+  });
   return result;
 }

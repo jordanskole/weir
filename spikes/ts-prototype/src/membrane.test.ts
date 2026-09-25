@@ -22,7 +22,7 @@ const birthday = defineNode({
 
 describe("membrane", () => {
   it("calls fn with a payload that matches the node's declared input edge", async () => {
-    const invocation = await membrane(birthday, { age: 41, nickname: null }, "thread-1");
+    const invocation = await membrane(birthday, { age: 41, nickname: null }, { correlationId: "thread-1" });
     expect(invocation.result).toEqual({ age: 42, nickname: null });
     expect(invocation.envelope).toBeDefined();
   });
@@ -30,14 +30,14 @@ describe("membrane", () => {
   it("is derived purely from the NodeDef — no separate configuration", async () => {
     // Same node, a second membrane() call: nothing to pass but the NodeDef itself
     // and this invocation's own arguments.
-    const invocation = await membrane(birthday, { age: 10, nickname: "Bird" }, "thread-1");
+    const invocation = await membrane(birthday, { age: 10, nickname: "Bird" }, { correlationId: "thread-1" });
     expect(invocation.result).toEqual({ age: 11, nickname: "Bird" });
   });
 
   it("resolves to Failed<In>, carrying the original payload, when a required field is missing — fn never runs, but the attempt still carries a real envelope", async () => {
     let called = false;
     const node = defineNode({ ...birthday, fn: (p) => { called = true; return p; } });
-    const invocation = await membrane(node, { nickname: null }, "thread-1");
+    const invocation = await membrane(node, { nickname: null }, { correlationId: "thread-1" });
     expect(invocation.result).toEqual({ input: { nickname: null }, reason: expect.stringMatching(/age/) });
     expect(invocation.envelope).toBeDefined();
     expect(invocation.envelope.node).toBe(node.name);
@@ -46,21 +46,21 @@ describe("membrane", () => {
   });
 
   it("resolves to Failed<In> for the wrong type on a field — envelope present, since buildEnvelope now runs before the assert", async () => {
-    const invocation = await membrane(birthday, { age: "old", nickname: null }, "thread-1");
+    const invocation = await membrane(birthday, { age: "old", nickname: null }, { correlationId: "thread-1" });
     expect(invocation.result).toEqual({ input: { age: "old", nickname: null }, reason: expect.stringMatching(/age/) });
     expect(invocation.envelope).toBeDefined();
     expect(invocation.envelope.node).toBe(birthday.name);
   });
 
   it("resolves to Failed<In> for null on a non-nullable field — envelope present, since buildEnvelope now runs before the assert", async () => {
-    const invocation = await membrane(birthday, { age: null, nickname: null }, "thread-1");
+    const invocation = await membrane(birthday, { age: null, nickname: null }, { correlationId: "thread-1" });
     expect(invocation.result).toEqual({ input: { age: null, nickname: null }, reason: expect.stringMatching(/age/) });
     expect(invocation.envelope).toBeDefined();
     expect(invocation.envelope.node).toBe(birthday.name);
   });
 
   it("accepts null for a nullable field", async () => {
-    const invocation = await membrane(birthday, { age: 5, nickname: null }, "thread-1");
+    const invocation = await membrane(birthday, { age: 5, nickname: null }, { correlationId: "thread-1" });
     expect(invocation.result).toEqual({
       age: 6,
       nickname: null,
@@ -68,22 +68,22 @@ describe("membrane", () => {
   });
 
   it("resolves to Failed<In> for a non-object payload", async () => {
-    expect((await membrane(birthday, "nope", "thread-1")).result).toEqual({
+    expect((await membrane(birthday, "nope", { correlationId: "thread-1" })).result).toEqual({
       input: "nope",
       reason: expect.stringMatching(/Person/),
     });
-    expect((await membrane(birthday, null, "thread-1")).result).toEqual({
+    expect((await membrane(birthday, null, { correlationId: "thread-1" })).result).toEqual({
       input: null,
       reason: expect.stringMatching(/Person/),
     });
-    expect((await membrane(birthday, [], "thread-1")).result).toEqual({
+    expect((await membrane(birthday, [], { correlationId: "thread-1" })).result).toEqual({
       input: [],
       reason: expect.stringMatching(/Person/),
     });
   });
 
   it("lists every violation in Failed<In>.reason, not just the first", async () => {
-    const invocation = await membrane(birthday, { age: "old", nickname: 5 }, "thread-1");
+    const invocation = await membrane(birthday, { age: "old", nickname: 5 }, { correlationId: "thread-1" });
     expect(invocation.result).toEqual({
       input: { age: "old", nickname: 5 },
       reason: expect.stringMatching(/age/),
@@ -98,7 +98,7 @@ describe("membrane", () => {
         throw new Error("kaboom");
       },
     });
-    const invocation = await membrane(node, { age: 41, nickname: null }, "thread-1");
+    const invocation = await membrane(node, { age: 41, nickname: null }, { correlationId: "thread-1" });
     expect(invocation.result).toEqual({ input: { age: 41, nickname: null }, reason: "kaboom" });
     expect(invocation.envelope).toBeDefined();
   });
@@ -108,7 +108,7 @@ describe("membrane", () => {
       ...birthday,
       fn: (p) => ({ input: p, reason: "too old to have a birthday" }),
     });
-    const invocation = await membrane(node, { age: 200, nickname: null }, "thread-1");
+    const invocation = await membrane(node, { age: 200, nickname: null }, { correlationId: "thread-1" });
     expect(invocation.result).toEqual({ input: { age: 200, nickname: null }, reason: "too old to have a birthday" });
     expect(invocation.envelope).toBeDefined();
   });
@@ -118,13 +118,13 @@ describe("membrane", () => {
     // envelope the invoke resolves to can be compared by id — not merely
     // asserting some envelope exists on both sides.
     const node = defineNode({ ...birthday, fn: (_person, env) => env });
-    const invocation = await membrane(node, { age: 41, nickname: null }, "thread-1");
+    const invocation = await membrane(node, { age: 41, nickname: null }, { correlationId: "thread-1" });
     expect(invocation.envelope).toBeDefined();
     expect((invocation.result as { id: string }).id).toBe(invocation.envelope?.id);
   });
 
   it("still returns a real envelope when the input assert rejects — Fn never ran, but the attempt is observable", async () => {
-    const invocation = await membrane(birthday, { age: "old", nickname: null }, "thread-1");
+    const invocation = await membrane(birthday, { age: "old", nickname: null }, { correlationId: "thread-1" });
     expect(invocation.envelope).toBeDefined();
     expect(invocation.envelope.correlationId).toBe("thread-1");
     expect(invocation.envelope.node).toBe(birthday.name);
@@ -405,19 +405,19 @@ describe("membrane — allOf", () => {
   it("is not ready when only some declared edges are present for this correlation_id", async () => {
     const log = new InMemoryLog();
     log.append("A", "thread-1", { value: "a" });
-    await expect(membrane(nodeC, "thread-1", log)).resolves.toBeUndefined();
+    await expect(membrane(nodeC, log, { correlationId: "thread-1" })).resolves.toBeUndefined();
   });
 
   it("is not ready with no edges present at all", async () => {
     const log = new InMemoryLog();
-    await expect(membrane(nodeC, "thread-1", log)).resolves.toBeUndefined();
+    await expect(membrane(nodeC, log, { correlationId: "thread-1" })).resolves.toBeUndefined();
   });
 
   it("calls fn once all declared edges are present, keyed by edge name", async () => {
     const log = new InMemoryLog();
     log.append("A", "thread-1", { value: "a" });
     log.append("B", "thread-1", { value: "b" });
-    const invocation = await membrane(nodeC, "thread-1", log);
+    const invocation = await membrane(nodeC, log, { correlationId: "thread-1" });
     expect(invocation?.result).toEqual({ value: "a+b" });
     expect(invocation?.envelope).toBeDefined();
   });
@@ -426,7 +426,7 @@ describe("membrane — allOf", () => {
     const log = new InMemoryLog();
     log.append("B", "thread-1", { value: "b" });
     log.append("A", "thread-1", { value: "a" });
-    const invocation = await membrane(nodeC, "thread-1", log);
+    const invocation = await membrane(nodeC, log, { correlationId: "thread-1" });
     expect(invocation?.result).toEqual({ value: "a+b" });
   });
 
@@ -435,8 +435,8 @@ describe("membrane — allOf", () => {
     log.append("A", "thread-1", { value: "a" });
     log.append("A", "thread-2", { value: "a2" });
     log.append("B", "thread-2", { value: "b2" });
-    await expect(membrane(nodeC, "thread-1", log)).resolves.toBeUndefined();
-    const invocation = await membrane(nodeC, "thread-2", log);
+    await expect(membrane(nodeC, log, { correlationId: "thread-1" })).resolves.toBeUndefined();
+    const invocation = await membrane(nodeC, log, { correlationId: "thread-2" });
     expect(invocation?.result).toEqual({ value: "a2+b2" });
   });
 
@@ -444,8 +444,8 @@ describe("membrane — allOf", () => {
     const log = new InMemoryLog();
     log.append("A", "thread-1", { value: "a" });
     log.append("B", "thread-1", { value: "b" });
-    const first = await membrane(nodeC, "thread-1", log);
-    const second = await membrane(nodeC, "thread-1", log);
+    const first = await membrane(nodeC, log, { correlationId: "thread-1" });
+    const second = await membrane(nodeC, log, { correlationId: "thread-1" });
     expect(first?.result).toEqual({ value: "a+b" });
     expect(second?.result).toEqual({ value: "a+b" });
   });
@@ -454,7 +454,7 @@ describe("membrane — allOf", () => {
     const log = new InMemoryLog();
     log.append("A", "thread-1", { value: 5 });
     log.append("B", "thread-1", { value: "b" });
-    const invocation = await membrane(nodeC, "thread-1", log);
+    const invocation = await membrane(nodeC, log, { correlationId: "thread-1" });
     expect(invocation?.result).toEqual({
       input: { A: { value: 5 }, B: { value: "b" } },
       reason: expect.stringMatching(/A/),
@@ -473,7 +473,7 @@ describe("membrane — allOf", () => {
     const log = new InMemoryLog();
     log.append("A", "thread-1", { value: "a" });
     log.append("B", "thread-1", { value: "b" });
-    const invocation = await membrane(throwing, "thread-1", log);
+    const invocation = await membrane(throwing, log, { correlationId: "thread-1" });
     expect(invocation?.result).toEqual({ input: { A: { value: "a" }, B: { value: "b" } }, reason: "kaboom" });
     expect(invocation?.envelope).toBeDefined();
   });
@@ -489,7 +489,7 @@ describe("membrane — envelope", () => {
         return { age: 1, nickname: null };
       },
     });
-    await membrane(node, { age: 41, nickname: null }, "thread-1");
+    await membrane(node, { age: 41, nickname: null }, { correlationId: "thread-1" });
     expect(receivedArgs).toBe(1);
   });
 
@@ -502,7 +502,7 @@ describe("membrane — envelope", () => {
         return person;
       },
     });
-    await membrane(node, { age: 41, nickname: null }, "thread-1");
+    await membrane(node, { age: 41, nickname: null }, { correlationId: "thread-1" });
 
     expect(received?.correlationId).toBe("thread-1");
     expect(received?.id).toMatch(/^[0-9a-f-]{36}$/);
@@ -522,7 +522,7 @@ describe("membrane — envelope", () => {
         return person;
       },
     });
-    await membrane(node, { age: 41, nickname: null }, "thread-1");
+    await membrane(node, { age: 41, nickname: null }, { correlationId: "thread-1" });
 
     expect(received?.node).toBe(birthday.name);
     expect(received?.contractHash).toBe((await hashNode(birthday)).hash);
@@ -540,7 +540,7 @@ describe("membrane — envelope", () => {
     const log = new InMemoryLog();
     log.append("A", "thread-1", { value: "a" });
     log.append("B", "thread-1", { value: "b" });
-    await membrane(node, "thread-1", log);
+    await membrane(node, log, { correlationId: "thread-1" });
     expect(received?.correlationId).toBe("thread-1");
   });
 });
@@ -555,7 +555,7 @@ describe("membrane — scope", () => {
         return person;
       },
     });
-    await membrane(node, { age: 41, nickname: null }, "thread-1", { sub: "user-1", iss: "issuer" });
+    await membrane(node, { age: 41, nickname: null }, { correlationId: "thread-1", identity: { sub: "user-1", iss: "issuer" } });
     expect(received).toEqual({});
   });
 
@@ -569,7 +569,7 @@ describe("membrane — scope", () => {
         return person;
       },
     });
-    await membrane(node, { age: 41, nickname: null }, "thread-1", { sub: "user-1", iss: "issuer" });
+    await membrane(node, { age: 41, nickname: null }, { correlationId: "thread-1", identity: { sub: "user-1", iss: "issuer" } });
     expect(received).toEqual({ sub: "user-1" });
   });
 
@@ -583,15 +583,15 @@ describe("membrane — scope", () => {
         return person;
       },
     });
-    await membrane(node, { age: 41, nickname: null }, "thread-1");
+    await membrane(node, { age: 41, nickname: null }, { correlationId: "thread-1" });
     expect(received).toEqual({ sub: expect.any(String) });
   });
 
   it("resolves to Failed<In> when scope names a field Identity doesn't have — no envelope, buildEnvelope threw", async () => {
     const node = defineNode({ ...birthday, scope: ["read:Identity:email"] });
-    const invocation = await membrane(node, { age: 41, nickname: null }, "thread-1", {
-      sub: "user-1",
-      iss: "issuer",
+    const invocation = await membrane(node, { age: 41, nickname: null }, {
+      correlationId: "thread-1",
+      identity: { sub: "user-1", iss: "issuer" },
     });
     expect(invocation.result).toEqual({
       input: { age: 41, nickname: null },
@@ -602,9 +602,9 @@ describe("membrane — scope", () => {
 
   it("resolves to Failed<In> when scope names an edge other than Identity — no envelope, buildEnvelope threw", async () => {
     const node = defineNode({ ...birthday, scope: ["read:Person:age"] });
-    const invocation = await membrane(node, { age: 41, nickname: null }, "thread-1", {
-      sub: "user-1",
-      iss: "issuer",
+    const invocation = await membrane(node, { age: 41, nickname: null }, {
+      correlationId: "thread-1",
+      identity: { sub: "user-1", iss: "issuer" },
     });
     expect(invocation.result).toEqual({
       input: { age: 41, nickname: null },
@@ -615,9 +615,9 @@ describe("membrane — scope", () => {
 
   it("resolves to Failed<In> for an unsupported verb — no envelope, buildEnvelope threw", async () => {
     const node = defineNode({ ...birthday, scope: ["write:Identity:sub"] });
-    const invocation = await membrane(node, { age: 41, nickname: null }, "thread-1", {
-      sub: "user-1",
-      iss: "issuer",
+    const invocation = await membrane(node, { age: 41, nickname: null }, {
+      correlationId: "thread-1",
+      identity: { sub: "user-1", iss: "issuer" },
     });
     expect(invocation.result).toEqual({
       input: { age: 41, nickname: null },

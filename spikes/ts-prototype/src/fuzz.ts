@@ -238,7 +238,7 @@ export async function fuzzNode(
 
   for (const [i, input] of cases.entries()) {
     assertGeneratedCase(nodeDef.input, input, i);
-    const { result } = await invokeWithInput(nodeDef, input, `fuzz-${i}`);
+    const { result } = await invokeWithInput(nodeDef, input, { correlationId: `fuzz-${i}` });
     if (isAcceptableResult(nodeDef.output, result)) {
       passed += 1;
     } else {

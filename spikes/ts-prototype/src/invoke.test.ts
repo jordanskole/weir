@@ -25,7 +25,7 @@ describe("invokeWithInput", () => {
       fn: (payload) => ({ age: payload.age + 1 }),
     });
 
-    const { result } = await invokeWithInput(birthday, { age: 41 }, "c-1");
+    const { result } = await invokeWithInput(birthday, { age: 41 }, { correlationId: "c-1" });
     expect(result).toEqual({ age: 42 });
   });
 
@@ -37,7 +37,9 @@ describe("invokeWithInput", () => {
       fn: () => ({ age: 7 }),
     });
 
-    const { result } = await invokeWithInput(combine, { Person: { age: 41 }, Pet: { species: "cat" } }, "c-2");
+    const { result } = await invokeWithInput(combine, { Person: { age: 41 }, Pet: { species: "cat" } }, {
+      correlationId: "c-2",
+    });
     expect(result).toEqual({ age: 7 });
   });
 
@@ -49,7 +51,9 @@ describe("invokeWithInput", () => {
       fn: () => ({ age: 7 }),
     });
 
-    expect(await invokeWithInput(combine, { Person: { age: 41 } }, "c-3")).toEqual({ result: undefined });
+    expect(await invokeWithInput(combine, { Person: { age: 41 } }, { correlationId: "c-3" })).toEqual({
+      result: undefined,
+    });
   });
 
   it("returns Failed<In> rather than throwing when Fn throws — the membrane boundary, not a bypass", async () => {
@@ -62,7 +66,7 @@ describe("invokeWithInput", () => {
       },
     });
 
-    const { result } = await invokeWithInput(boom, { age: 41 }, "c-4");
+    const { result } = await invokeWithInput(boom, { age: 41 }, { correlationId: "c-4" });
     expect(result).toEqual({ input: { age: 41 }, reason: "nope" });
   });
 
@@ -79,7 +83,7 @@ describe("invokeWithInput", () => {
     // so this should land exactly where a bag genuinely missing an edge does:
     // membrane's own readiness `undefined`, folded into `result` here rather
     // than escaping as a bare `undefined`.
-    expect(await invokeWithInput(combine, null, "c-5")).toEqual({ result: undefined });
-    expect(await invokeWithInput(combine, undefined, "c-6")).toEqual({ result: undefined });
+    expect(await invokeWithInput(combine, null, { correlationId: "c-5" })).toEqual({ result: undefined });
+    expect(await invokeWithInput(combine, undefined, { correlationId: "c-6" })).toEqual({ result: undefined });
   });
 });

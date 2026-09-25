@@ -66,7 +66,7 @@
  */
 
 import { membrane } from "./membrane.js";
-import type { InstanceEnvelope, Log, LoggedInstance } from "./membrane.js";
+import type { InstanceEnvelope, InvocationContext, Log, LoggedInstance } from "./membrane.js";
 import type { Program } from "./implementation.js";
 import type { AnyEdgeDef, Envelope, Failed, InputSpec, NodeDef, OutputSpec, PayloadOf } from "./types.js";
 import { Identity, failedEdgeName, failedAllOfEdgeName } from "./types.js";
@@ -82,22 +82,17 @@ import type { Trace } from "./trace.js";
  * narrowing limitation, not a genuine call-shape ambiguity (checked at
  * runtime by the `kind` branch itself). These two aliases name the cast
  * instead of hiding it. `AnyAllOfInvoke` names the cast for `allOf`-input
- * nodes' call shape (`nodeDef, correlationId, log, identity?`); `In` is
- * erased here too.
+ * nodes' call shape (`nodeDef, log, context`); `In` is erased here too.
  */
 type AnySingleInvoke = (
   nodeDef: NodeDef,
   payload: unknown,
-  correlationId: string,
-  identity?: PayloadOf<typeof Identity>,
-  step?: number,
+  context: InvocationContext,
 ) => Promise<{ result: unknown; envelope?: Envelope }>;
 type AnyAllOfInvoke = (
   nodeDef: NodeDef,
-  correlationId: string,
   log: Log,
-  identity?: PayloadOf<typeof Identity>,
-  step?: number,
+  context: InvocationContext,
 ) => Promise<{ result: unknown; envelope?: Envelope } | undefined>;
 
 export interface RunResult {
@@ -325,7 +320,11 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         payload = instance.payload;
       }
       input = payload;
-      const invocation = await (membrane as AnySingleInvoke)(nodeDef, payload, correlationId, identity, pulse);
+      const invocation = await (membrane as AnySingleInvoke)(nodeDef, payload, {
+        correlationId,
+        identity,
+        step: pulse,
+      });
       result = invocation.result;
       envelope = invocation.envelope;
     } else {
@@ -338,7 +337,7 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         bag[edge.name] = log.latest(edge.name, correlationId);
       }
       input = bag;
-      const invocation = await (membrane as AnyAllOfInvoke)(nodeDef, correlationId, log, identity, pulse);
+      const invocation = await (membrane as AnyAllOfInvoke)(nodeDef, log, { correlationId, identity, step: pulse });
       if (invocation === undefined) return false;
       result = invocation.result;
       envelope = invocation.envelope;

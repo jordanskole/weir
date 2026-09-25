@@ -12,9 +12,8 @@
  */
 
 import { InMemoryLog, membrane } from "./membrane.js";
-import type { Log } from "./membrane.js";
-import { Identity } from "./types.js";
-import type { Envelope, NodeDef, PayloadOf } from "./types.js";
+import type { InvocationContext, Log } from "./membrane.js";
+import type { Envelope, NodeDef } from "./types.js";
 
 /**
  * The same documented cast idiom `runtime.ts` already uses: `membrane()`'s
@@ -22,9 +21,9 @@ import type { Envelope, NodeDef, PayloadOf } from "./types.js";
  * which TS can't resolve from a plain, doubly-defaulted `NodeDef` even
  * after `nodeDef.input.kind` has been checked at the value level — a real
  * TS narrowing limitation, not a genuine call-shape ambiguity (the `kind`
- * branch checks it at runtime). Both call shapes carry the same third and
- * fourth, optional `identity`/`step` arguments `membrane.ts`'s real
- * `MembraneArgs` accepts — `identity` typed `Partial`, matching
+ * branch checks it at runtime). Both call shapes carry the same trailing
+ * `context` argument `membrane.ts`'s real `MembraneArgs` accepts —
+ * `InvocationContext`'s `identity` is typed `Partial`, matching
  * `Envelope.identity` itself, because replay's caller (see
  * `replayInvocation`) can only ever supply a previously *narrowed*
  * identity, never the full claims set.
@@ -32,16 +31,12 @@ import type { Envelope, NodeDef, PayloadOf } from "./types.js";
 type AnySingleInvoke = (
   nodeDef: NodeDef,
   payload: unknown,
-  correlationId: string,
-  identity?: Partial<PayloadOf<typeof Identity>>,
-  step?: number,
+  context: InvocationContext,
 ) => Promise<{ result: unknown; envelope?: Envelope }>;
 type AnyAllOfInvoke = (
   nodeDef: NodeDef,
-  correlationId: string,
   log: Log,
-  identity?: Partial<PayloadOf<typeof Identity>>,
-  step?: number,
+  context: InvocationContext,
 ) => Promise<{ result: unknown; envelope?: Envelope } | undefined>;
 
 /**
@@ -66,14 +61,14 @@ type AnyAllOfInvoke = (
  * the latter can ever hand this a non-object, so the guard costs the former
  * nothing.
  *
- * `identity` is optional and passed straight through to `membrane()` —
- * omitted, a node resolves under `SYSTEM_IDENTITY` exactly as before
- * (membrane.ts's documented default). `replay.ts` is the caller that
- * supplies one, re-feeding a recorded `Envelope.identity` back in so a
+ * `context.identity` is optional and passed straight through to
+ * `membrane()` — omitted, a node resolves under `SYSTEM_IDENTITY` exactly
+ * as before (membrane.ts's documented default). `replay.ts` is the caller
+ * that supplies one, re-feeding a recorded `Envelope.identity` back in so a
  * scoped node's replayed result reflects who actually invoked it rather
  * than always falling through to the system default.
  *
- * `step` is threaded the same way, for the same reason: optional, trailing,
+ * `context.step` is threaded the same way, for the same reason: optional,
  * passed straight through to `membrane()`, defaulting to 0 for a caller
  * with no scheduler behind it. `replay.ts` is again the caller that
  * supplies one, re-feeding a recorded `Envelope.step` back in so a replayed
@@ -85,19 +80,18 @@ type AnyAllOfInvoke = (
 export async function invokeWithInput(
   nodeDef: NodeDef,
   input: unknown,
-  correlationId: string,
-  identity?: Partial<PayloadOf<typeof Identity>>,
-  step?: number,
+  context: InvocationContext,
 ): Promise<{ result: unknown; envelope?: Envelope }> {
   if (nodeDef.input.kind === "single") {
-    return await (membrane as AnySingleInvoke)(nodeDef, input, correlationId, identity, step);
+    return await (membrane as AnySingleInvoke)(nodeDef, input, context);
   }
 
+  const { correlationId } = context;
   const log = new InMemoryLog();
   const bag = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
   for (const edge of nodeDef.input.edges) {
     log.append(edge.name, correlationId, bag[edge.name]);
   }
-  const invocation = await (membrane as AnyAllOfInvoke)(nodeDef, correlationId, log, identity, step);
+  const invocation = await (membrane as AnyAllOfInvoke)(nodeDef, log, context);
   return invocation ?? { result: undefined };
 }

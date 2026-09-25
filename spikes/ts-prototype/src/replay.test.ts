@@ -89,7 +89,7 @@ async function recordInvocation(
   correlationId: string,
 ): Promise<TraceEntry> {
   const nodeDef = await resolveImplementationAt(nodeDecl, implRoot, contractHash);
-  const { result, envelope } = await invokeWithInput(nodeDef, input, correlationId);
+  const { result, envelope } = await invokeWithInput(nodeDef, input, { correlationId });
   if (!envelope) throw new Error("test setup: expected an envelope from a successful invocation");
   return { envelope, input, result };
 }
@@ -235,9 +235,9 @@ describe("replayInvocation", () => {
     );
 
     const nodeDef = await resolveImplementationAt(whoAmI, dir, hash);
-    const { result, envelope } = await membrane(nodeDef, { age: 41 }, "c-scope-drift", {
-      sub: "alice",
-      iss: "issuer",
+    const { result, envelope } = await membrane(nodeDef, { age: 41 }, {
+      correlationId: "c-scope-drift",
+      identity: { sub: "alice", iss: "issuer" },
     });
     if (!envelope) throw new Error("test setup: expected an envelope from a successful invocation");
     expect(envelope.identity).toEqual({ sub: "alice" });
@@ -264,10 +264,10 @@ describe("replayInvocation", () => {
 
     const nodeDef = await resolveImplementationAt(whoAmI, dir, hash);
     // Recorded under a real caller identity, not the system default —
-    // membrane() already accepts this third argument.
-    const { result, envelope } = await membrane(nodeDef, { age: 41 }, "c-identity", {
-      sub: "alice",
-      iss: "issuer",
+    // membrane() already accepts identity on its context argument.
+    const { result, envelope } = await membrane(nodeDef, { age: 41 }, {
+      correlationId: "c-identity",
+      identity: { sub: "alice", iss: "issuer" },
     });
     if (!envelope) throw new Error("test setup: expected an envelope from a successful invocation");
     expect(result).toEqual({ value: "alice" });
@@ -293,7 +293,7 @@ describe("replayInvocation", () => {
     const nodeDef = await resolveImplementationAt(stepReader, dir, hash);
     // Recorded at a non-zero step, as a real pulse-loop invocation would be
     // (runtime.ts's tryFire calls membrane() with the current pulse number).
-    const { result, envelope } = await membrane(nodeDef, { age: 41 }, "c-step", undefined, 5);
+    const { result, envelope } = await membrane(nodeDef, { age: 41 }, { correlationId: "c-step", step: 5 });
     if (!envelope) throw new Error("test setup: expected an envelope from a successful invocation");
     expect(result).toEqual({ age: 5 });
     expect(envelope.step).toBe(5);

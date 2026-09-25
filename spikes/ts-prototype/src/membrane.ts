@@ -375,33 +375,42 @@ export interface Invocation<In extends InputSpec, O extends OutputSpec> {
 }
 
 /**
- * `membrane()`'s arguments after the declaration itself. A `single`-input
- * node takes a payload directly, the invocation's correlationId, and
- * (optionally) the caller's identity — defaults to a documented system
- * identity when omitted (file header). An `allOf`-input node takes a
- * correlationId and the Log to resolve readiness against instead of a
- * payload — see `MembraneResult` for what that readiness check resolves
- * to.
+ * The envelope fields an invocation's *caller* supplies, as against the
+ * ones the membrane derives for itself (`id`, `timestamp`, `node`,
+ * `contractHash`). Grouped rather than passed positionally because the
+ * list grows: `identity`, then `step`, then `causationIds`, and four
+ * optional positional parameters is where a signature stops being
+ * readable — the same slide that took `runNetlist` to seven before `Run`
+ * and `Host` split it.
  *
  * `identity` is typed `Partial`, not the full `PayloadOf<typeof Identity>`:
  * a live caller normally supplies the full claims set, but `replay.ts`
- * supplies only a previously *narrowed* identity (`Envelope.identity` is
- * itself `Partial` — see that field's own doc comment), and
- * `narrowIdentity` below only ever reads the fields a node's `scope` names
- * regardless of which case this is. Re-feeding a narrowed identity through
- * the same narrowing is idempotent under an unchanged `scope`, which is
- * exactly what makes replay work (see replay.ts's header for the residual
- * limit when `scope` has since widened).
+ * supplies a previously *narrowed* identity. Re-feeding a narrowed
+ * identity through the same narrowing is idempotent under an unchanged
+ * `scope`, which is what makes replay work.
  *
- * `step` is the scheduler's pulse number, threaded in rather than stamped on
- * afterwards: the envelope is built *before* `Fn` runs and handed to it, so a
- * caller that patched the returned envelope would leave `Fn` seeing a value
- * the log disagrees with. Optional and trailing, exactly as `identity` is —
- * a caller with no scheduler behind it gets the documented default of 0.
+ * `step` is the scheduler's pulse number, threaded in rather than stamped
+ * on afterwards: the envelope is built before `Fn` runs and handed to it,
+ * so a caller patching the returned envelope would leave `Fn` seeing a
+ * value the log disagrees with. A caller with no scheduler behind it gets
+ * the documented default of 0.
+ */
+export interface InvocationContext {
+  correlationId: string;
+  identity?: Partial<PayloadOf<typeof Identity>>;
+  step?: number;
+}
+
+/**
+ * `membrane()`'s arguments after the declaration itself. A `single`-input
+ * node takes a payload directly and the invocation's `InvocationContext`.
+ * An `allOf`-input node takes the Log to resolve readiness against instead
+ * of a payload, plus the same context — see `MembraneResult` for what that
+ * readiness check resolves to.
  */
 type MembraneArgs<In extends InputSpec> = In extends { kind: "single" }
-  ? [payload: unknown, correlationId: string, identity?: Partial<PayloadOf<typeof Identity>>, step?: number]
-  : [correlationId: string, log: Log, identity?: Partial<PayloadOf<typeof Identity>>, step?: number];
+  ? [payload: unknown, context: InvocationContext]
+  : [log: Log, context: InvocationContext];
 
 /**
  * What `membrane()` resolves to. A `single`-input node always resolves to
@@ -469,19 +478,14 @@ function narrowIdentity(
  * Can throw (a bad `scope` declaration) — the caller is responsible for
  * turning that into `Failed<In>`.
  */
-async function buildEnvelope(
-  nodeDef: NodeDecl,
-  correlationId: string,
-  identity: Partial<PayloadOf<typeof Identity>>,
-  step = 0,
-): Promise<Envelope> {
+async function buildEnvelope(nodeDef: NodeDecl, context: InvocationContext): Promise<Envelope> {
   return {
     id: crypto.randomUUID(),
-    correlationId,
+    correlationId: context.correlationId,
     causationId: null,
     timestamp: new Date().toISOString(),
-    step,
-    identity: narrowIdentity(nodeDef.scope, identity),
+    step: context.step ?? 0,
+    identity: narrowIdentity(nodeDef.scope, context.identity ?? SYSTEM_IDENTITY),
     node: nodeDef.name,
     contractHash: (await hashNode(nodeDef)).hash,
   };
@@ -535,15 +539,10 @@ export async function membrane<In extends InputSpec, O extends OutputSpec>(
 ): Promise<MembraneResult<In, O>> {
   if (nodeDef.input.kind === "single") {
     const edge = nodeDef.input.edge;
-    const [payload, correlationId, identity, step] = args as unknown as [
-      payload: unknown,
-      correlationId: string,
-      identity: Partial<PayloadOf<typeof Identity>> | undefined,
-      step: number | undefined,
-    ];
+    const [payload, context] = args as unknown as [payload: unknown, context: InvocationContext];
     let envelope: Envelope;
     try {
-      envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY, step);
+      envelope = await buildEnvelope(nodeDef, context);
     } catch (cause) {
       return { result: { input: payload as InputPayload<In>, reason: reasonOf(cause) } } as MembraneResult<In, O>;
     }
@@ -565,12 +564,8 @@ export async function membrane<In extends InputSpec, O extends OutputSpec>(
 
   if (nodeDef.input.kind === "allOf") {
     const edges = nodeDef.input.edges;
-    const [correlationId, log, identity, step] = args as unknown as [
-      correlationId: string,
-      log: Log,
-      identity: Partial<PayloadOf<typeof Identity>> | undefined,
-      step: number | undefined,
-    ];
+    const [log, context] = args as unknown as [log: Log, context: InvocationContext];
+    const { correlationId } = context;
 
     // Hazard, other end: `Log.latest`'s own doc comment above warns that
     // `runtime.ts`'s trace-rebuild read depends on nothing appending to
@@ -588,7 +583,7 @@ export async function membrane<In extends InputSpec, O extends OutputSpec>(
 
     let envelope: Envelope;
     try {
-      envelope = await buildEnvelope(nodeDef, correlationId, identity ?? SYSTEM_IDENTITY, step);
+      envelope = await buildEnvelope(nodeDef, context);
     } catch (cause) {
       return { result: { input: rawBag as InputPayload<In>, reason: reasonOf(cause) } } as MembraneResult<In, O>;
     }
