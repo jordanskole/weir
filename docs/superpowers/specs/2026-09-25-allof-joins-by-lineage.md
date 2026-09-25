@@ -1,6 +1,6 @@
 # `allOf` joins by lineage
 
-Status: specified, not yet built.
+Status: implemented.
 
 ## Motivation
 
