@@ -151,6 +151,8 @@ This is §5's own doctrine applied one layer up: *"replay on mismatch either mig
 - **Splitting `Log`'s two jobs** (emission record vs. input staging). Surfaced by §2, recorded as an open question, not resolved.
 - **Migrate-or-refuse on edge schema mismatch.** §5 describes replay migrating through a declared rule or refusing when an instance's schema hash no longer matches. This spec makes the hash *present* on stored instances, which is the prerequisite; the migration machinery is separate.
 - **Causation chains.** `causationId` stays the honest `null` placeholder `membrane.ts` already documents — nothing yet tells a node which upstream instance triggered it, and inventing it here would be scope creep.
+
+  > **Built, 2026-09-24.** This was true when written. Causation is now tracked: `Envelope.causationId` became `causationIds: string[]`, the runtime supplies it for a `single`-input node, and the membrane derives it for an `allOf` node during its own resolution. See docs/superpowers/specs/2026-09-24-causation-is-real.md.
 - **`step`.** Likewise still `0`; the pulse model isn't wired into the membrane.
 
 ## Testing

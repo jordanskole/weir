@@ -1,6 +1,6 @@
 # Causation is real
 
-Status: specified, not yet built.
+Status: implemented.
 
 ## Motivation
 

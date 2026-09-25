@@ -18,7 +18,9 @@ indistinguishable from a primitive at its boundary, so topologies nest without l
 upward and bottom out at primitives.
 
 **Envelope** — per-invocation metadata wrapping every edge instance: id (UUIDv7/ULID),
-correlation_id, causation_id, timestamp, step index, identity, schema hash. Deliberately
+correlation_id, causation_ids, timestamp, step index, identity, schema hash.
+`causation_ids` is a list, not a single id, because a multi-input (`allOf`) node
+consumes several instances at once, and only a list can name all of them. Deliberately
 does not carry a `state` or `history` field — an accumulated per-thread state map was
 considered and rejected in favor of resolving it on demand, at each node's boundary,
 from the per-edge-type logs themselves (§5); baking it into the envelope's own persisted
@@ -370,6 +372,6 @@ paper over it with more storage. Nothing is destructively regenerated; every acc
 implementation a node ever had stays reachable.
 
 **Replay.** An invocation records which implementation version it actually ran under,
-immutable once written, alongside `causation_id` and `schema_hash` in the envelope.
+immutable once written, alongside `causation_ids` and `schema_hash` in the envelope.
 Redeploying a node's implementation never touches invocations already in flight — they
 stay pinned to the version they started under; only new invocations pick up the new one.

@@ -6,7 +6,7 @@ function envelope(overrides: Partial<Envelope> = {}): Envelope {
   return {
     id: "invocation-1",
     correlationId: "thread-1",
-    causationId: null,
+    causationIds: [],
     timestamp: "2026-09-23T00:00:00.000Z",
     step: 0,
     identity: {},

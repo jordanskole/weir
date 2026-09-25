@@ -26,6 +26,19 @@
  * replay"). Without this, `invokeWithInput`'s default of 0 would silently
  * overwrite whatever pulse the invocation actually ran in.
  *
+ * `entry.envelope.causationIds` is re-fed for the same reason `step` is: it
+ * isn't narrowed, it's recorded verbatim. For a `single`-input node that was
+ * always true. For an `allOf` node it additionally requires membrane.ts's
+ * `allOf` branch to prefer this re-fed value over its own resolution —
+ * `invoke.ts` rebuilds readiness against a fresh, scratch `InMemoryLog` for
+ * replay, so the instance ids that scratch log would resolve are not the
+ * ones the original invocation actually consumed; only the re-fed recorded
+ * value is. Either way, replaying it means passing it straight back
+ * through. Without this, `invokeWithInput`'s default of `[]` would silently
+ * overwrite whatever the invocation actually recorded as having caused it —
+ * and for `allOf`, membrane resolving its own ids instead of deferring to
+ * the re-fed value would silently fabricate ids that exist in no real log.
+ *
  * A widened `scope` is caught by the hash-drift refusal below, which is
  * where it belongs: `hash.ts`'s `fingerprintNode` covers `scope`, so the
  * declaration's hash no longer matches the recorded `contractHash` and the
@@ -58,12 +71,11 @@ export async function replayInvocation(
   }
 
   const nodeDef = await resolveImplementationAt(node, implRoot, entry.envelope.contractHash);
-  const { result } = await invokeWithInput(
-    nodeDef,
-    entry.input,
-    entry.envelope.correlationId,
-    entry.envelope.identity,
-    entry.envelope.step,
-  );
+  const { result } = await invokeWithInput(nodeDef, entry.input, {
+    correlationId: entry.envelope.correlationId,
+    identity: entry.envelope.identity,
+    step: entry.envelope.step,
+    causationIds: entry.envelope.causationIds,
+  });
   return result;
 }
