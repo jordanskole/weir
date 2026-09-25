@@ -69,6 +69,26 @@ const stepReader: NodeDecl<{ kind: "single"; edge: typeof Person }, { kind: "sin
   output: { kind: "single", edge: Person },
 };
 
+// An edge whose one field is a string, so a node can echo back
+// `env.causationIds` (a `string[]`, joined) — `Person`'s `age` is a
+// uint8 and can't carry that.
+const CausationEcho: AnyEdgeDef = {
+  name: "CausationEcho",
+  label: "CausationEcho",
+  description: "Echoes back the invocation's causationIds, joined",
+  fields: { value: { type: "utf8", label: "Value", description: "d", nullable: false } },
+};
+
+// A node whose Fn reads the invocation's `causationIds` back out — the
+// shape needed to prove replay reproduces recorded causation rather than
+// silently reverting to `invokeWithInput`'s default of `[]`.
+const causationReader: NodeDecl<{ kind: "single"; edge: typeof Person }, { kind: "single"; edge: typeof CausationEcho }> = {
+  name: "causationReader",
+  description: "Returns the invocation's causationIds, to prove replay reproduces them",
+  input: { kind: "single", edge: Person },
+  output: { kind: "single", edge: CausationEcho },
+};
+
 let dir: string | undefined;
 
 afterEach(async () => {
@@ -305,5 +325,34 @@ describe("replayInvocation", () => {
     // stops threading entry.envelope.step through invokeWithInput, this
     // reads back { age: 0 } instead and the test reddens.
     expect(replayed).toEqual({ age: 5 });
+  });
+
+  it("replays under the recorded causationIds, not invokeWithInput's default of [] — recorded at a non-empty value deliberately, since a test recording [] would pass against the exact bug it is meant to catch", async () => {
+    dir = await mkdtemp(join(tmpdir(), "weir-replay-causation-"));
+    const { short, hash } = await hashNode(causationReader);
+    await writeImpl(
+      dir,
+      "causationReader",
+      short,
+      `export default function causationReader(payload, env) { return { value: env.causationIds.join(",") }; }\n`,
+    );
+
+    const nodeDef = await resolveImplementationAt(causationReader, dir, hash);
+    const { result, envelope } = await membrane(nodeDef, { age: 41 }, {
+      correlationId: "c-causation",
+      causationIds: ["inst-upstream"],
+    });
+    if (!envelope) throw new Error("test setup: expected an envelope from a successful invocation");
+    expect(result).toEqual({ value: "inst-upstream" });
+    expect(envelope.causationIds).toEqual(["inst-upstream"]);
+
+    const entry: TraceEntry = { envelope, input: { age: 41 }, result };
+    const replayed = await replayInvocation(entry, causationReader, dir);
+
+    // The recorded causationIds (["inst-upstream"]), not the default [] —
+    // if replayInvocation ever stops threading entry.envelope.causationIds
+    // through invokeWithInput, this reads back { value: "" } instead and
+    // the test reddens.
+    expect(replayed).toEqual({ value: "inst-upstream" });
   });
 });
