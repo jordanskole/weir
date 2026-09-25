@@ -62,9 +62,10 @@ interface FieldDefBase<T extends ScalarType> {
  * `false` — so a bare `FieldDef` reference stays compatible with a nullable
  * field; only `defineField`'s own default narrows to non-nullable) controls
  * whether the field's payload type is `T | null`. Explicit `T | null`, not an
- * optional/absent key — same call already made for `Envelope.causationId`
- * (docs/design-history.md): a nullable field forces a caller to handle the
- * null, an absent key doesn't force anything.
+ * optional/absent key — the same call docs/design-history.md made for
+ * `Envelope`'s old singular `causationId` field (since replaced by the
+ * never-nullable `causationIds: string[]`): a nullable field forces a
+ * caller to handle the null, an absent key doesn't force anything.
  */
 export type FieldDef<T extends ScalarType = ScalarType, N extends boolean = boolean> = T extends "bool"
   ? FieldDefBase<T>
@@ -229,7 +230,23 @@ export const Identity: EdgeDef<{ sub: FieldDef<"utf8">; iss: FieldDef<"utf8"> }>
 export interface Envelope {
   id: string;
   correlationId: string;
-  causationId: string | null;
+  /**
+   * The instances this invocation consumed. Empty for an origin — an
+   * external event caused it, and an external event is not a token — and
+   * for an out-of-band invocation with no log behind it (`invoke.ts`).
+   * One entry for a `single`-input node; N for an `allOf` node, one per
+   * declared input edge.
+   *
+   * Plural rather than singular because an `allOf` invocation genuinely
+   * consumes several tokens, and a singular field could only name one of
+   * them — losing lineage at exactly the fan-in nodes that lineage is
+   * wanted for. This is OpenTelemetry's `parentSpanId` with the one
+   * difference that matters: a span has one parent, an `allOf` invocation
+   * has N.
+   *
+   * Never nullable. "Nothing caused this" is `[]`.
+   */
+  causationIds: string[];
   timestamp: string;
   step: number;
   identity: Partial<PayloadOf<typeof Identity>>;

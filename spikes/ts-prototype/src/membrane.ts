@@ -14,8 +14,8 @@
  * declares one (arity-detected, `fn.length >= 2` — same opt-in shape `env`
  * already has on `Fn`, made real here for the first time). One of
  * `Envelope`'s fields is still an honest placeholder, not resolved:
- * `causationId` is always `null` (no causation-chain tracking exists yet —
- * nothing currently tells a node which specific upstream edge instance
+ * `causationIds` is always `[]` (no causation-chain tracking exists yet —
+ * nothing currently tells a node which specific upstream edge instances
  * triggered it). `step` used to be the other one; it is now the scheduler's
  * pulse number, passed in by whoever invokes (see `MembraneArgs`) and
  * defaulting to 0 for callers with no scheduler behind them. `identity` narrows
@@ -399,6 +399,8 @@ export interface InvocationContext {
   correlationId: string;
   identity?: Partial<PayloadOf<typeof Identity>>;
   step?: number;
+  /** See `Envelope.causationIds`. Defaults to `[]` — a caller with no notion of a consumed instance records nothing. */
+  causationIds?: string[];
 }
 
 /**
@@ -468,12 +470,12 @@ function narrowIdentity(
 }
 
 /**
- * Builds this invocation's Envelope. `causationId` is still an honest
- * placeholder (see file header) — real causation needs a mechanism that
- * does not exist yet. `step` is no longer one: under the runtime's pulse
- * scheduling it is the pulse number, which is exactly causal position
- * within the topology. Defaults to 0 for callers with no scheduler behind
- * them (`invoke.ts`'s single invocation, tests).
+ * Builds this invocation's Envelope. `causationIds` is still an honest
+ * placeholder (see file header) when the caller supplies none — real
+ * causation needs a mechanism that does not exist yet. `step` is no longer
+ * one: under the runtime's pulse scheduling it is the pulse number, which is
+ * exactly causal position within the topology. Defaults to 0 for callers
+ * with no scheduler behind them (`invoke.ts`'s single invocation, tests).
  *
  * Can throw (a bad `scope` declaration) — the caller is responsible for
  * turning that into `Failed<In>`.
@@ -482,7 +484,7 @@ async function buildEnvelope(nodeDef: NodeDecl, context: InvocationContext): Pro
   return {
     id: crypto.randomUUID(),
     correlationId: context.correlationId,
-    causationId: null,
+    causationIds: context.causationIds ?? [],
     timestamp: new Date().toISOString(),
     step: context.step ?? 0,
     identity: narrowIdentity(nodeDef.scope, context.identity ?? SYSTEM_IDENTITY),

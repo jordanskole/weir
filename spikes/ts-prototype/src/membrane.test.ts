@@ -506,7 +506,7 @@ describe("membrane — envelope", () => {
 
     expect(received?.correlationId).toBe("thread-1");
     expect(received?.id).toMatch(/^[0-9a-f-]{36}$/);
-    expect(received?.causationId).toBeNull();
+    expect(received?.causationIds).toEqual([]);
     expect(typeof received?.timestamp).toBe("string");
     expect(new Date(received?.timestamp as string).toString()).not.toBe("Invalid Date");
     expect(typeof received?.contractHash).toBe("string");
@@ -542,6 +542,21 @@ describe("membrane — envelope", () => {
     log.append("B", "thread-1", { value: "b" });
     await membrane(node, log, { correlationId: "thread-1" });
     expect(received?.correlationId).toBe("thread-1");
+  });
+
+  it("gives every envelope a causationIds array, empty when nothing supplied one", async () => {
+    const invocation = await membrane(birthday, { age: 41 }, { correlationId: "thread-1" });
+
+    expect(invocation.envelope?.causationIds).toEqual([]);
+  });
+
+  it("carries the causationIds its caller supplied", async () => {
+    const invocation = await membrane(birthday, { age: 41 }, {
+      correlationId: "thread-1",
+      causationIds: ["inst-a", "inst-b"],
+    });
+
+    expect(invocation.envelope?.causationIds).toEqual(["inst-a", "inst-b"]);
   });
 });
 

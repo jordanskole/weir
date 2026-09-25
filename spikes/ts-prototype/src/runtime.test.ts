@@ -1470,7 +1470,7 @@ describe("eligibleInstances", () => {
     return {
       id: "inv-" + node,
       correlationId: "c1",
-      causationId: null,
+      causationIds: [],
       timestamp: new Date().toISOString(),
       step: 0,
       identity: {},
