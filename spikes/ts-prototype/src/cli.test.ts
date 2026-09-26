@@ -107,7 +107,74 @@ describe("runCli", () => {
     const unknown = await runCli(["frobnicate"], "/nowhere");
     expect(unknown.code).toBe(1);
     expect(unknown.out).toContain(`unknown command "frobnicate"`);
-    // No `run`, deliberately — the only Log is in-memory.
-    expect(unknown.out).toContain("no \"run\"");
+    // `replay` is deliberately absent — replayInvocation reads a Trace, and
+    // only the Log is durable — and the help says so rather than leaving
+    // someone to discover it.
+    expect(unknown.out).toContain('no "replay" yet');
+  });
+});
+
+describe("runCli — run", () => {
+  it("executes a real example end to end and leaves a readable log", async () => {
+    const workdir = await fixture({});
+    const implRoot = join(workdir, "impl");
+    for (const [node, fn] of [
+      ["mix", `export default function mix(p) { return { title: p.title, servings: p.servings }; }`],
+      ["preheatOven", `export default function preheatOven(p) { return { temperature: p.temperature, preheated: true }; }`],
+      ["bake", `export default function bake(b) { return { title: b.Dough.title, servings: b.Dough.servings, done: false }; }`],
+      ["cool", `export default function cool(p) { return { ...p, done: true }; }`],
+    ] as const) {
+      const { hashNode } = await import("./hash.js");
+      const { elaborate } = await import("./elaborate.js");
+      const hash = (await hashNode((await elaborate(RECIPE_SRC)).nodes[node]!)).short;
+      await mkdir(join(implRoot, node), { recursive: true });
+      await writeFile(join(implRoot, node, `${hash}.ts`), `${fn}\n`, "utf8");
+    }
+    const recipe = { title: "Chocolate Chip Cookies", servings: 24, temperature: 375, ingredients: {} };
+    const payload = join(workdir, "payload.json");
+    await writeFile(payload, JSON.stringify({ mix: recipe, preheatOven: recipe }), "utf8");
+    const logPath = join(workdir, "weir.jsonl");
+
+    const result = await runCli(
+      ["run", RECIPE_SRC, "--impl", implRoot, "--payload", payload, "--log", logPath, "--run", "r1"],
+      workdir,
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("quiescence");
+    expect(result.out).toContain("firings   4");
+
+    // The log outlives the process, which is the whole point: read it back
+    // with no runtime involved.
+    const { FileLog } = await import("./file-log.js");
+    const reloaded = FileLog.open(logPath);
+    expect(reloaded.latest("Cookies", "r1")).toEqual({
+      title: recipe.title,
+      servings: recipe.servings,
+      done: true,
+    });
+  });
+
+  it("refuses a run whose origins have no payload, rather than firing nothing", async () => {
+    // Without this the symptom is a graph reaching quiescence having done no
+    // work, with exit 0 and no error — the failure mode this whole project
+    // has been chasing all week.
+    const workdir = await fixture({});
+    const payload = join(workdir, "payload.json");
+    await writeFile(payload, JSON.stringify({ mix: {} }), "utf8");
+
+    const result = await runCli(
+      ["run", RECIPE_SRC, "--impl", join(workdir, "impl"), "--payload", payload],
+      workdir,
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.out).toMatch(/no payload for origin|No accepted implementation/);
+  });
+
+  it("needs --impl and --payload", async () => {
+    const result = await runCli(["run", RECIPE_SRC], "/nowhere");
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("--impl and --payload");
   });
 });

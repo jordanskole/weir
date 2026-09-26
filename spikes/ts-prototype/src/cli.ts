@@ -2,12 +2,14 @@
  * The command-line surface, kept deliberately small: the three things that
  * need nothing weir has not built.
  *
- * `check` and `graph` and `contract` are all pure functions of a directory
- * of declarations — no log, no implementations, no runtime. That is why they
- * can ship while `run` cannot: `InMemoryLog` is the only `Log` there is, so
- * a run starts empty and dies with the process (readme.md's "not built yet:
- * ... any log that outlives the process"). A `weir run` would be a demo, not
- * a tool, and shipping it as one would misrepresent how finished this is.
+ * `check`, `graph` and `contract` are pure functions of a directory of
+ * declarations — no log, no implementations, no runtime. `run` needs all
+ * three, and could only ship once `FileLog` gave it a log that outlives the
+ * process; before that it would have been a demo dressed as a tool.
+ *
+ * `replay` is still absent, and for a smaller reason than `run` was:
+ * `replayInvocation` reads a *Trace* entry, and only the Log is durable so
+ * far. The help text says so rather than leaving someone to find out.
  *
  * The core is `runCli(argv, cwd)`, returning a code and the text to print,
  * rather than a function that writes to stdout and calls `process.exit`.
@@ -17,9 +19,14 @@
  * on.
  */
 
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { elaborate } from "./elaborate.js";
 import { serializeNetlist } from "./netlist.js";
 import { exportContract } from "./contract.js";
+import { elaborateWithImplementations } from "./implementation.js";
+import { runNetlist } from "./runtime.js";
+import { FileLog } from "./file-log.js";
 
 export interface CliResult {
   code: number;
@@ -32,12 +39,15 @@ usage
   weir check [dir]              elaborate the declarations and report what fails
   weir graph [dir] [--json]     print the topology, or the netlist as JSON
   weir contract <node> [dir]    print one node's sealed contract, as an agent receives it
+  weir run [dir] --impl <dir> --payload <file.json> [--log <file>] [--run <id>]
+                                elaborate, resolve implementations, and execute
 
   dir defaults to the current directory.
+  --payload is a JSON object of origin node name -> that node's payload.
+  --log defaults to ./weir.jsonl and is appended to, never truncated.
 
-Every command reads .field/.edge/.node/.topology files and nothing else.
-There is deliberately no "run": the only Log is in-memory, so a run would
-not outlive the process.`;
+There is deliberately no "replay" yet: replayInvocation reads a Trace
+entry, and only the Log is durable so far.`;
 
 /** Renders an elaboration failure without a stack trace — the message is the product. */
 function failure(error: unknown, dir: string): CliResult {
@@ -122,6 +132,56 @@ async function graph(dir: string, json: boolean): Promise<CliResult> {
   };
 }
 
+async function run(dir: string, flags: Map<string, string>): Promise<CliResult> {
+  const implRoot = flags.get("impl");
+  const payloadPath = flags.get("payload");
+  if (implRoot === undefined || payloadPath === undefined) {
+    return { code: 1, out: `✗ run needs --impl and --payload.\n\n${USAGE}` };
+  }
+
+  let program;
+  try {
+    program = await elaborateWithImplementations(dir, resolve(implRoot));
+  } catch (error) {
+    return failure(error, dir);
+  }
+
+  let originPayloads: Record<string, unknown>;
+  try {
+    originPayloads = JSON.parse(await readFile(resolve(payloadPath), "utf8")) as Record<string, unknown>;
+  } catch (error) {
+    return { code: 1, out: `✗ could not read --payload ${payloadPath}\n\n  ${(error as Error).message}` };
+  }
+
+  // Worth naming rather than letting the run quietly do nothing: an origin
+  // with no payload is never offered as a candidate, so the symptom would be
+  // a graph reaching quiescence having fired nothing, with no error at all.
+  const missing = program.wiring.origins.filter((o) => !(o in originPayloads));
+  if (missing.length > 0) {
+    return {
+      code: 1,
+      out: `✗ no payload for origin(s) ${missing.map((m) => `"${m}"`).join(", ")}.\n\n  --payload must name every origin: ${program.wiring.origins.join(", ")}`,
+    };
+  }
+
+  const logPath = resolve(flags.get("log") ?? "weir.jsonl");
+  const log = FileLog.open(logPath);
+  const correlationId = flags.get("run") ?? crypto.randomUUID();
+  const result = await runNetlist(program, { correlationId, originPayloads }, { log });
+
+  return {
+    code: 0,
+    out: [
+      `✓ ${result.stopped}`,
+      "",
+      `  run       ${correlationId}`,
+      `  firings   ${result.firings}`,
+      `  pulses    ${result.pulses}`,
+      `  log       ${logPath}`,
+    ].join("\n"),
+  };
+}
+
 async function contract(nodeName: string, dir: string): Promise<CliResult> {
   let elaborated;
   try {
@@ -139,15 +199,33 @@ async function contract(nodeName: string, dir: string): Promise<CliResult> {
 
 /** Parses argv (without node/script) and runs the command. Never writes, never exits. */
 export async function runCli(argv: string[], cwd: string): Promise<CliResult> {
-  const args = argv.filter((a) => a !== "--json");
-  const json = argv.includes("--json");
-  const [command, ...rest] = args;
+  const flags = new Map<string, string>();
+  const positional: string[] = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]!;
+    if (!arg.startsWith("--")) {
+      positional.push(arg);
+      continue;
+    }
+    const name = arg.slice(2);
+    // `--json` is a bare switch; every other flag takes the next argument.
+    if (name === "json") {
+      flags.set("json", "true");
+      continue;
+    }
+    i += 1;
+    flags.set(name, argv[i] ?? "");
+  }
+  const json = flags.has("json");
+  const [command, ...rest] = positional;
 
   switch (command) {
     case "check":
       return check(rest[0] ?? cwd);
     case "graph":
       return graph(rest[0] ?? cwd, json);
+    case "run":
+      return run(rest[0] ?? cwd, flags);
     case "contract": {
       if (rest[0] === undefined) return { code: 1, out: `✗ contract needs a node name.\n\n${USAGE}` };
       return contract(rest[0], rest[1] ?? cwd);
