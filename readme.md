@@ -13,9 +13,19 @@ An application is a directed graph of nodes wired together by their edge types, 
 
 The name comes from a fish weir: rather than watching the whole ocean, you build the one narrow place everything has to cross, and check it there. Edges are those crossings.
 
-> **Status: early, but it runs.** The example below elaborates from real `.edge`/`.node`/`.topology` files and executes end to end — schema assertion, multi-input readiness, `Failed<In>` routing, structural hashing, and implementation resolution by contract hash all work against files on disk, with a test suite over them. So does the acceptance gate that decides whether a drafted implementation is allowed to persist at all: it runs the node's declared examples, generated structural cases, and its `∀ p . …` property assertions before anything is written, and an invocation records the implementation version it ran under so it can be replayed against exactly that one. **Iteration runs too:** the log retains every instance instead of overwriting, and a single-input node fires once per unconsumed instance reaching it along a declared arc, so a cycle in the wiring runs to quiescence rather than firing once ([spec](docs/superpowers/specs/2026-09-24-instance-retention-and-iteration.md)). **`allOf` joins by lineage now, too:** a fan-in node fires once per lineage group — instances grouped by nearest common ancestor and zipped positionally — rather than once per run, so a fan-out/fan-in diamond iterates, not just single-input chains ([spec](docs/superpowers/specs/2026-09-25-allof-joins-by-lineage.md)). **And ancestry is total now:** the external trigger is represented as a token — one run-root instance per run that every origin node's output cites ([spec](docs/superpowers/specs/2026-09-25-system-nodes-run-root-and-noop.md)), so a fan-in fed by two *independent* origin nodes fires, where it used to reach quiescence silently unfired. The qualifier that remains, in [open-questions.md](docs/open-questions.md): an "item" is an *instance of the ancestor the arms diverged from*, not an element of a collection — a `many` output is one token carrying a keyed collection, and nothing spreads it into N tokens, so there is still no data-driven fan-out. A topology also refuses arcs and nodes it can never satisfy, at elaboration rather than at runtime.
+> **Status: early, but it runs.** The example below elaborates from real `.edge`/`.node`/`.topology` files and executes end to end, with a test suite over it. What works against files on disk:
 >
-> Not built yet: the planner and the rest of the `sys` queries, zones and classification, composite nodes, and any log that outlives the process. The host language is also undecided — `spikes/ts-prototype/` is a spike and the current lean is OCaml — so treat the TypeScript as evidence the design holds together rather than as the implementation.
+> - **Declaration and checking.** Schema assertion, structural hashing, implementation resolution by contract hash, and a `weir` CLI (`check`, `graph`, `contract`, `run`, `replay`, `verify`). Every declaration is validated against generated JSON Schema at elaboration, so a typo'd key is an error rather than a silently ignored field. A topology also refuses arcs and nodes it can never satisfy — including a `gather` with no spread above it — at elaboration rather than at runtime.
+> - **The acceptance gate.** A drafted implementation is not allowed to persist until it passes the node's declared examples, generated structural cases, and its `∀ p . …` property assertions.
+> - **Iteration.** The log retains every instance instead of overwriting, and a node fires once per unconsumed instance reaching it along a declared arc, so a cycle in the wiring runs to quiescence rather than firing once ([spec](docs/superpowers/specs/2026-09-24-instance-retention-and-iteration.md)).
+> - **Joins by lineage.** A fan-in fires once per lineage group — instances grouped by nearest common ancestor and zipped positionally — rather than once per run, so a fan-out/fan-in diamond iterates ([spec](docs/superpowers/specs/2026-09-25-allof-joins-by-lineage.md)).
+> - **Total ancestry.** The external trigger is a token: one run-root instance per run that every origin node's output cites ([spec](docs/superpowers/specs/2026-09-25-system-nodes-run-root-and-noop.md)), so a fan-in fed by two *independent* origins fires, where it used to reach quiescence silently unfired.
+> - **Data-driven fan-out, and its dual.** A `many` output materializes its elements as real tokens, so one alert becomes N entities each taking its own treatment with its own lineage ([spread](docs/superpowers/specs/2026-09-26-spread-materializes-elements.md)); `input: { gather: X }` collects every instance of one edge descended from a single spread and fires once with the collection ([gather](docs/superpowers/specs/2026-09-27-gather.md)). Together they are one `traverse` — see [`examples/soc-triage`](examples/soc-triage).
+> - **Composite nodes.** A `.topology` that declares a contract can be invoked wherever a node can, inlined at elaboration ([spec](docs/superpowers/specs/2026-09-26-composite-nodes.md)).
+> - **Effects, and a determinism check.** A node that needs the outside world declares `effect:` and the runtime's host performs it; replay feeds the *recorded* result back rather than re-performing ([spec](docs/superpowers/specs/2026-09-27-effects-are-data.md)). `weir verify` replays a run's recorded invocations against their pinned implementations and reports what disagreed — Principle 0 made mechanical ([spec](docs/superpowers/specs/2026-09-26-replay-and-the-determinism-check.md)).
+> - **A log that outlives the process.** Append-only `.jsonl` for both the log and the trace, so a run can be replayed and verified after the process that produced it is gone ([spec](docs/superpowers/specs/2026-09-26-a-log-that-outlives-the-process.md)).
+>
+> Not built yet: the planner and the rest of the `sys` queries — including the cut-vertex and complete-mediation analyses this readme describes below — zones and classification, and positional instance identity (`birthday.then.birthday` still runs once, not twice). `expect`-as-a-node is design intent, not built: examples today are declared `given`/`expect` data pairs the acceptance gate runs, not a graph execution. The host language is also undecided — `spikes/ts-prototype/` is a spike and the current lean is OCaml — so treat the TypeScript as evidence the design holds together rather than as the implementation.
 >
 > The design is being pressure-tested against [blue-ribbon-properties](https://github.com/jordanskole/blue-ribbon-properties), a separate project whose independent constraints keep surfacing edge cases here.
 
@@ -101,11 +111,32 @@ preheatOven:
 
 Two top-level keys are two origins: one external event — one call to the graph's outer membrane — populates every origin-shaped edge it declares needing at once. The dough gets mixed while the oven heats, and `bake` names as its own child under *both*. That is the whole program. The implementation of `bake` lives in a different tree, resolved by name and contract hash, and is regenerable build output rather than something you maintain.
 
-**A topology is a node.** A subgraph with one input edge and one output edge is indistinguishable from a single node at its boundary, so this file can be dropped into a larger graph wherever a `Recipe -> Cookies` node is expected, and nothing upstream can tell the difference. Graphs nest without limit and bottom out at a **primitive** — a node whose body is host code rather than more graph. There is no separate module system, because the composition rule already is one.
+**A topology is a node.** A subgraph is indistinguishable from a single node at its boundary, so a `.topology` can be dropped into a larger graph wherever a node is expected and nothing upstream can tell the difference. Graphs nest without limit and bottom out at a **primitive** — a node whose body is host code rather than more graph. There is no separate module system, because the composition rule already is one.
+
+The file above is a root topology and could not itself be dropped in as a node, because it declares no boundary. One that can says so explicitly — `input`, `output`, and the `terminals` whose outputs *are* that output. This one is from [`examples/soc-triage`](examples/soc-triage), where it is the per-entity investigation:
+
+```yaml
+# declarations/investigate.topology — a composite
+input: Entity
+output:
+  allOf:
+    - IdentityContext
+    - AssetContext
+terminals:
+  - investigateIdentity
+  - investigateAsset
+wiring:
+  investigateIdentity: {}
+  investigateAsset: {}
+```
+
+The contract is declared rather than inferred from the inner wiring, deliberately: a boundary you can read is worth more than one a reader has to derive, and it makes the composite checkable against its terminals at elaboration. Note the output is `allOf`, not a single edge — a composite's boundary is an ordinary node contract, so it gets every output mode a node has. Composites are inlined at elaboration; the runtime never learns they exist.
+
+That is also what lets a `.topology` file stay a tree while the graph it describes reconverges. A tree cannot express two branches meeting, so the join moves to a boundary: `investigate` fans out internally, and its *exit* is the join.
 
 ## What a run leaves behind
 
-Elaboration turns those files into a netlist — concrete nodes, concrete edges, no type variables. Execution appends to a log. For this recipe, the log opens like this (`envelope` also carries `timestamp`, `identity`, `node` and `contractHash`, and each instance its own `schemaHash` — trimmed here to the fields that matter for this walkthrough):
+Elaboration turns those files into a netlist — concrete nodes, concrete edges, no type variables. Execution appends to a log. For this recipe, the log opens like this (`envelope` also carries `timestamp`, `identity`, `node`, `contractHash` and the `implementationHash` a replay is pinned to, and each instance its own `schemaHash` — trimmed here to the fields that matter for this walkthrough):
 
 ```json
 { "instance": "run#1",         "edge": "Run",   "payload": { "correlationId": "run-1", "triggeredAt": "..." } }
@@ -123,7 +154,7 @@ The first entry is the **run root** — the external trigger represented as a to
 
 That log is the source of truth. Node state is a fold over prior edges keyed by correlation id. The tables an application shows you are materialized views over it. Both the tables and any node's implementation can be deleted and rebuilt from it; the only durable artifacts are edge definitions and topology.
 
-This holds because **effects are data**. A node does not call a database — it returns a description (`{ fetch, url }`, `{ sleep, duration }`) and the runtime is the only thing that performs it. Replay feeds back the *recorded* result instead of re-performing, which is what makes determinism survive contact with the outside world.
+This holds because **effects are data**. A node does not call a database — it declares `effect: http`, and the runtime's host is the only thing that performs it. The result arrives as an ordinary edge instance citing the request, so arcs, joins, lineage, spread and composites all apply to it with no second mechanism. Replay feeds back the *recorded* result instead of re-performing, which is what makes determinism survive contact with the outside world — and `weir verify` is the check that says so, replaying a run against its pinned implementations and reporting what disagreed.
 
 ## What the shape buys
 
@@ -157,7 +188,9 @@ Nothing a node can read is invisible in its contract. No instance fields, no mod
 
 The obvious objection is iteration. Every loop most people write has an accumulator — a slot you re-enter and mutate — and that slot is ambient state by definition.
 
-It turns out the array ban already closed that door. There is nothing to push onto. A collection is keyed, so the thing a loop would have built up incrementally is instead addressed directly: `many Ingredient` fans out into N independent invocations, each producing an edge keyed by the same id, and reassembly is a lookup rather than an append. Order stops being load-bearing, which is also why arrival order doesn't matter to `every:`.
+It turns out the array ban already closed that door. There is nothing to push onto. A collection is keyed, so the thing a loop would have built up incrementally is instead addressed directly: a node whose *output* is `many Ingredient` fans out into N independent tokens, each keyed by the edge's own index, each taking its own path with its own lineage — and reassembly is `gather`, which fires once when every one of them has arrived. Order stops being load-bearing, because a collection is addressed by key rather than by position.
+
+Worth being exact about, because the distinction is easy to lose: it is a `many` **output** that fans out. A `many` **field** — `ingredients: many Ingredient` inside the `Recipe` edge above — is ordinary nested data in one payload, and fans out nothing. Same word, two positions, one of which is a cardinality in the topology and the other a shape inside a token.
 
 And a cycle in the wiring is not a loop — it is recursion. What a `while` loop needs is a mutable slot the condition reads and the body writes, and that slot has nowhere to live here. Recursion needs no slot, because each application receives a new value instead of mutating an old one: `const whenDone = (t) => ready(t) ? t : whenDone(step(t))` carries no accumulator, and neither does `C` feeding back into `A`. It is a fresh application of the same function to new data, indistinguishable from any other forward step. The base case is ordinary too — a node whose output is `oneOf: [Continue, Done]` terminates by emitting the branch nothing routes back. The log holds every intermediate value a loop would have accumulated, so the accumulator was redundant with the log the whole time.
 
@@ -165,7 +198,9 @@ And a cycle in the wiring is not a loop — it is recursion. What a `while` loop
 
 **Three words, because the first two usually get collapsed and the third usually goes missing.** A **token** is one edge instance in flight. A **run** is one whole traversal, which `correlation_id` names. **Lineage** is which token descended from which, which `causation_id` names. Fan-out is where they come apart: one token goes into a fan-out node and three come out, still one run — and lineage is what lets a later fan-in tell that those three belong together.
 
-**Tests live in the contract.** You have already seen them: the `examples` block in `bake.node` is written in the same composition syntax used to wire nodes together, and `expect` is an ordinary node with `oneOf: [Pass, Fail]`. A test run is a graph execution on production machinery, so a production log entry can be promoted to a test case directly.
+**Tests live in the contract.** You have already seen them: the `examples` block in `bake.node` is part of the node's declaration, not a separate test file, and the acceptance gate runs them before a drafted implementation is allowed to persist at all.
+
+The intended end state goes further — `expect` as an ordinary node with `oneOf: [Pass, Fail]`, so a test run is a graph execution on production machinery and a production log entry can be promoted to a test case directly. That part is design, not built: today an example is a declared `given`/`expect` pair the gate invokes directly.
 
 Examples are the weaker half. Because a node's input is fully typed, that type doubles as a generator — `age: uint8` supplies a domain, `validations.min`/`max` narrow it, `enumValues` enumerates it — so a property like *mix never changes a recipe's title or serving count* costs about as much to write as one example and rules out far more. There is nothing to mock, because there are no impure dependencies to isolate.
 

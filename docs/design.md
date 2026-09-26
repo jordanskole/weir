@@ -32,14 +32,20 @@ weir doesn't reduce nondeterminism. It records nondeterminism where it enters, a
 Edges may be parameterized (`Animal<T extends {...}>`); parameters are instantiated
 into concrete edges at elaboration and never reach the runtime.
 
-**Node** — a pure function from its declared input (one edge, or several via `allOf:`,
-§5) to an edge. No instance state, no `this`, no ambient access. A node whose body is host code is a **primitive**; a node whose body is
-a subgraph is a **composite**. A composite with one input edge and one output edge is
-indistinguishable from a primitive at its boundary, so topologies nest without limit
-upward and bottom out at primitives.
+**Node** — a pure function from its declared input to an edge. Input comes in three
+kinds (§5): one edge; several at once via `allOf:`; or N of one edge via `gather:`, the
+dual of a `many` output. No instance state, no `this`, no ambient access. A node whose body is host code is a **primitive**; a node whose body is
+a subgraph is a **composite**. A composite is indistinguishable from a primitive at its
+boundary, so topologies nest without limit upward and bottom out at primitives. Its
+boundary is an ordinary node contract and gets every output mode a node has — and it is
+*declared* in the `.topology`, alongside the `terminals` whose outputs are that output,
+rather than inferred from the inner wiring
+([spec](superpowers/specs/2026-09-26-composite-nodes.md)).
 
 **Envelope** — per-invocation metadata wrapping every edge instance: id (UUIDv7/ULID),
-correlation_id, causation_ids, timestamp, step index, identity, schema hash.
+correlation_id, causation_ids, timestamp, step index, identity, the producing node, the
+contract hash it ran under, the implementation hash it is pinned to (§10), and — per
+instance rather than per invocation — the schema hash of the edge it was written under.
 `causation_ids` is a list, not a single id, because a multi-input (`allOf`) node
 consumes several instances at once, and only a list can name all of them. Deliberately
 does not carry a `state` or `history` field — an accumulated per-thread state map was
@@ -61,7 +67,7 @@ wiring is always declared explicitly, never derived from type identity.
 emit distinct edges: `Person -> one of {Child, Female, Male}`, not `Person -> Person`.
 The consumer's input type *is* the proof, so the decision is never re-derived. Shape is
 shared by spread (`edge Parrot { ...Animal, wingspan: f32 }`), not inheritance — there
-is no type hierarchy. Spread composes with override the way it does in any language that
+is no type hierarchy ([spec](superpowers/specs/2026-09-09-edge-spread.md)). Spread composes with override the way it does in any language that
 has it — a later explicit key wins over a spread-inherited one, no separate merge rule
 needed (`edge CompletedTodo { ...Todo, is_complete: true }`). A bare literal in that
 position is its own field kind, not a `bool` with a value attached: pinned to that one
@@ -102,6 +108,39 @@ Node outputs come in three distinct modes, which must not be conflated:
 
 Copy is a **wiring** fact (one edge to N consumers), not a node output mode.
 
+`many A` is the fan-out, and what it puts in the log is both the collection token *and*
+one real instance of `A` per entry, each citing the collection. Materializing the elements
+is the feature, not an implementation detail: firing a downstream node N times against one
+collection token would give every element's descendants the same nearest common ancestor,
+so a later fan-in would pair across elements — the exact mispairing the lineage join exists
+to prevent, reintroduced by the mechanism meant to make per-element work possible
+([spec](superpowers/specs/2026-09-26-spread-materializes-elements.md)). Note this is `many`
+in *output* position; `many` inside an edge's fields is ordinary nested data in one payload
+and fans out nothing.
+
+**Input has its own closed set**, and it is not the same set:
+
+- one edge — fires once per unconsumed instance reaching it along a declared arc.
+- `all of {A, B}` — fires once per lineage group (§5). A readiness condition, not a wire.
+- `gather A` — fires once per *barrier*: every instance of `A` descended from a single
+  spread, collected into one keyed payload. The dual of a `many` output, and `sequence` in
+  the functional sense (`t (f a) → f (t a)`), which is what settles its failure policy:
+  one element's failure is the whole group's.
+
+A `gather`'s cardinality is the one thing in a weir declaration that is *not* statically
+known — it comes from the spread above it at runtime — which is why it is the only input
+kind whose readiness cannot be answered from the contract alone.
+
+There is a fourth thing an `input:` may say, and it is **sugar rather than a kind**:
+`anyOf: [A, B]` means *one or more of these edges may arrive, each independently*, and it
+desugars at elaboration into N ordinary single-input nodes named `<name>__<edge>`, one per
+listed edge. It is deliberately **not** the input-position mirror of `oneOf`: an output's
+`oneOf` guarantees exactly one branch fires, which is a promise the producer makes and
+nothing on the input side can offer
+([spec](superpowers/specs/2026-08-31-oneof-input-becomes-anyof.md)). Desugaring rather than
+adding a kind is what keeps the runtime's readiness rules at three
+([spec](superpowers/specs/2026-08-31-any-desugaring-design.md)).
+
 **Failure is an edge.** Every node's real output signature includes `Failed<In>`,
 parameterized by the failing node's own input: `{ input: PayloadOf<In>, reason? }` — it
 carries the original payload so a retry node has something to re-emit, not just a
@@ -141,11 +180,20 @@ source; instances live in the netlist.
 primitive an author declares (§1's Edge/Node/Envelope) — it's framework-owned execution
 machinery, generated purely from a node's own contract (`input`, `scope`), never
 hand-written and never exposed to a `.node` author to modify. Concretely:
-`membrane(nodeDef)` produces `(edges, identity) => Promise<Envelope>` — it resolves the
-edges `nodeDef.input` declares, asserts them, checks `identity` against `nodeDef.scope`,
-and only then calls `Fn`. A membrane failure (a failed assert, an unsatisfied scope)
-produces its own tagged edge (§3, "failure is an edge"), never an uncaught exception
-escaping the boundary.
+`membrane(nodeDef, input, context)` returns `{ result, envelope }` — it builds the
+envelope, narrows `identity` to what `nodeDef.scope` declares, asserts the input against
+the edges `nodeDef.input` names, and only then calls `Fn`. A membrane failure (a failed
+assert, an unsatisfied scope) produces its own tagged edge (§3, "failure is an edge"),
+never an uncaught exception escaping the boundary.
+
+**The membrane asserts; it does not resolve.** It receives the input the runtime already
+chose and checks it. That division matters for every multi-instance input kind: the
+runtime's readiness rules below decide *which* instances belong together, and handing that
+job to the membrane instead would mean re-reading the log after the choice was made —
+silently discarding the choice, and reintroducing the cross-lineage pairing the join exists
+to prevent. The envelope is built *before* the input is asserted, so a rejected input is
+observable too: every *attempted* invocation gets an envelope and a trace entry, not only
+every completed one.
 
 Resolution differs by input kind. A `single`-input node fires once per unconsumed
 instance reaching it along a declared arc in the topology's wiring — not on its input
@@ -169,12 +217,38 @@ never joins at all — so it is the answer for a host that stages envelope-less 
 into a real log, which today means tests
 ([spec](superpowers/specs/2026-09-25-allof-joins-by-lineage.md)).
 
-**A fan-in fed by two independent origin nodes does not fire.** Origin outputs carry
-`causation_ids: []`, so two separate origins' descendants share no common ancestor, no
-lineage group ever forms, and the node sits unfired at quiescence — silently, with no
-error. This is a real gap against the very shape this section blesses below (one
-external event, several origin-shaped inputs resolved from it at once); see
-[open-questions.md](open-questions.md).
+A `gather`-input node fires once per **barrier**. Its candidates arrive on one arc under the
+ordinary rule, and they are grouped by the nearest collection token in their lineage — the
+`many` output that spread them. **That token records the count**, which is what makes a
+runtime-decided cardinality answerable at all: a group is complete when its size equals the
+collection's entry count, so the barrier needs no scoped notion of quiescence, just a count
+and the ancestry walk that already existed. A group that can no longer complete — some
+element's subgraph produced `Failed<In>` instead of the gathered edge — fails as a whole
+rather than waiting, because `gather` is `sequence` and a silent stall is the worse outcome.
+A spread of zero elements gathers immediately to an empty collection, which falls out of the
+count rather than needing a case ([spec](superpowers/specs/2026-09-27-gather.md)).
+
+Which spread a gather collects from is **not declared, and must not be.** It is the nearest
+collection ancestor its candidates share. Declaring it would make a node's contract depend
+on the topology above it, which is the property this design exists to avoid: a node in the
+middle of a fan-out declares `Entity -> IdentityContext` and knows nothing about being one
+of N.
+
+**The external trigger is a token, which is what makes ancestry total.** One run-root
+instance is appended per run before any node fires, and every origin node's output cites it.
+Without it an origin's output carried `causation_ids: []` — descended from nothing — so two
+separate origins' descendants shared no common ancestor at all, no lineage group ever
+formed, and a fan-in fed by both sat unfired at quiescence, silently and with no error.
+That was a real gap against the very shape this section blesses below (one external event,
+several origin-shaped inputs resolved from it at once), and the run root closes it
+([spec](superpowers/specs/2026-09-25-system-nodes-run-root-and-noop.md)).
+
+The root deliberately carries **no envelope of its own**: an envelope records an invocation,
+and nothing invoked this. It is also deliberately not a join point — at an ancestor with no
+envelope, only its *direct* children group. Two instances that both descend from the root
+through intermediate invocations share nothing but having happened in the same run, which is
+not a reason to pair them; two the root produced directly — one event's several origins —
+genuinely do belong together, which is the case this section blesses.
 
 Nothing polls. **Origin nodes** (cron, HTTP request, queue consumer, file watcher) are
 the only place nondeterminism enters; everything downstream is deterministic. An origin
@@ -198,9 +272,22 @@ A node that itself required `A` to produce `B` (`A -> B -> C` alongside `A -> C`
 directly) doesn't need `C` to redeclare that dependency: reading `B`'s log entry already
 implies `A` was available when `B` ran.
 
-**Effects are data.** A node emits a description (`{fetch, url}`, `{sleep, duration}`);
-the runtime performs it and delivers the result as another edge. Replay feeds back the
-*recorded* result rather than re-performing, which is what makes determinism hold.
+**Effects are data.** A node that needs the outside world declares `effect: http` and
+resolves to a host-supplied handler rather than to a drafted implementation; the runtime
+performs it and delivers the result as another edge instance citing the request. Everything
+else about such a node is unchanged — it is wired like any node, its input is asserted at
+the membrane like any node, and lineage threads through it — so arcs, joins, spread and
+composites all apply with no second mechanism, and *where the outside world is touched is
+visible in the wiring*, which is the property Principle 0 is about. A missing handler is a
+hard failure at run start, not at fire time: a program whose effects cannot be performed
+should not begin.
+
+Replay feeds back the *recorded* result rather than re-performing, which is what makes
+determinism hold — a replay that re-fetches is not a replay. That has a consequence worth
+stating rather than discovering: comparing an effect node's replay to its record is vacuous
+by construction, so `verify` reports effect nodes as a third category — *nondeterminism
+enters here by declaration* — rather than counting them as passing checks
+([spec](superpowers/specs/2026-09-27-effects-are-data.md)).
 
 **The log of edge instances is the source of truth.** Node state is a fold over prior
 edges keyed by correlation_id. Tables are materialized views over the log; node
@@ -214,8 +301,11 @@ Every edge instance carries the **schema hash** of the definition it was written
 The hash covers structural fields only (name, index, type, measure, format, enumValues,
 relation, min, max, minLength, maxLength, pattern) and excludes cosmetic ones
 (description, unit, sourceKey). Replay on mismatch
-either migrates through a declared rule or refuses. If a cosmetic change invalidates
-history, the fingerprint is wrong — fix the fingerprint.
+either migrates through a declared rule or refuses. Only the refusal is built — there is no
+migration story for contracts yet, and `replayInvocation` says so in the error it throws
+rather than implying one exists
+([spec](superpowers/specs/2026-09-26-replay-and-the-determinism-check.md)). If a cosmetic
+change invalidates history, the fingerprint is wrong — fix the fingerprint.
 
 ---
 
@@ -227,9 +317,11 @@ A node definition carries three things beyond its types:
 - **Properties**: `∀ p . birthday(p).age == p.age + 1`
 - **Prose**: intent, stating *why* — never *how*, which would compete with the code and drift.
 
-`expect` is an ordinary node with `one of {Pass, Fail}`, so a test run is a graph
-execution on the same machinery as production, and production log entries can be
-promoted to test cases directly.
+`expect` is an ordinary node with `one of {Pass, Fail}`, so a test run is a graph execution
+on the same machinery as production, and production log entries can be promoted to test
+cases directly. **Intent, not built:** today an example is a declared `given`/`expect` data
+pair that the acceptance gate (§10) invokes through the membrane directly, not a graph
+execution, and nothing promotes a log entry into one.
 
 Properties matter more than examples: a single example underdetermines the function and
 the implementing agent can see the test. Edge definitions double as generator specs
@@ -245,7 +337,7 @@ from (§5, effects are data). An example is a real invocation with a chosen inpu
 substitute for one; mocking exists to manage impurity this design doesn't have. Per-field
 generators come straight from `FieldDef` the same way every other derived artifact does
 — `type` bounds the domain, `enumValues` enumerates it — composed into a whole-edge
-generator. Examples and generated cases aren't redundant: examples are hand-picked to be
+generator ([spec](superpowers/specs/2026-09-10-generator-and-fuzz-harness.md)). Examples and generated cases aren't redundant: examples are hand-picked to be
 legible, what a reviewer reads to see intent; generated cases are unbiased breadth a
 human wouldn't think to write by hand. Acceptance (§10) requires both — an implementation
 that passes generated cases inconsistently against an *unchanged* contract is exposing
@@ -253,11 +345,13 @@ underdetermined examples, not implementation flakiness, and the fix is to the co
 
 **Risk ordering, highest first: ontology, topology, examples, implementation.** Ontology
 has no mechanical check — nothing can tell you the edge set carves the domain correctly
-except review. Topology gets partial mechanical support from §8's `sys` namespace:
-cut-vertex analysis and reachability/orphan detection run automatically over the netlist
-at elaboration time, so complete mediation is a query, not something a reviewer reads
-off a diagram — but whether the *reachable* graph is the graph you meant is still a
-review question. Tests can only check a node against a carve already chosen. Implementation
+except review. Topology gets partial mechanical support at elaboration time, and it
+is worth being exact about how much. **Reachability is built** — a topology refuses an arc
+that can carry nothing its consumer declares, a node no parent can satisfy, and a `gather`
+with no spread above it, all before anything runs. **Cut-vertex analysis and complete
+mediation are not** — they are §8 `sys` queries, and §8 is unbuilt, so today they are
+something a reviewer reads off a diagram rather than a query. Either way, whether the
+*reachable* graph is the graph you meant stays a review question. Tests can only check a node against a carve already chosen. Implementation
 is last and disposable.
 
 ---
@@ -292,16 +386,21 @@ Two independent gates:
 
 **Concretely, identity is a JWT, and `Identity` is the one true system edge.** The
 graph's outer membrane verifies the token once, on the way in, and populates `Identity`
-(`sub`, `iss`, granted scopes) directly — no node produces it, because verifying the
+(`sub`, `iss`) directly. A granted-scopes claim belongs there too and is **not** carried
+yet — weir's field model has no scalar-array type, so there is nothing to declare it as; an
+independent gap, not the deferred PDP question below — no node produces it, because verifying the
 token *is* the trust boundary. Everything richer built on top of it — a user profile, an
 account lookup — is not framework magic; it's an ordinary node like any other
 (`LookupUserProfile: Identity -> UserProfile`), just one the framework ships a sensible
 default implementation for (`Std.*`, batteries-included, replaceable the same way any
 `.node` contract's implementation is replaceable — §10 already has the mechanism: a
 different accepted implementation for the same contract hash). Keeping the framework-only
-set to just `Identity` (plus `Std.Now`, §5) means almost everything reachable from
-identity is reviewable, versioned, and swappable like the rest of the graph, not runtime
-internals.
+set to just `Identity` means almost everything reachable from identity is reviewable,
+versioned, and swappable like the rest of the graph, not runtime internals. An earlier draft
+of this section named a second framework edge, `Std.Now`, and cross-referenced §5 for it;
+§5 never described one and none exists. A clock is an **effect** (§5) — `effect: clock`,
+performed once by the host and fed back on every replay — which is the same job done by a
+mechanism that already exists, so there is nothing for a system edge to add.
 
 A node reads `Identity` the same way it reads any other edge — declared, not ambient. A
 `.node` file's `scope` field names exactly which field(s) it needs (`read:Identity:sub`),
@@ -312,10 +411,11 @@ happens to look similar, isn't settled (open-questions.md). This doesn't reintro
 ambient state (§5): nothing ever writes to `Identity` once the outer membrane populates
 it, and a node's ability to *proceed* still depends on a gate it explicitly declared,
 checked by that node's own membrane call before `Fn` runs. A scope mismatch is a failure edge (§3),
-same as any other membrane rejection. The set of valid scopes is itself generated by
-scanning every `.node`'s declared `scope` (§10's schema-generation discipline, applied
-one layer up) — no separately hand-maintained grant registry to drift out of sync with
-what nodes actually enforce.
+same as any other membrane rejection. The set of valid scopes should itself be generated by
+scanning every `.node`'s declared `scope` (§10's schema-generation discipline, applied one
+layer up), so there is no separately hand-maintained grant registry to drift out of sync
+with what nodes actually enforce. Not built: `scope` is parsed, hashed into the contract and
+enforced per node, but nothing yet collects the set across a program.
 
 Prefer **scoping over checking**: filter data to the identity once at entry, so
 downstream nodes never see what they aren't entitled to. This works because everything
@@ -377,7 +477,11 @@ everything else; deferred, not designed away.
 `.edge` and `.topology` are pure data — every field maps directly onto existing types,
 nothing missing. `.node` is not: `Fn` is host code, which a data format can't and
 shouldn't hold (§5, "implementations are build output"). A `.node` file declares the
-contract only — name, input, output, examples, fixed — never the body.
+contract only — never the body. What it may carry: `label`, `description`, `input`,
+`output`, `examples`, `properties` (§6), `closure` (values fixed at elaboration), `scope`
+(§7), and `effect` (§5, naming a host handler instead of a drafted implementation). Its name
+is its filename, not a field — one place to write it down means it cannot drift out of sync
+with itself, the same rule `.edge` follows.
 
 **The seam.** Contract and implementation are two artifacts, connected by convention and
 kept in sync by tooling, not memory — the elaborator (§4) scaffolds and wires the
@@ -391,8 +495,10 @@ implementation, doesn't know whether one exists yet. The elaborator resolves
 `{node-name}/{contract-hash}.ts` in the implementation tree by name alone, the same way
 that project's `actionRegistry` never stores a handler's file path — mapping by
 convention, enforced by codegen, not by a stored reference. An explicit path field would
-also have to survive being resolved across that package boundary, which a bare name
-doesn't need to.
+also have to survive being resolved across that package boundary, which a bare name doesn't
+need to. The contract an isolated agent actually receives — every referenced edge embedded
+in full, so nothing has to be looked up — is the *sealed contract*
+([spec](superpowers/specs/2026-09-10-sealed-contract-and-implementation-metadata.md)).
 
 For an application built with weir (not this repo, which has no such application yet):
 suggested top-level names are `declarations/` and `implementations/`, echoing vocabulary
@@ -406,14 +512,27 @@ by feature, or flat is an authoring choice, not a framework rule.
 written once it passes both its examples and generated property cases (§6), never
 overwritten. Draft attempts an agent iterates on before acceptance aren't versions and
 don't live here; only what passes gets written. A new file is generated when the node's
-schema hash (§5) no longer matches the one an accepted implementation exists for, the
-same staleness check already used for edges, applied one layer down. If regenerating
+**contract** hash no longer matches the one an accepted implementation exists for — the same
+staleness check §5 describes for an edge's *schema* hash, applied one layer up rather than
+down: a node's hash covers its whole contract (input, output, examples, properties,
+closure, scope) and transitively the schema of every edge it names, so an edge change reaches
+its nodes automatically. If regenerating
 against an *unchanged* contract ever produces a different accept/reject outcome, that's
 underdetermination in the examples (§6), not a versioning case — fix the contract, don't
 paper over it with more storage. Nothing is destructively regenerated; every accepted
 implementation a node ever had stays reachable.
 
 **Replay.** An invocation records which implementation version it actually ran under,
-immutable once written, alongside `causation_ids` and `schema_hash` in the envelope.
-Redeploying a node's implementation never touches invocations already in flight — they
-stay pinned to the version they started under; only new invocations pick up the new one.
+immutable once written, alongside `causation_ids` and `schema_hash` in the envelope
+([spec](superpowers/specs/2026-09-23-invocation-records-and-replay.md)). Redeploying a
+node's implementation never touches invocations already in flight — they stay pinned to the
+version they started under; only new invocations pick up the new one.
+
+The pin is **implementation-shaped, not contract-shaped**, and the distinction is what makes
+the determinism check usable. A contract hash alone cannot tell "the declaration moved" from
+"the body moved", so `verify` could not say whether a disagreeing replay meant a
+nondeterministic node or merely a different implementation. With both recorded, a changed
+declaration and a changed body each arrive as a *skip with a reason*; what is left, when a
+replay completes and disagrees, is the node itself. (Built alongside the determinism check
+rather than under a spec of its own — `Envelope.implementationHash`, and
+`resolveImplementationAt` refusing an implementation whose bytes no longer hash to it.)
