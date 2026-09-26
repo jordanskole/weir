@@ -1328,17 +1328,19 @@ failing:
     expect(result.wiring.feeds.failing?.sort()).toEqual(["HandleFailed__Failed_Person", "HandleFailed__Failed_Todo"]);
   });
 
-  it("loads the real recipe example — a many(Ingredient) origin fanning out into a mix/preheat allOf join at bake", async () => {
+  it("loads the real recipe example — two origins joining at bake, with no identity node between them", async () => {
     const result = await elaborate(RECIPE_SRC);
 
-    expect(Object.keys(result.nodes).sort()).toEqual([
-      "bake",
-      "cool",
-      "gatherIngredients",
-      "mix",
-      "preheatOven",
-    ]);
-    expect(result.nodes.gatherIngredients!.input).toEqual({ kind: "single", edge: result.edges.Recipe });
+    // `gatherIngredients: Recipe → Recipe` used to sit here. It looked like
+    // dead weight and was load-bearing: it minted the one Recipe instance
+    // mix and preheatOven both descended from, because an origin's output
+    // carried `causationIds: []` and two origins shared no ancestor to group
+    // on. The run root supplies that ancestor now, so the workaround is gone
+    // and `mix`/`preheatOven` are origins in their own right — one external
+    // event populating both origin-shaped edges, which is design.md §5's
+    // named-legitimate shape.
+    expect(Object.keys(result.nodes).sort()).toEqual(["bake", "cool", "mix", "preheatOven"]);
+    expect(result.wiring.origins.sort()).toEqual(["mix", "preheatOven"]);
     expect(result.nodes.mix!.output).toEqual({ kind: "single", edge: result.edges.Dough });
     expect(result.nodes.preheatOven!.output).toEqual({ kind: "single", edge: result.edges.Oven });
     expect(result.nodes.bake!.input).toEqual({
@@ -1361,8 +1363,13 @@ failing:
     expect(result.edges.Cookies!.fields.title).toEqual(result.edges.Dough!.fields.title);
     expect(result.edges.Cookies!.fields.done).toEqual({ literal: true });
 
-    expect(result.wiring.origins).toEqual(["gatherIngredients"]);
-    expect(result.wiring.feeds.gatherIngredients?.sort()).toEqual(["mix", "preheatOven"]);
+    // Two top-level keys in the .topology are two origins. Both arms reach
+    // `bake` directly, and their instances are direct children of the run
+    // root — which is what lets them group there, since an external ancestor
+    // admits only its direct children (lineage.ts, externalAncestorAllows).
+    expect(result.wiring.feeds.mix).toEqual(["bake"]);
+    expect(result.wiring.feeds.preheatOven).toEqual(["bake"]);
+    expect(result.wiring.feeds.bake).toEqual(["cool"]);
     expect(result.wiring.feeds.mix).toEqual(["bake"]);
     expect(result.wiring.feeds.preheatOven).toEqual(["bake"]);
     expect(result.wiring.feeds.bake).toEqual(["cool"]);

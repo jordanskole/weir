@@ -1,10 +1,9 @@
-gatherIngredients:
+mix:
   then:
-    mix:
+    bake:
       then:
-        bake:
-          then:
-            cool: {}
-    preheatOven:
-      then:
-        bake: {}
+        cool: {}
+
+preheatOven:
+  then:
+    bake: {}

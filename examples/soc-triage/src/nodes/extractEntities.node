@@ -1,0 +1,5 @@
+label: Extract Entities
+description: Pull the entities worth investigating out of an alert
+input: Alert
+output:
+  many: Entity

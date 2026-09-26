@@ -1,0 +1,4 @@
+label: Assess
+description: Reach a verdict for one entity from its joined evidence
+input: EntityEvidence
+output: Assessment

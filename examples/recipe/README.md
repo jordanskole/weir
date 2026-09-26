@@ -13,25 +13,29 @@ are done.
 ## The pipeline
 
 ```
-                              +-- mix          (Recipe -> Dough) --+
-Recipe { title, servings,    |                                    v
-  temperature,                                              bake  (allOf [Dough, Oven] -> BakedCookies)
-  ingredients: many(Ingredient) }                                 |
-  | gatherIngredients (Recipe -> Recipe, origin)                  v
-                              |                              cool (BakedCookies -> Cookies { done: true })
-                              +-- preheatOven  (Recipe -> Oven) ---+
+                    +-- mix          (Recipe -> Dough) --+
+                    |                                    v
+one Recipe event ---+                              bake  (allOf [Dough, Oven] -> BakedCookies)
+                    |                                    |
+                    +-- preheatOven  (Recipe -> Oven) ---+
+                                                         v
+                                                   cool  (BakedCookies -> Cookies { done: true })
 ```
 
-`gatherIngredients` fans out to two independent branches — `mix` and `preheatOven` — that both read
-straight off the gathered `Recipe` and run without waiting on each other. `bake` declares
-`input: allOf: [Dough, Oven]`: the readiness check `todo-list`'s `AddTodoToList` also uses, except
-here both branches actually get produced, so it resolves for real. `.topology` needs no special join
-syntax for this — `bake` just appears again under `preheatOven`'s own `then:`, the same node fed by
-two different parents.
+`mix` and `preheatOven` are **two origins**, not one origin fanning out. One external event — one call
+to the graph's outer membrane — populates every origin-shaped edge the graph declares needing at once
+(`design.md` §5), so both read the same `Recipe` payload and run without waiting on each other. `bake`
+declares `input: allOf: [Dough, Oven]`: the readiness check resolves once both branches have produced.
+`.topology` needs no special join syntax — `bake` just appears again under `preheatOven`'s own `then:`,
+the same node fed by two different parents.
 
-`gatherIngredients` is `Recipe -> Recipe` — a real step (confirm everything's on hand before you
-start) that happens not to transform the payload, the same shape `todo-list`'s `CreateTodo` already
-established as legitimate.
+This shape was unbuildable until the run root landed (`docs/superpowers/specs/2026-09-25-system-nodes-run-root-and-noop.md`).
+An origin node's output used to carry `causationIds: []` — nothing produced it — so two origins shared
+no ancestor, `bake`'s join could form no lineage group, and the node silently never fired. This example
+therefore used to open with `gatherIngredients: Recipe -> Recipe`, an identity node whose only job was
+to mint the one `Recipe` instance both branches could descend from. It looked like dead weight and was
+load-bearing. The run root supplies that ancestor for every run now, so the workaround is gone and the
+two branches are origins in their own right.
 
 Every stage past that gets its own edge name — `Dough`, `Oven`, then `BakedCookies`, then `Cookies`
 — rather than reusing `Recipe` throughout. That's deliberate: it's the same dish, but a different
@@ -65,9 +69,10 @@ schema-validated at load time, only real runtime payloads are.
 
 ## Origin shape
 
-Like `todo-list`'s `CreateTodo` and `person-birthday`'s `birthday`, `gatherIngredients` takes
-`Recipe` as its input directly and is the topology's own origin — no separate `Unit`-input,
-closure-literal node. That's the pattern both existing fixtures actually implement on disk; the
+Like `todo-list`'s `CreateTodo` and `person-birthday`'s `birthday`, `mix` and `preheatOven` take
+`Recipe` as their input directly and are the topology's own origins — no separate `Unit`-input,
+closure-literal node. What is new here is that there are *two* of them: the run root is what makes
+several origins in one run joinable downstream. That's the pattern both existing fixtures actually implement on disk; the
 `Unit`/closure-origin convention in `examples/person-birthday/netlist.json` is a first draft that
 fixture never adopted (see that file's own README).
 

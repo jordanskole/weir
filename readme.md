@@ -13,7 +13,7 @@ An application is a directed graph of nodes wired together by their edge types, 
 
 The name comes from a fish weir: rather than watching the whole ocean, you build the one narrow place everything has to cross, and check it there. Edges are those crossings.
 
-> **Status: early, but it runs.** The example below elaborates from real `.edge`/`.node`/`.topology` files and executes end to end — schema assertion, multi-input readiness, `Failed<In>` routing, structural hashing, and implementation resolution by contract hash all work against files on disk, with a test suite over them. So does the acceptance gate that decides whether a drafted implementation is allowed to persist at all: it runs the node's declared examples, generated structural cases, and its `∀ p . …` property assertions before anything is written, and an invocation records the implementation version it ran under so it can be replayed against exactly that one. **Iteration runs too:** the log retains every instance instead of overwriting, and a single-input node fires once per unconsumed instance reaching it along a declared arc, so a cycle in the wiring runs to quiescence rather than firing once ([spec](docs/superpowers/specs/2026-09-24-instance-retention-and-iteration.md)). **`allOf` joins by lineage now, too:** a fan-in node fires once per lineage group — instances grouped by nearest common ancestor and zipped positionally — rather than once per run, so a fan-out/fan-in diamond iterates, not just single-input chains ([spec](docs/superpowers/specs/2026-09-25-allof-joins-by-lineage.md)). Two qualifiers, both in [open-questions.md](docs/open-questions.md): an "item" here is an *instance of the ancestor the arms diverged from*, not an element of a collection — a `many` output is one token carrying a keyed collection, and nothing today spreads it into N tokens, so there is no data-driven fan-out; and a fan-in fed by two *independent* origin nodes still never fires, silently, because separate origins share no ancestor to group on.
+> **Status: early, but it runs.** The example below elaborates from real `.edge`/`.node`/`.topology` files and executes end to end — schema assertion, multi-input readiness, `Failed<In>` routing, structural hashing, and implementation resolution by contract hash all work against files on disk, with a test suite over them. So does the acceptance gate that decides whether a drafted implementation is allowed to persist at all: it runs the node's declared examples, generated structural cases, and its `∀ p . …` property assertions before anything is written, and an invocation records the implementation version it ran under so it can be replayed against exactly that one. **Iteration runs too:** the log retains every instance instead of overwriting, and a single-input node fires once per unconsumed instance reaching it along a declared arc, so a cycle in the wiring runs to quiescence rather than firing once ([spec](docs/superpowers/specs/2026-09-24-instance-retention-and-iteration.md)). **`allOf` joins by lineage now, too:** a fan-in node fires once per lineage group — instances grouped by nearest common ancestor and zipped positionally — rather than once per run, so a fan-out/fan-in diamond iterates, not just single-input chains ([spec](docs/superpowers/specs/2026-09-25-allof-joins-by-lineage.md)). **And ancestry is total now:** the external trigger is represented as a token — one run-root instance per run that every origin node's output cites ([spec](docs/superpowers/specs/2026-09-25-system-nodes-run-root-and-noop.md)), so a fan-in fed by two *independent* origin nodes fires, where it used to reach quiescence silently unfired. The qualifier that remains, in [open-questions.md](docs/open-questions.md): an "item" is an *instance of the ancestor the arms diverged from*, not an element of a collection — a `many` output is one token carrying a keyed collection, and nothing spreads it into N tokens, so there is still no data-driven fan-out. A topology also refuses arcs and nodes it can never satisfy, at elaboration rather than at runtime.
 >
 > Not built yet: the planner and the rest of the `sys` queries, zones and classification, composite nodes, and any log that outlives the process. The host language is also undecided — `spikes/ts-prototype/` is a spike and the current lean is OCaml — so treat the TypeScript as evidence the design holds together rather than as the implementation.
 >
@@ -88,19 +88,18 @@ The wiring is its own file:
 
 ```yaml
 # declarations/main.topology
-gatherIngredients:
+mix:
   then:
-    mix:
+    bake:
       then:
-        bake:
-          then:
-            cool: {}
-    preheatOven:
-      then:
-        bake: {}
+        cool: {}
+
+preheatOven:
+  then:
+    bake: {}
 ```
 
-`mix` and `preheatOven` both run off `gatherIngredients`'s output, independently — the dough gets mixed while the oven heats, and `bake` names as its own child under *both*. That is the whole program. The implementation of `bake` lives in a different tree, resolved by name and contract hash, and is regenerable build output rather than something you maintain.
+Two top-level keys are two origins: one external event — one call to the graph's outer membrane — populates every origin-shaped edge it declares needing at once. The dough gets mixed while the oven heats, and `bake` names as its own child under *both*. That is the whole program. The implementation of `bake` lives in a different tree, resolved by name and contract hash, and is regenerable build output rather than something you maintain.
 
 **A topology is a node.** A subgraph with one input edge and one output edge is indistinguishable from a single node at its boundary, so this file can be dropped into a larger graph wherever a `Recipe -> Cookies` node is expected, and nothing upstream can tell the difference. Graphs nest without limit and bottom out at a **primitive** — a node whose body is host code rather than more graph. There is no separate module system, because the composition rule already is one.
 
@@ -109,17 +108,18 @@ gatherIngredients:
 Elaboration turns those files into a netlist — concrete nodes, concrete edges, no type variables. Execution appends to a log. For this recipe, the log opens like this (`envelope` also carries `timestamp`, `identity`, `node` and `contractHash`, and each instance its own `schemaHash` — trimmed here to the fields that matter for this walkthrough):
 
 ```json
-{ "instance": "gatherIngredients#1", "edge": "Recipe", "payload": { "title": "Chocolate Chip Cookies", "servings": 24 },
-  "envelope": { "id": "env-1", "correlationId": "run-1", "causationIds": [], "step": 1 } }
+{ "instance": "run#1",         "edge": "Run",   "payload": { "correlationId": "run-1", "triggeredAt": "..." } }
 
-{ "instance": "mix#1",               "edge": "Dough",  "payload": { "title": "Chocolate Chip Cookies", "servings": 24 },
-  "envelope": { "id": "env-2", "correlationId": "run-1", "causationIds": ["gatherIngredients#1"], "step": 2 } }
+{ "instance": "mix#1",         "edge": "Dough", "payload": { "title": "Chocolate Chip Cookies", "servings": 24 },
+  "envelope": { "id": "env-1", "correlationId": "run-1", "causationIds": ["run#1"], "step": 1 } }
 
-{ "instance": "preheatOven#1",       "edge": "Oven",   "payload": { "temperature": 375, "preheated": true },
-  "envelope": { "id": "env-3", "correlationId": "run-1", "causationIds": ["gatherIngredients#1"], "step": 2 } }
+{ "instance": "preheatOven#1", "edge": "Oven",  "payload": { "temperature": 375, "preheated": true },
+  "envelope": { "id": "env-2", "correlationId": "run-1", "causationIds": ["run#1"], "step": 1 } }
 ```
 
-`causationIds` names the specific instances this invocation consumed, not merely their edge types. `gatherIngredients` is the origin, so it consumed nothing — `[]`. `mix` and `preheatOven` are each `single`-input, so each names the one `Recipe` instance it read: `["gatherIngredients#1"]`. `bake`, further downstream, is a fan-in — `input: allOf: [Dough, Oven]` — so its own entry would name both `mix#1` and `preheatOven#1`, one per declared edge, in declaration order: empty for an origin, one entry for a single-input node, several for a fan-in. `step` is the pulse number: `gatherIngredients` is the origin and fires in the first pulse, `step: 1`; `mix` and `preheatOven` become ready only once it has appended, so they fire the pulse after, `step: 2` — independent, concurrent applications of the same origin, not a sequence. `bake` waits for both before it can append its own entry, one pulse later still.
+The first entry is the **run root** — the external trigger represented as a token. It is the one instance nothing produced, so it carries no envelope of its own, and every origin node's output cites it. That is what makes ancestry total: without it an origin's output descended from nothing, two origins shared no ancestor, and a fan-in fed by both could never form a lineage group to fire on.
+
+`causationIds` names the specific instances this invocation consumed, not merely their edge types. `mix` and `preheatOven` are origins, so each names the run root. `bake`, further downstream, is a fan-in — `input: allOf: [Dough, Oven]` — so its own entry names both `mix#1` and `preheatOven#1`, one per declared edge, in declaration order. `step` is the pulse number: both origins fire in the first pulse, `step: 1` — independent, concurrent applications of the same event, not a sequence. `bake` waits for both before it can append its own entry, one pulse later.
 
 That log is the source of truth. Node state is a fold over prior edges keyed by correlation id. The tables an application shows you are materialized views over it. Both the tables and any node's implementation can be deleted and rebuilt from it; the only durable artifacts are edge definitions and topology.
 

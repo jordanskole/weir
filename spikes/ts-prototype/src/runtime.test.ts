@@ -807,7 +807,6 @@ describe("runNetlist", () => {
       const raw = await elaborate(RECIPE_SRC);
 
       for (const [name, fn] of [
-        ["gatherIngredients", `export default function gatherIngredients(payload) { return payload; }`],
         [
           "mix",
           `export default function mix(payload) { return { title: payload.title, servings: payload.servings }; }`,
@@ -836,7 +835,14 @@ describe("runNetlist", () => {
         ingredients: { Butter: { name: "Butter", amount: "1 cup, softened" } },
       };
 
-      const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { gatherIngredients: recipe } }, { log });
+      // One external event populating both origin-shaped edges — design.md
+      // §5's blessed shape, and unbuildable before the run root because the
+      // two origins' outputs shared no ancestor for `bake` to group on.
+      const result = await runNetlist(
+        program,
+        { correlationId: "thread-1", originPayloads: { mix: recipe, preheatOven: recipe } },
+        { log },
+      );
 
       expect(log.latest("Dough", "thread-1")).toEqual({ title: recipe.title, servings: recipe.servings });
       expect(log.latest("Oven", "thread-1")).toEqual({ temperature: recipe.temperature, preheated: true });
