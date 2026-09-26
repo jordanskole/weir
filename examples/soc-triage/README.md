@@ -5,9 +5,12 @@ its own pair of independent investigations, and each pair rejoins with *its own*
 another's.
 
 It has a second job, which is why it is worth reading even though its declarations are unremarkable:
-**it was written before the feature that makes it work.** An outside reader sketched a SOC triage
-app from weir's own documentation, checked out the repo, and wrote these `.edge`/`.node`/`.topology`
-files. They are committed here unchanged.
+**it was written before the feature that makes it work.** An outside reader sketched a SOC triage app
+from weir's own documentation, checked out the repo, and wrote these files. Every `.edge` and `.node`
+is committed exactly as they wrote it — which is the point, since the fix was to make the runtime do
+what those declarations already said. Only the `.topology` has changed, and only to move the
+per-entity fan-out into a composite once composites existed; the flattened wiring is the same either
+way.
 
 ## The topology
 
@@ -88,7 +91,7 @@ That failure produced three separate pieces of work: an elaboration-time wiring 
 can carry nothing is rejected rather than discovered at runtime, the **run root** so ancestry is
 total, and **spread** so a `many` output becomes N tokens.
 
-## Why the declarations did not change
+## Why the node declarations did not change
 
 `investigateIdentity` declares `input: Entity`. That is what its author meant and it is now correct,
 because a `many Entity` output logs one real instance per element under the plain edge name — and
