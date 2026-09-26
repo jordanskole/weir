@@ -1,6 +1,6 @@
 # System nodes: the run root and `noop`
 
-Status: Part 1 (the run root) implemented; Part 2 (`noop`) designed, deliberately not built.
+Status: implemented. Part 1 (the run root) 2026-09-25; Part 2 (`noop`) 2026-09-26, once composite nodes gave a terminal somewhere to terminate.
 
 ## Motivation
 
@@ -85,9 +85,11 @@ The run root makes ancestry total. It does not supply *well-formed groups* — t
 
 ## Part 2: `noop`
 
-### 6. Synthesis, one per declared edge
+### 6. Synthesis, on reference
 
-`noop_X : X → X`, synthesized by the same linear scan as `synthesizeFailedEdges`, so the declaration language needs no generics and no polymorphic node kind. Synthesized from the edge table *after* `Failed_X` synthesis, from a snapshot, so no `noop_Failed_X` is generated unless an author declares a node consuming one.
+`noop_X : X → X`, synthesized per edge rather than as one polymorphic node, so the declaration language needs no generics.
+
+**Built on reference rather than unconditionally**, which is where this departs from the `synthesizeFailedEdges` precedent it was modelled on. An edge table is cheap and a node table is not: one `noop` per declared edge puts two unused nodes in every program for every edge, `Failed_X` included, and that showed up immediately as every test asserting a node list. Resolution is the natural place — the single point where a wiring turns a name into a node — and it falls out that `noop_Failed_X` is available when a failure branch needs terminating while `noop_noop_X` is unreachable, since no edge is named `noop_X`. An author's own `noop_X.node` file wins, because it is in the node table before resolution runs.
 
 ### 7. Its job is branch termination
 
@@ -95,11 +97,11 @@ A composite node closes when every declared terminal has fired (design-history.m
 
 Its second, formal job: outside a cartesian category the copy morphism `Δ` must be written explicitly, and `noop` is where weir writes it (design-history.md, "A join is a topology boundary").
 
-### 8. Why it is not built here
+### 8. Why it was not built with Part 1, and what changed
 
-Both jobs need something that does not exist. Branch termination needs composite nodes (piece 4) to terminate into. The copy morphism is the identity-origin workaround, which Part 1 deletes. Building `noop` before piece (4) would ship a node with no exercisable job and no honest test — the vacuity pattern this repo has shipped five times, at the topology layer.
+Both jobs needed something that did not exist. Branch termination needs composite nodes (piece 4) to terminate into; the copy morphism was the identity-origin workaround, which Part 1 deleted. Building `noop` then would have shipped a node with no exercisable job and no honest test — the vacuity pattern this repo has shipped five times, at the topology layer.
 
-**Recorded here so the design is settled when (4) starts, and deliberately not implemented.**
+**Built 2026-09-26, once composites landed.** One of the two jobs survived the wait and the other did not: the copy-morphism justification turned out to be wrong outright, since weir's arcs already copy (design-history.md, "Correction: weir's arcs already copy"). `noop` has exactly one job — terminating a branch inside a composite so its exit contract has a definite shape — and now has somewhere to do it.
 
 ## Testing
 

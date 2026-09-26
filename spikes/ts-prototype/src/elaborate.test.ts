@@ -1798,3 +1798,78 @@ prepare:
     expect(result.wiring.feeds.prepare).toBeUndefined();
   });
 });
+
+describe("elaborate — noop", () => {
+  it("synthesizes noop_<Edge> on reference, and not otherwise", async () => {
+    const edges = {
+      "edges/Seed.edge": `description: S\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "edges/Other.edge": `description: O\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\n`,
+    };
+
+    const unreferenced = await elaborate(await writeFixture({ ...edges, "topology/main.topology": `start: {}\n` }));
+    // Nothing referenced a noop, so none exist. An edge table is cheap and a
+    // node table is not: synthesizing one per edge would put two unused nodes
+    // in every program for every edge, Failed_* included.
+    expect(Object.keys(unreferenced.nodes).sort()).toEqual(["start"]);
+
+    const referenced = await elaborate(
+      await writeFixture({ ...edges, "topology/main.topology": `start:\n  then:\n    noop_Seed: {}\n` }),
+    );
+    expect(referenced.nodes.noop_Seed).toBeDefined();
+    expect(referenced.nodes.noop_Seed!.input).toEqual({ kind: "single", edge: referenced.edges.Seed });
+    expect(referenced.nodes.noop_Seed!.output).toEqual({ kind: "single", edge: referenced.edges.Seed });
+    // Only the one referenced.
+    expect(referenced.nodes.noop_Other).toBeUndefined();
+
+    // A failure branch can be terminated too, since Failed_* edges exist by
+    // the time resolution runs.
+    const failed = await elaborate(
+      await writeFixture({ ...edges, "topology/main.topology": `start:\n  then:\n    noop_Failed_Seed: {}\n` }),
+    );
+    expect(failed.nodes.noop_Failed_Seed).toBeDefined();
+  });
+
+  it("lets a composite terminate a branch on a noop, satisfying its declared output", async () => {
+    // The job noop was promoted for: a branch whose last real node does not
+    // itself produce the shape the composite's contract promises still needs
+    // a terminal, and a terminal's contract determines its implementation, so
+    // there is nothing to draft and nothing for the acceptance gate to accept.
+    const root = await writeFixture({
+      "edges/Seed.edge": `description: S\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "edges/Left.edge": `description: L\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "edges/Right.edge": `description: R\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "edges/Done.edge": `description: D\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "nodes/toLeft.node": `label: L\ndescription: d\ninput: Seed\noutput: Left\n`,
+      "nodes/toRight.node": `label: R\ndescription: d\ninput: Seed\noutput: Right\n`,
+      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\n`,
+      "nodes/finish.node": `label: F\ndescription: d\ninput:\n  allOf:\n    - Left\n    - Right\noutput: Done\n`,
+      "topology/split.topology": `
+input: Seed
+output:
+  allOf:
+    - Left
+    - Right
+terminals:
+  - noop_Left
+  - noop_Right
+wiring:
+  toLeft:
+    then:
+      noop_Left: {}
+  toRight:
+    then:
+      noop_Right: {}
+`,
+      "topology/main.topology": `start:\n  then:\n    split:\n      then:\n        finish: {}\n`,
+    });
+
+    const result = await elaborate(root);
+
+    // The terminals are the exits, so they are what feeds whatever consumed
+    // the composite.
+    expect(result.wiring.feeds["split/noop_Left"]).toEqual(["finish"]);
+    expect(result.wiring.feeds["split/noop_Right"]).toEqual(["finish"]);
+    expect(result.wiring.feeds["split/toLeft"]).toEqual(["split/noop_Left"]);
+  });
+});

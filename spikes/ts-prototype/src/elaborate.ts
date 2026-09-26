@@ -101,6 +101,56 @@ function synthesizeAllOfFailedEdges(edges: Record<string, AnyEdgeDef>, combos: A
   }
 }
 
+/**
+ * Synthesizes one `noop_<EdgeName>` node per declared edge — `X -> X`, the
+ * identity. A *system node* in the sense of `open-questions.md`: its contract
+ * determines its implementation, so there is nothing for an agent to draft
+ * and nothing for the acceptance gate to accept. No `fn`, no implementation
+ * file keyed by contract hash, no declared examples, no property assertions.
+ *
+ * Its job is **terminating a branch inside a composite**
+ * (docs/superpowers/specs/2026-09-25-system-nodes-run-root-and-noop.md §7).
+ * A composite's `terminals` are the inner nodes whose outputs are its
+ * declared output; when a branch's last real node does not itself produce
+ * that shape, or when the branch simply needs a named exit, `noop_X` is what
+ * it ends on. Declared rather than inferred, so the boundary is checkable at
+ * elaboration instead of only observable at runtime.
+ *
+ * Synthesized per edge rather than as one polymorphic node, so the
+ * declaration language needs no generics — the trick `synthesizeFailedEdges`
+ * already uses, with one difference: **on reference, not unconditionally.**
+ * An edge table is cheap and a node table is not; synthesizing `noop_X` for
+ * every declared edge would put 2N unused nodes in every program (`Failed_X`
+ * edges get noops too), which showed up immediately as every test asserting
+ * a node list. Resolution is the natural place — it is the single point
+ * where a wiring turns a name into a node — and it means `noop_Failed_X` is
+ * available if a failure branch needs terminating while `noop_noop_X` is
+ * never reachable, since no edge is named `noop_X`.
+ *
+ * What this is *not*, corrected once already: an explicit copy morphism.
+ * Weir's arcs already copy — `feeds: { a: ["b", "c"] }` gives both the same
+ * instance, because consumption is tracked per node — so `Δ` is free and
+ * needs no node (design-history.md, "Correction: weir's arcs already copy").
+ */
+function synthesizeNoopNode(
+  nodes: Record<string, NodeDecl>,
+  edges: Record<string, AnyEdgeDef>,
+  name: string,
+): boolean {
+  if (name in nodes) return true;
+  const edgeName = name.startsWith("noop_") ? name.slice("noop_".length) : undefined;
+  const edge = edgeName === undefined ? undefined : edges[edgeName];
+  if (edge === undefined) return false;
+  nodes[name] = {
+    name,
+    label: `No-op (${edge.label})`,
+    description: `Passes a "${edge.name}" through unchanged — a branch terminal (docs/superpowers/specs/2026-09-25-system-nodes-run-root-and-noop.md).`,
+    input: { kind: "single", edge },
+    output: { kind: "single", edge },
+  };
+  return true;
+}
+
 /** Parse a `.field` file's YAML text into a validated FieldDef. */
 export function parseFieldFile(yamlText: string): FieldDef {
   const raw = parse(yamlText) as Record<string, unknown>;
@@ -906,7 +956,12 @@ export async function elaborate(root: string): Promise<Elaborated> {
     const aliased = anyOfAliases.get(name);
     if (aliased) return aliased;
     if (!(name in nodes) && !compositeNames.has(name)) {
-      throw new Error(`Cannot resolve "${name}" — no .node file or composite .topology declares it.`);
+      // `noop_X` is synthesized here rather than up front — see
+      // synthesizeNoopNode. An author's own `noop_X` .node file wins,
+      // because it is already in `nodes` by now.
+      if (!synthesizeNoopNode(nodes, edges, name)) {
+        throw new Error(`Cannot resolve "${name}" — no .node file or composite .topology declares it.`);
+      }
     }
     return [name];
   };
