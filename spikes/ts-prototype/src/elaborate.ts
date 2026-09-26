@@ -373,8 +373,87 @@ export type NodeNameResolver = (name: string) => string[];
  * deliberately imprecise rather than smart, since a wasted readiness check
  * on the wrong shadow is free (docs/superpowers/specs/2026-08-31-any-desugaring-design.md).
  */
-export function parseTopologyFile(yamlText: string, resolveNodeName: NodeNameResolver): Wiring {
+/**
+ * A `.topology` file that declares a contract: a named, contracted topology
+ * another topology may reference exactly where it would reference a node
+ * (docs/superpowers/specs/2026-09-26-composite-nodes.md). A file is a
+ * composite exactly when it declares `input:` at the top level; one without
+ * is a root, parsed as bare wiring the way every `.topology` was before.
+ *
+ * That detection rule is what keeps every existing example untouched, and it
+ * costs one restriction: `input`, `output`, `terminals` and `wiring` are
+ * reserved at the top level of a `.topology`, so a node may not be named any
+ * of them.
+ */
+export interface CompositeDecl {
+  name: string;
+  input: InputSpec;
+  output: OutputSpec;
+  /** The inner nodes whose outputs are this composite's output. */
+  terminals: string[];
+  wiring: Wiring;
+}
+
+/** Top-level keys a `.topology` reserves for a composite's contract. */
+export const TOPOLOGY_RESERVED_KEYS = ["input", "output", "terminals", "wiring"] as const;
+
+/** Whether a parsed `.topology` document declares a contract rather than being bare wiring. */
+export function isCompositeTopology(yamlText: string): boolean {
   const raw = (parse(yamlText) as Record<string, unknown> | null) ?? {};
+  return "input" in raw;
+}
+
+/** Parses a contract-declaring `.topology` into a CompositeDecl. Its filename is its name. */
+export function parseCompositeTopologyFile(
+  yamlText: string,
+  name: string,
+  resolveEdge: EdgeResolver,
+  resolveNodeName: NodeNameResolver,
+): CompositeDecl {
+  const raw = (parse(yamlText) as Record<string, unknown> | null) ?? {};
+  const { input, output, terminals, wiring, ...rest } = raw as {
+    input?: unknown;
+    output?: unknown;
+    terminals?: unknown;
+    wiring?: unknown;
+  };
+  const unrecognized = Object.keys(rest)[0];
+  if (unrecognized !== undefined) {
+    throw new Error(
+      `Composite topology "${name}": unrecognized top-level key "${unrecognized}" — a composite declares only ${TOPOLOGY_RESERVED_KEYS.join(", ")}.`,
+    );
+  }
+  if (output === undefined) {
+    throw new Error(`Composite topology "${name}": declares "input" but no "output".`);
+  }
+  if (!Array.isArray(terminals) || terminals.length === 0) {
+    throw new Error(
+      `Composite topology "${name}": needs a non-empty "terminals" list — the inner nodes whose outputs are this composite's output.`,
+    );
+  }
+  if (wiring === undefined) {
+    throw new Error(`Composite topology "${name}": declares a contract but no "wiring".`);
+  }
+  return {
+    name,
+    input: resolveInputSpec(input, resolveEdge),
+    output: resolveOutputSpec(output, resolveEdge),
+    terminals: terminals.map(String),
+    wiring: parseWiringObject(wiring as Record<string, unknown>, resolveNodeName),
+  };
+}
+
+export function parseTopologyFile(yamlText: string, resolveNodeName: NodeNameResolver): Wiring {
+  return parseWiringObject((parse(yamlText) as Record<string, unknown> | null) ?? {}, resolveNodeName);
+}
+
+/**
+ * The wiring walk itself, over an already-parsed object. Shared by a bare
+ * `.topology` (whose whole document is the wiring) and a composite's
+ * `wiring:` key, so both get identical semantics rather than two parsers
+ * that could drift.
+ */
+function parseWiringObject(raw: Record<string, unknown>, resolveNodeName: NodeNameResolver): Wiring {
   const origins: string[] = [];
   const feeds = new Map<string, Set<string>>();
 
@@ -575,6 +654,132 @@ function assertWiringTypes(
   }
 }
 
+/**
+ * Replaces every composite reference in `wiring` with the composite's own
+ * nodes, wired in at both ends — the whole of composite-node support
+ * (docs/superpowers/specs/2026-09-26-composite-nodes.md §4). The runtime
+ * never learns composites exist.
+ *
+ * Inlining rather than a runtime membrane is deliberate, and the reasoning
+ * is worth having here rather than only in the spec: what the boundary was
+ * *for* is authoring. A `.topology` file is geometrically a tree and cannot
+ * express reconvergence, so joins had to move to a boundary; inlining keeps
+ * every authored file a tree and lets the elaborator assemble the DAG, which
+ * is already its job. What it costs is recursive composition — a composite
+ * cannot reference itself — which is rejected below rather than looped on.
+ *
+ * Two references to one composite become two independent node sets, which is
+ * not a compromise but the rule positional identity asks for (two mentions
+ * are two instances) arriving for free.
+ */
+function inlineComposites(
+  nodes: Record<string, NodeDecl>,
+  wiring: Wiring,
+  composites: Map<string, CompositeDecl>,
+  stack: string[] = [],
+  prefix = "",
+): Wiring {
+  const referenced = new Set(
+    [...wiring.origins, ...Object.keys(wiring.feeds), ...Object.values(wiring.feeds).flat()].filter((n) =>
+      composites.has(n),
+    ),
+  );
+  if (referenced.size === 0) return wiring;
+
+  let origins = [...wiring.origins];
+  const feeds = new Map<string, string[]>(Object.entries(wiring.feeds).map(([k, v]) => [k, [...v]]));
+
+  for (const name of referenced) {
+    if (stack.includes(name)) {
+      throw new Error(
+        `Composite topology "${name}" references itself (${[...stack, name].join(" -> ")}) — recursive composition is not supported; a composite is inlined at elaboration, so it must nest finitely.`,
+      );
+    }
+    const composite = composites.get(name)!;
+
+    // One reference site per parent that feeds it, plus one if it is an
+    // origin. More than one site means the composite is instantiated more
+    // than once, and each instance needs its own node names.
+    const parents = [...feeds.entries()].filter(([, kids]) => kids.includes(name)).map(([p]) => p);
+    const sites: (string | null)[] = [...(origins.includes(name) ? [null] : []), ...parents];
+    const qualify = (siteIndex: number): string =>
+      sites.length > 1 ? `${prefix}${name}#${siteIndex + 1}` : `${prefix}${name}`;
+
+    sites.forEach((parent, siteIndex) => {
+      const instance = qualify(siteIndex);
+      // Expand the composite's own wiring first, so a composite containing a
+      // composite flattens bottom-up under this instance's prefix.
+      const inner = inlineComposites(nodes, composite.wiring, composites, [...stack, name], `${instance}/`);
+
+      const rename = (innerName: string): string =>
+        composites.has(innerName) ? innerName : `${instance}/${innerName}`;
+
+      for (const innerName of new Set([...inner.origins, ...Object.keys(inner.feeds), ...Object.values(inner.feeds).flat()])) {
+        const decl = nodes[innerName];
+        if (decl !== undefined && nodes[rename(innerName)] === undefined) {
+          // The *key* is qualified; `name` deliberately is not. An inlined
+          // copy is the same node in a different position — same contract,
+          // same hash, same accepted implementation. `fingerprintNode`
+          // includes `name` and `implementation.ts` resolves
+          // `{node.name}/<hash>.ts`, so renaming here would silently orphan
+          // every composite's implementations.
+          nodes[rename(innerName)] = { ...decl };
+        }
+      }
+      for (const [innerParent, innerKids] of Object.entries(inner.feeds)) {
+        const key = rename(innerParent);
+        feeds.set(key, [...new Set([...(feeds.get(key) ?? []), ...innerKids.map(rename)])]);
+      }
+
+      const entries = inner.origins.map(rename);
+      const exits = composite.terminals.map(rename);
+
+      if (parent === null) {
+        origins = [...origins.filter((o) => o !== name), ...entries];
+      } else {
+        feeds.set(parent, [...new Set([...feeds.get(parent)!.filter((k) => k !== name), ...entries])]);
+      }
+      for (const exit of exits) {
+        feeds.set(exit, [...new Set([...(feeds.get(exit) ?? []), ...(wiring.feeds[name] ?? [])])]);
+      }
+    });
+
+    feeds.delete(name);
+    origins = origins.filter((o) => o !== name);
+  }
+
+  return { origins, feeds: Object.fromEntries(feeds) };
+}
+
+/**
+ * A composite's declared `output` must be what its terminals actually
+ * produce. Rule B at the boundary rather than a new rule: the same question
+ * `assertWiringTypes` asks of a node's parents, asked of a composite's exits.
+ */
+function assertCompositeContracts(nodes: Record<string, NodeDecl>, composites: Map<string, CompositeDecl>): void {
+  for (const composite of composites.values()) {
+    const produced = new Set(
+      composite.terminals.flatMap((terminal) => {
+        const decl = nodes[terminal];
+        if (decl === undefined) {
+          throw new Error(`Composite topology "${composite.name}": terminal "${terminal}" is not a declared node.`);
+        }
+        return producedEdges(decl).map((p) => p.name);
+      }),
+    );
+    const declared =
+      composite.output.kind === "single" || composite.output.kind === "many"
+        ? [composite.output.edge.name]
+        : composite.output.edges.map((edge) => edge.name);
+    const missing = declared.filter((name) => !produced.has(name));
+    if (missing.length > 0) {
+      throw new Error(
+        `Composite topology "${composite.name}": declares output ${missing.map((m) => `"${m}"`).join(", ")}, but its terminals (${composite.terminals.join(", ")}) produce ${[...produced].map((p) => `"${p}"`).join(", ")}.`,
+      );
+    }
+  }
+}
+
 export interface Elaborated {
   fields: Record<string, FieldDef>;
   edges: Record<string, AnyEdgeDef>;
@@ -683,19 +888,46 @@ export async function elaborate(root: string): Promise<Elaborated> {
     }
   }
 
+  // A composite is referenced by name where a node would be, so the resolver
+  // has to know them before any wiring is parsed — including a composite's
+  // own inner wiring, which may reference another composite. Collected by a
+  // cheap first pass over the .topology files (their filenames and whether
+  // they declare `input:`), before anything is parsed for real.
+  const compositeNames = new Set<string>();
+  const topologyFiles: { file: string; text: string; composite: boolean }[] = [];
+  for await (const file of glob("**/*.topology", { cwd: root })) {
+    const text = await readFile(`${root}/${file}`, "utf8");
+    const composite = isCompositeTopology(text);
+    if (composite) compositeNames.add(basename(file, ".topology"));
+    topologyFiles.push({ file, text, composite });
+  }
+
   const resolveNodeName: NodeNameResolver = (name) => {
     const aliased = anyOfAliases.get(name);
     if (aliased) return aliased;
-    if (!(name in nodes)) {
-      throw new Error(`Cannot resolve "${name}" — no .node file declares it.`);
+    if (!(name in nodes) && !compositeNames.has(name)) {
+      throw new Error(`Cannot resolve "${name}" — no .node file or composite .topology declares it.`);
     }
     return [name];
   };
 
+  // A `.topology` declaring `input:` is a composite — a named, contracted
+  // topology referenced where a node would be. Everything else is a root and
+  // merges as it always has.
+  const composites = new Map<string, CompositeDecl>();
   let wiring: Wiring = { origins: [], feeds: {} };
-  for await (const file of glob("**/*.topology", { cwd: root })) {
-    const text = await readFile(`${root}/${file}`, "utf8");
+  for (const { file, text, composite } of topologyFiles) {
+    if (composite) {
+      const name = basename(file, ".topology");
+      composites.set(name, parseCompositeTopologyFile(text, name, resolveEdge, resolveNodeName));
+      continue;
+    }
     wiring = mergeWiring(wiring, parseTopologyFile(text, resolveNodeName));
+  }
+
+  if (composites.size > 0) {
+    assertCompositeContracts(nodes, composites);
+    wiring = inlineComposites(nodes, wiring, composites);
   }
 
   assertWiringTypes(nodes, wiring, anyOfAliases);

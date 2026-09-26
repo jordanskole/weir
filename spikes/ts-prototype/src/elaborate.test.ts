@@ -1520,3 +1520,281 @@ describe("elaborate — wiring type checks", () => {
     expect(result.wiring.feeds.count).toEqual(["count"]);
   });
 });
+
+/**
+ * Composite nodes (docs/superpowers/specs/2026-09-26-composite-nodes.md).
+ *
+ * A `.topology` file that declares `input:` is a composite: a named,
+ * contracted topology that another topology may reference exactly where it
+ * would reference a node. Composites are inlined at elaboration — the
+ * runtime never learns they exist — so the authoring surface stays a tree
+ * while the elaborator assembles the DAG, which is what "a join is a
+ * topology boundary" needs in order to be buildable.
+ */
+describe("elaborate — composite nodes", () => {
+  const EDGES = {
+    "edges/Seed.edge": `
+description: Seed
+fields:
+  value:
+    type: utf8
+    label: V
+    description: d
+    nullable: false
+`,
+    "edges/Left.edge": `
+description: Left
+fields:
+  value:
+    type: utf8
+    label: V
+    description: d
+    nullable: false
+`,
+    "edges/Right.edge": `
+description: Right
+fields:
+  value:
+    type: utf8
+    label: V
+    description: d
+    nullable: false
+`,
+    "edges/Done.edge": `
+description: Done
+fields:
+  value:
+    type: utf8
+    label: V
+    description: d
+    nullable: false
+`,
+  };
+
+  const SPLIT_NODES = {
+    "nodes/toLeft.node": `label: L\ndescription: d\ninput: Seed\noutput: Left\n`,
+    "nodes/toRight.node": `label: R\ndescription: d\ninput: Seed\noutput: Right\n`,
+  };
+
+  it("inlines a referenced composite: qualified inner nodes, and the composite name gone", async () => {
+    const root = await writeFixture({
+      ...EDGES,
+      ...SPLIT_NODES,
+      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\n`,
+      "nodes/finish.node": `label: F\ndescription: d\ninput:\n  allOf:\n    - Left\n    - Right\noutput: Done\n`,
+      "topology/split.topology": `
+input: Seed
+output:
+  allOf:
+    - Left
+    - Right
+terminals:
+  - toLeft
+  - toRight
+wiring:
+  toLeft: {}
+  toRight: {}
+`,
+      "topology/main.topology": `
+start:
+  then:
+    split:
+      then:
+        finish: {}
+`,
+    });
+
+    const result = await elaborate(root);
+
+    // The composite itself is not a node in the flattened program.
+    expect(result.wiring.feeds.split).toBeUndefined();
+    expect(Object.keys(result.nodes)).not.toContain("split");
+
+    // Its inner nodes are, under qualified keys. The originals stay in the
+    // table too — a .node file declares a node whether or not a topology
+    // reaches it — and assertWiringTypes skips unwired ones.
+    expect(Object.keys(result.nodes).sort()).toEqual([
+      "finish",
+      "split/toLeft",
+      "split/toRight",
+      "start",
+      "toLeft",
+      "toRight",
+    ]);
+    // The qualified copy keeps its original `name`, so its contract hash and
+    // its accepted implementation are unchanged.
+    expect(result.nodes["split/toLeft"]!.name).toBe("toLeft");
+
+    // Arcs reconnect at both ends: what fed the composite now feeds its
+    // origins, and its terminals now feed what the composite fed.
+    expect(result.wiring.feeds.start?.sort()).toEqual(["split/toLeft", "split/toRight"]);
+    expect(result.wiring.feeds["split/toLeft"]).toEqual(["finish"]);
+    expect(result.wiring.feeds["split/toRight"]).toEqual(["finish"]);
+  });
+
+  it("gives two references to one composite two independent node sets", async () => {
+    const root = await writeFixture({
+      ...EDGES,
+      ...SPLIT_NODES,
+      "nodes/startA.node": `label: A\ndescription: d\ninput: Seed\noutput: Seed\n`,
+      "nodes/startB.node": `label: B\ndescription: d\ninput: Seed\noutput: Seed\n`,
+      "topology/split.topology": `
+input: Seed
+output:
+  allOf:
+    - Left
+    - Right
+terminals:
+  - toLeft
+  - toRight
+wiring:
+  toLeft: {}
+  toRight: {}
+`,
+      "topology/main.topology": `
+startA:
+  then:
+    split: {}
+
+startB:
+  then:
+    split: {}
+`,
+    });
+
+    const result = await elaborate(root);
+
+    // Two mentions, two instances — the rule positional identity asks for,
+    // falling out of the flattener rather than being implemented.
+    expect(Object.keys(result.nodes).sort()).toEqual([
+      "split#1/toLeft",
+      "split#1/toRight",
+      "split#2/toLeft",
+      "split#2/toRight",
+      "startA",
+      "startB",
+      "toLeft",
+      "toRight",
+    ]);
+    expect(result.wiring.feeds.startA?.sort()).toEqual(["split#1/toLeft", "split#1/toRight"]);
+    expect(result.wiring.feeds.startB?.sort()).toEqual(["split#2/toLeft", "split#2/toRight"]);
+  });
+
+  it("leaves a root topology — one with no input: header — exactly as it was", async () => {
+    const root = await writeFixture({
+      ...EDGES,
+      ...SPLIT_NODES,
+      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\n`,
+      "topology/main.topology": `
+start:
+  then:
+    toLeft: {}
+    toRight: {}
+`,
+    });
+
+    const result = await elaborate(root);
+
+    expect(result.wiring.origins).toEqual(["start"]);
+    expect(result.wiring.feeds.start?.sort()).toEqual(["toLeft", "toRight"]);
+    expect(Object.keys(result.nodes).sort()).toEqual(["start", "toLeft", "toRight"]);
+  });
+
+  it("rejects a composite whose terminals do not satisfy its declared output", async () => {
+    const root = await writeFixture({
+      ...EDGES,
+      ...SPLIT_NODES,
+      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\n`,
+      "topology/split.topology": `
+input: Seed
+output:
+  allOf:
+    - Left
+    - Right
+terminals:
+  - toLeft
+wiring:
+  toLeft: {}
+  toRight: {}
+`,
+      "topology/main.topology": `start:\n  then:\n    split: {}\n`,
+    });
+
+    await expect(elaborate(root)).rejects.toThrow(/split.*Right/s);
+  });
+
+  it("rejects a composite that references itself, rather than inlining forever", async () => {
+    const root = await writeFixture({
+      ...EDGES,
+      ...SPLIT_NODES,
+      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\n`,
+      "topology/split.topology": `
+input: Seed
+output:
+  allOf:
+    - Left
+    - Right
+terminals:
+  - toLeft
+  - toRight
+wiring:
+  toLeft:
+    then:
+      split: {}
+  toRight: {}
+`,
+      "topology/main.topology": `start:\n  then:\n    split: {}\n`,
+    });
+
+    // Recursive composition is deferred with the runtime membrane (spec §3).
+    // Rejecting is the honest behaviour; looping is not.
+    await expect(elaborate(root)).rejects.toThrow(/recurs|cycle|itself/i);
+  });
+});
+
+describe("elaborate — a composite removes a topology's double mention", () => {
+  it("flattens a fan-out composite to the same wiring the hand-written diamond produces", async () => {
+    // examples/recipe names `bake` twice, under `mix` and under
+    // preheatOven`, because a .topology is a tree and there is nowhere else
+    // to put the reconvergence. Moving the fan-out into a composite whose
+    // *exit* is allOf[Dough, Oven] leaves the root a chain — one mention of
+    // each node — and flattens to the identical wiring.
+    const root = await writeFixture({
+      "edges/Recipe.edge": `description: R\nfields:\n  title:\n    type: utf8\n    label: T\n    description: d\n    nullable: false\n`,
+      "edges/Dough.edge": `description: D\nfields:\n  title:\n    type: utf8\n    label: T\n    description: d\n    nullable: false\n`,
+      "edges/Oven.edge": `description: O\nfields:\n  temperature:\n    type: uint16\n    label: T\n    description: d\n    nullable: false\n`,
+      "edges/Cookies.edge": `description: C\nfields:\n  title:\n    type: utf8\n    label: T\n    description: d\n    nullable: false\n`,
+      "nodes/mix.node": `label: M\ndescription: d\ninput: Recipe\noutput: Dough\n`,
+      "nodes/preheatOven.node": `label: P\ndescription: d\ninput: Recipe\noutput: Oven\n`,
+      "nodes/bake.node": `label: B\ndescription: d\ninput:\n  allOf:\n    - Dough\n    - Oven\noutput: Cookies\n`,
+      "topology/prepare.topology": `
+input: Recipe
+output:
+  allOf:
+    - Dough
+    - Oven
+terminals:
+  - mix
+  - preheatOven
+wiring:
+  mix: {}
+  preheatOven: {}
+`,
+      // A chain. No node named twice, anywhere.
+      "topology/main.topology": `
+prepare:
+  then:
+    bake: {}
+`,
+    });
+
+    const result = await elaborate(root);
+
+    expect(result.wiring.origins.sort()).toEqual(["prepare/mix", "prepare/preheatOven"]);
+    expect(result.wiring.feeds["prepare/mix"]).toEqual(["bake"]);
+    expect(result.wiring.feeds["prepare/preheatOven"]).toEqual(["bake"]);
+    // Which is the diamond — assembled by the elaborator from a tree, rather
+    // than written as one.
+    expect(result.wiring.feeds.prepare).toBeUndefined();
+  });
+});

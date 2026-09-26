@@ -96,6 +96,12 @@ Break-proofs required for each; `tsconfig.json` excludes `src/**/*.test.ts`, so 
 5. A composite whose terminals do not satisfy its declared `output` is rejected at elaboration.
 6. A cycle of composites (a composite referencing itself, directly or transitively) is rejected at elaboration rather than looping the flattener.
 
+## 5a. Found while building: inlining renames origins
+
+If a composite is itself the root's origin — which is what `examples/recipe` becomes once its fan-out moves inside one — inlining replaces it with its inner origins under qualified names, so `runNetlist`'s `originPayloads` must be keyed `prepare/mix` rather than `mix`. The caller has to know the composite's interior to start the run, which is exactly what a boundary is supposed to hide.
+
+Not fixed here, and not a blocker: no shipped example uses a composite as a root origin. The candidate answer is that `originPayloads` should be keyed by the *authored* name and expanded during inlining, alongside the wiring — which is a small addition to the flattener rather than a design change. Recorded so it is found deliberately rather than discovered by a confusing failure.
+
 ## 6. Explicitly out of scope
 
 - **Runtime membranes** (§3(a)), and with them **recursive composition**, dynamic invocation, isolation and per-composite budgets. A composite referencing itself is rejected at elaboration (§5.6) rather than supported.
