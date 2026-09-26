@@ -1,0 +1,4 @@
+label: Investigate Asset
+description: Gather asset evidence about one entity
+input: Entity
+output: AssetContext

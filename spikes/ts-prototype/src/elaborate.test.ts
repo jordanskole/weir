@@ -1387,12 +1387,12 @@ failing:
  *                          their input arrives as an originPayload, not
  *                          along an arc.
  *
- * The motivating case is A's `many` branch: no InputSpec is ever `many`
- * (resolveInputSpec builds only `single`/`allOf`), so a `many X` output
- * can never satisfy any input. Before this check, wiring one into a
- * `single X` input elaborated clean, ran to quiescence, and failed as a
- * schema error two nodes downstream — see examples/soc-triage's history
- * in docs/open-questions.md ("There is no fan-out primitive").
+ * The motivating case was A's `many` branch, since removed: a `many X`
+ * output could not satisfy any input, so wiring one into a `single X`
+ * input elaborated clean, ran to quiescence, and failed as a schema error
+ * two nodes downstream. Spread made that arc satisfiable and the branch
+ * went with it (2026-09-26-spread-materializes-elements.md §3). What Rule
+ * A still catches is an arc carrying nothing the consumer declares at all.
  */
 const ITEM_EDGE = `
 description: One item
@@ -1416,7 +1416,7 @@ fields:
 `;
 
 describe("elaborate — wiring type checks", () => {
-  it("rejects a many output wired into a single input, naming both nodes and the edge", async () => {
+  it("accepts a many output wired into a single input — spread materializes the elements", async () => {
     const root = await writeFixture({
       "edges/Seed.edge": PLAIN_EDGE("Seed"),
       "edges/Item.edge": ITEM_EDGE,
@@ -1426,7 +1426,15 @@ describe("elaborate — wiring type checks", () => {
       "topology/main.topology": `extract:\n  then:\n    use: {}\n`,
     });
 
-    await expect(elaborate(root)).rejects.toThrow(/use.*extract.*many Item/s);
+    // This rejected until spread landed, and the rejection was correct at the
+    // time: no InputSpec is ever `many` and nothing turned a collection into
+    // instances, so the arc could carry nothing. `logOutput` now materializes
+    // one instance per element under the declared edge name, so the arc is
+    // satisfiable and `use` fires once per element — piece (1)'s existing
+    // rule, with no new declaration
+    // (docs/superpowers/specs/2026-09-26-spread-materializes-elements.md §3).
+    const result = await elaborate(root);
+    expect(result.wiring.feeds.extract).toEqual(["use"]);
   });
 
   it("rejects an arc whose parent produces nothing the child consumes", async () => {

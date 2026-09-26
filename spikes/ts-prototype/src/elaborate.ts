@@ -436,14 +436,12 @@ function mergeWiring(a: Wiring, b: Wiring): Wiring {
  * (docs/design-history.md, "`many` is a collection, keyed by index, not an
  * array").
  */
-function producedEdges(node: NodeDecl): { name: string; many: boolean }[] {
+function producedEdges(node: NodeDecl): { name: string }[] {
   const output = node.output;
   const declared =
-    output.kind === "single"
-      ? [{ name: output.edge.name, many: false }]
-      : output.kind === "many"
-        ? [{ name: output.edge.name, many: true }]
-        : output.edges.map((edge) => ({ name: edge.name, many: false }));
+    output.kind === "single" || output.kind === "many"
+      ? [{ name: output.edge.name }]
+      : output.edges.map((edge) => ({ name: edge.name }));
 
   // Every node can also emit `Failed<In>`, which the runtime logs under a
   // synthesized edge named for the node's *input* (`runtime.ts`'s
@@ -457,7 +455,7 @@ function producedEdges(node: NodeDecl): { name: string; many: boolean }[] {
       ? failedEdgeName(node.input.edge.name)
       : failedAllOfEdgeName(node.input.edges);
 
-  return [...declared, { name: failed, many: false }];
+  return [...declared, { name: failed }];
 }
 
 /**
@@ -532,19 +530,13 @@ function assertWiringTypes(
       const group = groupOf(child);
       const satisfiable = group.some((sibling) => {
         const consumed = new Set(consumedEdges(nodes[sibling]!.input));
-        return produced.some((p) => !p.many && consumed.has(p.name));
+        return produced.some((p) => consumed.has(p.name));
       });
       if (satisfiable) continue;
 
       const consumed = new Set(group.flatMap((sibling) => consumedEdges(nodes[sibling]!.input)));
-      const collectionMatch = produced.find((p) => p.many && consumed.has(p.name));
-      if (collectionMatch) {
-        throw new Error(
-          `Wiring: "${child}" consumes "${collectionMatch.name}", but its parent "${parent}" produces "many ${collectionMatch.name}" — a many output is one token carrying a keyed collection, not one instance per element, so nothing on this arc can satisfy it.`,
-        );
-      }
       throw new Error(
-        `Wiring: the arc "${parent}" -> "${child}" carries nothing "${child}" can use — "${parent}" produces ${produced.map((p) => `"${p.many ? `many ${p.name}` : p.name}"`).join(", ")}; "${child}" consumes ${[...consumed].map((name) => `"${name}"`).join(", ")}.`,
+        `Wiring: the arc "${parent}" -> "${child}" carries nothing "${child}" can use — "${parent}" produces ${produced.map((p) => `"${p.name}"`).join(", ")}; "${child}" consumes ${[...consumed].map((name) => `"${name}"`).join(", ")}.`,
       );
     }
   }
@@ -561,7 +553,7 @@ function assertWiringTypes(
     if (origins.has(name) || !wired.has(name)) continue;
     const parents = parentsOf.get(name) ?? [];
     const covered = new Set(
-      parents.flatMap((parent) => producedEdges(nodes[parent]!).filter((p) => !p.many).map((p) => p.name)),
+      parents.flatMap((parent) => producedEdges(nodes[parent]!).map((p) => p.name)),
     );
     const missing = consumedEdges(nodes[name]!.input).filter((edge) => !covered.has(edge));
     if (missing.length === 0) continue;
@@ -571,9 +563,7 @@ function assertWiringTypes(
     if (group.length > 1) {
       const anySiblingReady = group.some((sibling) => {
         const siblingCovered = new Set(
-          (parentsOf.get(sibling) ?? []).flatMap((parent) =>
-            producedEdges(nodes[parent]!).filter((p) => !p.many).map((p) => p.name),
-          ),
+          (parentsOf.get(sibling) ?? []).flatMap((parent) => producedEdges(nodes[parent]!).map((p) => p.name)),
         );
         return consumedEdges(nodes[sibling]!.input).every((edge) => siblingCovered.has(edge));
       });

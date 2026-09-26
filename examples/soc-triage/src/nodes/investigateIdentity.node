@@ -1,0 +1,4 @@
+label: Investigate Identity
+description: Gather identity evidence about one entity
+input: Entity
+output: IdentityContext

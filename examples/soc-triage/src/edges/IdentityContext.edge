@@ -1,0 +1,19 @@
+label: Identity Context
+description: Identity evidence gathered for one entity
+fields:
+  entityId:
+    type: utf8
+    label: Entity ID
+    description: The entity this evidence is about
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 100
+  summary:
+    type: utf8
+    label: Summary
+    description: What the identity lookup found
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 500

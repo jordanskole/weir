@@ -186,8 +186,41 @@ async function logOutput(
   correlationId: string,
   envelope: Envelope | undefined,
 ): Promise<void> {
-  if (output.kind === "single" || output.kind === "many") {
+  if (output.kind === "single") {
     log.append(output.edge.name, correlationId, result, await instanceEnvelope(envelope, output.edge));
+    return;
+  }
+
+  if (output.kind === "many") {
+    // Spread. The collection is logged as a token under a reserved name, and
+    // each of its entries is logged as a real instance under the declared
+    // edge name — see the spec
+    // (docs/superpowers/specs/2026-09-26-spread-materializes-elements.md).
+    //
+    // Materializing is not an optimization detail, it is the feature. Firing
+    // a downstream node N times against the one collection token would give
+    // every element's descendants the *same* nearest common ancestor, so a
+    // later fan-in would pair across elements — the exact mispairing
+    // `joinRows` exists to prevent, reintroduced by the mechanism meant to
+    // make per-element work possible. With real instances, two elements'
+    // descendants have different nearest common ancestors (their own
+    // elements) and the existing join separates them with no new machinery.
+    //
+    // Elements cite the *collection*, not what the producing invocation
+    // consumed. Citing the invocation's own causation would make every
+    // element a sibling at the same depth, which is the tighter of the two
+    // ancestors and the one that makes element lineage nest.
+    const schemaHash = await instanceEnvelope(envelope, output.edge);
+    const collectionId = log.append(manyEdgeName(output.edge.name), correlationId, result, schemaHash);
+    if (typeof result !== "object" || result === null || Array.isArray(result)) return;
+    for (const entry of Object.values(result as Record<string, unknown>)) {
+      log.append(
+        output.edge.name,
+        correlationId,
+        entry,
+        schemaHash === undefined ? undefined : { ...schemaHash, causationIds: [collectionId] },
+      );
+    }
     return;
   }
   if (output.kind === "oneOf") {
@@ -260,6 +293,19 @@ export interface Host {
  * to declare `input: Run`.
  */
 export const RUN_ROOT_EDGE = "Run";
+
+/**
+ * The reserved edge name a `many` output's collection is logged under.
+ * Reserved rather than synthesized as a real `.edge`, for the same reason
+ * `fuzz.ts`'s `assertManyOutput` exists: a bare keyed collection is not a
+ * shape the type system can express as an edge payload. Keeping the
+ * collection at all is what leaves the vectorized path reachable — a node
+ * that wants the whole batch has something to read, and its retention cost
+ * stays per batch rather than per row.
+ */
+export function manyEdgeName(edgeName: string): string {
+  return `Many_${edgeName}`;
+}
 
 /** Generous enough that no correct run reaches it; small enough to fail a spin fast. See `Host.maxPulses`. */
 const DEFAULT_MAX_PULSES = 10_000;

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { defineEdge, defineField, defineNode, defineAnyOfNodes, allOf, single } from "./define.js";
+import { defineEdge, defineField, defineNode, defineAnyOfNodes, allOf, many, single } from "./define.js";
 import { elaborate } from "./elaborate.js";
 import { hashEdge, hashNode } from "./hash.js";
 import { elaborateWithImplementations } from "./implementation.js";
@@ -22,6 +22,7 @@ const TODO_LIST_SRC = fileURLToPath(new URL("../../../examples/todo-list/src", i
 const RECIPE_SRC = fileURLToPath(new URL("../../../examples/recipe/src", import.meta.url));
 const ESCALATION_SRC = fileURLToPath(new URL("../../../examples/escalation/src", import.meta.url));
 const REVIEW_SRC = fileURLToPath(new URL("../../../examples/manuscript-review/src", import.meta.url));
+const SOC_SRC = fileURLToPath(new URL("../../../examples/soc-triage/src", import.meta.url));
 
 const Start = defineEdge({
   name: "Start",
@@ -591,7 +592,7 @@ describe("runNetlist", () => {
     expect(invoiceInstance?.seq).not.toBe(inventoryInstance?.seq);
   });
 
-  it("routes a many output — logs the whole collection as one edge instance", async () => {
+  it("routes a many output — the collection under its reserved name, and each entry as its own instance", async () => {
     const Sibling = defineEdge({
       name: "Sibling",
       label: "Sibling",
@@ -615,7 +616,13 @@ describe("runNetlist", () => {
 
     const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { siblings: { value: "a" } } }, { log });
 
-    expect(log.latest("Sibling", "thread-1")).toEqual({ "8": { age: 8 }, "12": { age: 12 } });
+    // This asserted `log.latest("Sibling")` was the whole collection, which
+    // was the behaviour before spread: one token, no elements, no
+    // data-driven fan-out. The collection is still logged — that is what
+    // keeps a vectorized consumer reachable — but under a reserved name, and
+    // each entry is now a real instance under the declared edge name.
+    expect(log.latest("Many_Sibling", "thread-1")).toEqual({ "8": { age: 8 }, "12": { age: 12 } });
+    expect(log.instances("Sibling", "thread-1").map((i) => i.payload)).toEqual([{ age: 8 }, { age: 12 }]);
     expect(result.failures).toEqual([]);
   });
 
@@ -2617,6 +2624,56 @@ describe("the example topologies for iteration and lineage", () => {
     expect(log.latest("Resolution", "t")).toEqual({ id: "t-1", resolved_by_tier: 3 });
   });
 
+  it("soc-triage: one alert fans out per entity, and each entity's evidence joins with its own", async () => {
+    // Written by an outside reader from weir's docs before spread existed,
+    // and committed here *unchanged*. It elaborated, ran to quiescence with
+    // failures: [], and did a third of its work — investigateIdentity and
+    // investigateAsset each fired once, holding the whole Entity collection,
+    // and returned Failed<In> blaming the Entity contract for fields a
+    // collection does not have. The join and the assessment never ran and
+    // nothing recorded that they had not.
+    const program = await withImplementations(SOC_SRC, {
+      extractEntities: `export default function extractEntities(alert) {
+        return {
+          "e-principal": { id: "e-principal", kind: "principal", value: alert.principal },
+          "e-asset": { id: "e-asset", kind: "asset", value: alert.asset },
+        };
+      }`,
+      investigateIdentity: `export default function investigateIdentity(e) { return { entityId: e.id, summary: "identity:" + e.value }; }`,
+      investigateAsset: `export default function investigateAsset(e) { return { entityId: e.id, summary: "asset:" + e.value }; }`,
+      assembleEvidence: `export default function assembleEvidence(bag) {
+        return { entityId: bag.IdentityContext.entityId, identitySummary: bag.IdentityContext.summary, assetSummary: bag.AssetContext.summary };
+      }`,
+      assess: `export default function assess(ev) { return { entityId: ev.entityId, verdict: ev.identitySummary + " / " + ev.assetSummary }; }`,
+    });
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      program,
+      {
+        correlationId: "t",
+        originPayloads: { extractEntities: { id: "alert-1", principal: "svc-backup@corp", asset: "web-07.corp" } },
+      },
+      { log, budget: 50 },
+    );
+
+    expect(result.stopped).toBe("quiescence");
+    // extractEntities once, then two investigations, one join and one
+    // assessment per entity: 1 + 4 + 4 = 9.
+    expect(result.firings).toBe(9);
+    expect(log.instances("Entity", "t")).toHaveLength(2);
+
+    // The assertion the example exists for: every assessment's two halves
+    // are about the *same* entity. A join that grouped at the Entity
+    // collection would still produce two assessments, with halves crossed.
+    const verdicts = log.instances("Assessment", "t").map((i) => i.payload as { entityId: string; verdict: string });
+    expect(verdicts).toHaveLength(2);
+    for (const v of verdicts) {
+      const value = v.entityId === "e-principal" ? "svc-backup@corp" : "web-07.corp";
+      expect(v.verdict).toBe(`identity:${value} / asset:${value}`);
+    }
+  });
+
   it("manuscript-review: the fan-in fires once per revision, never pairing across revisions", async () => {
     const program = await withImplementations(REVIEW_SRC, {
       submit: `export default function submit(d) { return { id: d.id + "-r1", text: d.text, round: 1 }; }`,
@@ -2654,5 +2711,170 @@ describe("the example topologies for iteration and lineage", () => {
     }
     expect(notes.map((n) => n.revision_id)).toEqual(["m-1-r1", "m-1-r2", "m-1-r3"]);
     expect(log.latest("Accepted", "t")).toEqual({ id: "m-1-r3", rounds: 3 });
+  });
+});
+
+/**
+ * Spread (docs/superpowers/specs/2026-09-26-spread-materializes-elements.md).
+ *
+ * A `many` output used to log one token carrying a keyed collection and
+ * nothing else, so there was no data-driven fan-out: one alert could not
+ * become N entities each taking its own treatment. It now logs the
+ * collection *and* one instance per element, each citing the collection.
+ * Elements are ordinary tokens, so piece (1)'s existing rule — a
+ * single-input node fires once per unconsumed instance reaching it along a
+ * declared arc — supplies the per-element firing with no new declaration.
+ */
+describe("runNetlist — spread", () => {
+  const Seed = defineEdge({
+    name: "Seed",
+    label: "Seed",
+    description: "d",
+    fields: { value: defineField({ type: "utf8", label: "V", description: "d", nullable: false }) },
+  });
+  const Item = defineEdge({
+    name: "Item",
+    label: "Item",
+    description: "d",
+    index: "id",
+    fields: {
+      id: defineField({ type: "utf8", label: "ID", description: "d", nullable: false }),
+      value: defineField({ type: "utf8", label: "V", description: "d", nullable: false }),
+    },
+  });
+  const Looked = defineEdge({
+    name: "Looked",
+    label: "Looked",
+    description: "d",
+    fields: {
+      itemId: defineField({ type: "utf8", label: "I", description: "d", nullable: false }),
+      note: defineField({ type: "utf8", label: "N", description: "d", nullable: false }),
+    },
+  });
+  const Checked = defineEdge({
+    name: "Checked",
+    label: "Checked",
+    description: "d",
+    fields: {
+      itemId: defineField({ type: "utf8", label: "I", description: "d", nullable: false }),
+      note: defineField({ type: "utf8", label: "N", description: "d", nullable: false }),
+    },
+  });
+  const Verdict = defineEdge({
+    name: "Verdict",
+    label: "Verdict",
+    description: "d",
+    fields: { combined: defineField({ type: "utf8", label: "C", description: "d", nullable: false }) },
+  });
+
+  const explode = defineNode({
+    name: "explode",
+    input: single(Seed),
+    output: many(Item),
+    fn: (s) => ({
+      a: { id: "a", value: `${s.value}-a` },
+      b: { id: "b", value: `${s.value}-b` },
+    }),
+  });
+
+  it("logs the collection and one instance per element, each citing the collection", async () => {
+    const program: Program = {
+      fields: {},
+      edges: { Seed, Item },
+      nodes: { explode },
+      wiring: { origins: ["explode"], feeds: {} },
+    };
+    const log = new InMemoryLog();
+
+    await runNetlist(program, { correlationId: "t", originPayloads: { explode: { value: "x" } } }, { log });
+
+    const collection = log.instances("Many_Item", "t");
+    expect(collection).toHaveLength(1);
+    expect(collection[0]!.payload).toEqual({
+      a: { id: "a", value: "x-a" },
+      b: { id: "b", value: "x-b" },
+    });
+
+    const elements = log.instances("Item", "t");
+    expect(elements).toHaveLength(2);
+    expect(elements.map((i) => i.payload)).toEqual([
+      { id: "a", value: "x-a" },
+      { id: "b", value: "x-b" },
+    ]);
+    // Each element descends from the collection, not from whatever the
+    // producing invocation consumed — that is what gives two elements
+    // distinct lineages rather than one shared one.
+    for (const element of elements) {
+      expect(element.envelope?.causationIds).toEqual([collection[0]!.id]);
+    }
+  });
+
+  it("fires a downstream single-input node once per element, with no new declaration", async () => {
+    const look = defineNode({
+      name: "look",
+      input: single(Item),
+      output: single(Looked),
+      fn: (i) => ({ itemId: i.id, note: `looked ${i.value}` }),
+    });
+    const program: Program = {
+      fields: {},
+      edges: { Seed, Item, Looked },
+      nodes: { explode, look },
+      wiring: { origins: ["explode"], feeds: { explode: ["look"] } },
+    };
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      program,
+      { correlationId: "t", originPayloads: { explode: { value: "x" } } },
+      { log },
+    );
+
+    // explode once, look twice.
+    expect(result.firings).toBe(3);
+    expect(log.instances("Looked", "t").map((i) => (i.payload as { note: string }).note)).toEqual([
+      "looked x-a",
+      "looked x-b",
+    ]);
+  });
+
+  it("joins each element's own descendants, never across elements", async () => {
+    const look = defineNode({
+      name: "look",
+      input: single(Item),
+      output: single(Looked),
+      fn: (i) => ({ itemId: i.id, note: `L:${i.id}` }),
+    });
+    const check = defineNode({
+      name: "check",
+      input: single(Item),
+      output: single(Checked),
+      fn: (i) => ({ itemId: i.id, note: `C:${i.id}` }),
+    });
+    const judge = defineNode({
+      name: "judge",
+      input: allOf(Looked, Checked),
+      output: single(Verdict),
+      fn: (bag) => ({ combined: `${bag.Looked.note}+${bag.Checked.note}` }),
+    });
+    const program: Program = {
+      fields: {},
+      edges: { Seed, Item, Looked, Checked, Verdict },
+      nodes: { explode, look, check, judge },
+      wiring: {
+        origins: ["explode"],
+        feeds: { explode: ["look", "check"], look: ["judge"], check: ["judge"] },
+      },
+    };
+    const log = new InMemoryLog();
+
+    await runNetlist(program, { correlationId: "t", originPayloads: { explode: { value: "x" } } }, { log });
+
+    // Two verdicts, one per element — and each pairs an element with
+    // *itself*. A join that grouped at the collection would produce two
+    // verdicts too, with halves from different elements, so the count alone
+    // proves nothing.
+    const verdicts = log.instances("Verdict", "t").map((i) => (i.payload as { combined: string }).combined);
+    expect(verdicts.sort()).toEqual(["L:a+C:a", "L:b+C:b"]);
   });
 });
