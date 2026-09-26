@@ -1,0 +1,19 @@
+label: StyleReport
+description: What the style check found for one revision
+fields:
+  revision_id:
+    type: utf8
+    label: revision_id
+    description: The revision this report is about
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 100
+  note:
+    type: utf8
+    label: note
+    description: What the style check found
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 500

@@ -1,0 +1,4 @@
+label: Confirm Citations
+description: Confirms a finding's citations, one hop behind the style check — which is what gives the join a window where a cross-revision pairing is actually available
+input: FactFinding
+output: FactReport

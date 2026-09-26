@@ -1,0 +1,4 @@
+label: Check Style
+description: Reviews one revision for style, independently of the fact check
+input: Revision
+output: StyleReport

@@ -1,0 +1,4 @@
+label: Check Facts
+description: Finds the claims in one revision — the first of two hops on the fact arm
+input: Revision
+output: FactFinding

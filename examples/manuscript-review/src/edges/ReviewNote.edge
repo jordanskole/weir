@@ -1,0 +1,19 @@
+label: Review Note
+description: Both checks for one revision, joined — one per revision, never across revisions
+fields:
+  revision_id:
+    type: utf8
+    label: revision_id
+    description: The revision both reports were about
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 100
+  combined:
+    type: utf8
+    label: combined
+    description: The two findings together
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 1000

@@ -20,6 +20,8 @@ const PERSON_BIRTHDAY_SRC = fileURLToPath(
 );
 const TODO_LIST_SRC = fileURLToPath(new URL("../../../examples/todo-list/src", import.meta.url));
 const RECIPE_SRC = fileURLToPath(new URL("../../../examples/recipe/src", import.meta.url));
+const ESCALATION_SRC = fileURLToPath(new URL("../../../examples/escalation/src", import.meta.url));
+const REVIEW_SRC = fileURLToPath(new URL("../../../examples/manuscript-review/src", import.meta.url));
 
 const Start = defineEdge({
   name: "Start",
@@ -2557,5 +2559,100 @@ describe("runNetlist — the run root", () => {
 
     expect(result.firings).toBe(3);
     expect(log.latest("Joined", "thread-1")).toEqual({ value: "L:a+R:b" });
+  });
+});
+
+/**
+ * The two examples added for capabilities nothing in `examples/` covered.
+ *
+ * Both run from origin payloads only — no `log.append` staging — and assert
+ * a final log state rather than the absence of a crash. Staging is what hid
+ * `todo-list`'s dead node for as long as it did.
+ */
+describe("the example topologies for iteration and lineage", () => {
+  /** Writes each implementation under its node's contract hash, the way a real resolution tree would. */
+  async function withImplementations(src: string, impls: Record<string, string>): Promise<Program> {
+    const raw = await elaborate(src);
+    const dir = await mkdtemp(join(tmpdir(), "weir-examples-"));
+    implDirs.push(dir);
+    for (const [name, fn] of Object.entries(impls)) {
+      const hash = (await hashNode(raw.nodes[name]!)).short;
+      await mkdir(join(dir, name), { recursive: true });
+      await writeFile(join(dir, name, `${hash}.ts`), `${fn}\n`, "utf8");
+    }
+    return elaborateWithImplementations(src, dir);
+  }
+
+  const implDirs: string[] = [];
+  afterEach(async () => {
+    await Promise.all(implDirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  });
+
+  it("escalation: a cycle runs to quiescence, terminating on its oneOf base case", async () => {
+    const program = await withImplementations(ESCALATION_SRC, {
+      openTicket: `export default function openTicket(n) { return { ...n, tier: 1 }; }`,
+      triage: `export default function triage(t) {
+        return t.tier >= t.difficulty
+          ? { edge: "Resolution", payload: { id: t.id, resolved_by_tier: t.tier } }
+          : { edge: "Ticket", payload: { ...t, tier: t.tier + 1 } };
+      }`,
+    });
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      program,
+      {
+        correlationId: "t",
+        originPayloads: { openTicket: { id: "t-1", summary: "Cannot sign in", difficulty: 3 } },
+      },
+      { log, budget: 50 },
+    );
+
+    // openTicket, then triage three times: tiers 1 and 2 escalate, tier 3
+    // resolves. The count is the point — a cycle that fired once would still
+    // leave a Resolution in the log if the base case were reached early.
+    expect(result.firings).toBe(4);
+    expect(result.stopped).toBe("quiescence");
+    expect(log.instances("Ticket", "t").map((i) => (i.payload as { tier: number }).tier)).toEqual([1, 2, 3]);
+    expect(log.latest("Resolution", "t")).toEqual({ id: "t-1", resolved_by_tier: 3 });
+  });
+
+  it("manuscript-review: the fan-in fires once per revision, never pairing across revisions", async () => {
+    const program = await withImplementations(REVIEW_SRC, {
+      submit: `export default function submit(d) { return { id: d.id + "-r1", text: d.text, round: 1 }; }`,
+      revise: `export default function revise(r) {
+        return r.round >= 3
+          ? { edge: "Accepted", payload: { id: r.id, rounds: r.round } }
+          : { edge: "Revision", payload: { id: r.id.replace(/-r\\d+$/, "") + "-r" + (r.round + 1), text: r.text + " (revised)", round: r.round + 1 } };
+      }`,
+      checkStyle: `export default function checkStyle(r) { return { revision_id: r.id, note: "style ok at round " + r.round }; }`,
+      checkFacts: `export default function checkFacts(r) { return { revision_id: r.id, claim: "claim at round " + r.round }; }`,
+      confirmCitations: `export default function confirmCitations(f) { return { revision_id: f.revision_id, note: "facts ok at round " + f.claim.slice(-1) }; }`,
+      verdict: `export default function verdict(b) { return { revision_id: b.StyleReport.revision_id, combined: b.StyleReport.note + " | " + b.FactReport.note }; }`,
+    });
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      program,
+      { correlationId: "t", originPayloads: { submit: { id: "m-1", text: "The manuscript" } } },
+      { log, budget: 80 },
+    );
+
+    expect(result.stopped).toBe("quiescence");
+
+    // One note per revision — three revisions, three notes. Once per *run*
+    // would give one; a cartesian pairing would give nine.
+    const notes = log.instances("ReviewNote", "t").map((i) => i.payload as { revision_id: string; combined: string });
+    expect(notes).toHaveLength(3);
+
+    // And each note pairs the two reports from its own round. This is the
+    // assertion the whole example exists for: a lineage-blind latest-wins
+    // bag would still produce three notes, but their halves would disagree.
+    for (const note of notes) {
+      const round = note.revision_id.slice(-1);
+      expect(note.combined).toBe(`style ok at round ${round} | facts ok at round ${round}`);
+    }
+    expect(notes.map((n) => n.revision_id)).toEqual(["m-1-r1", "m-1-r2", "m-1-r3"]);
+    expect(log.latest("Accepted", "t")).toEqual({ id: "m-1-r3", rounds: 3 });
   });
 });

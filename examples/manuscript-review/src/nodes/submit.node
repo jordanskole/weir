@@ -1,0 +1,4 @@
+label: Submit
+description: Admits a draft as the first revision
+input: Draft
+output: Revision

@@ -1,0 +1,16 @@
+label: Open Ticket
+description: Admits a new request at tier 1, where every ticket starts
+input: NewTicket
+output: Ticket
+examples:
+  - given:
+      NewTicket:
+        id: "t-1"
+        summary: "Cannot sign in after password reset"
+        difficulty: 3
+    expect:
+      Ticket:
+        id: "t-1"
+        summary: "Cannot sign in after password reset"
+        difficulty: 3
+        tier: 1

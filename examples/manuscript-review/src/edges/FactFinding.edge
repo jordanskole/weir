@@ -1,0 +1,19 @@
+label: Fact Finding
+description: A raw fact-check finding, before its citations are confirmed — the extra hop that makes the fact arm longer than the style arm
+fields:
+  revision_id:
+    type: utf8
+    label: revision_id
+    description: The revision this finding is about
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 100
+  claim:
+    type: utf8
+    label: claim
+    description: The claim that was checked
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 500

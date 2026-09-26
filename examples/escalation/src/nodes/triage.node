@@ -1,0 +1,32 @@
+label: Triage
+description: Resolves the ticket if this tier can, otherwise hands it to the next one
+input: Ticket
+output:
+  oneOf:
+    - Resolution
+    - Ticket
+examples:
+  - given:
+      Ticket:
+        id: "t-1"
+        summary: "Cannot sign in after password reset"
+        difficulty: 3
+        tier: 1
+    expect:
+      edge: Ticket
+      payload:
+        id: "t-1"
+        summary: "Cannot sign in after password reset"
+        difficulty: 3
+        tier: 2
+  - given:
+      Ticket:
+        id: "t-1"
+        summary: "Cannot sign in after password reset"
+        difficulty: 3
+        tier: 3
+    expect:
+      edge: Resolution
+      payload:
+        id: "t-1"
+        resolved_by_tier: 3

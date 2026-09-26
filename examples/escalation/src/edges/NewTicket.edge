@@ -1,0 +1,27 @@
+label: New Ticket
+description: A support request as it arrives, before anyone has looked at it
+fields:
+  id:
+    type: utf8
+    label: ID
+    description: The ticket's identifier
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 100
+  summary:
+    type: utf8
+    label: Summary
+    description: What the customer reported
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 500
+  difficulty:
+    type: uint8
+    label: Difficulty
+    description: The lowest tier that can actually resolve this, discovered only by trying
+    nullable: false
+    validations:
+      min: 1
+      max: 5

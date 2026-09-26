@@ -1,0 +1,28 @@
+label: Revision
+description: One round of the manuscript, the thing both checks are about
+index: id
+fields:
+  id:
+    type: utf8
+    label: id
+    description: A stable identifier for this revision, unique within the review
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 100
+  text:
+    type: utf8
+    label: text
+    description: The manuscript body at this round
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 2000
+  round:
+    type: uint8
+    label: round
+    description: Which review round this is
+    nullable: false
+    validations:
+      min: 1
+      max: 10

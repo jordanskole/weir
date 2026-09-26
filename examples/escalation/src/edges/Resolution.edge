@@ -1,0 +1,19 @@
+label: Resolution
+description: A ticket that reached a tier able to resolve it — the loop's base case
+fields:
+  id:
+    type: utf8
+    label: ID
+    description: The ticket's identifier
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 100
+  resolved_by_tier:
+    type: uint8
+    label: Resolved By Tier
+    description: The tier that finally resolved it
+    nullable: false
+    validations:
+      min: 1
+      max: 5

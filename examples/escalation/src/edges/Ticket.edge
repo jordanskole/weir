@@ -1,0 +1,13 @@
+label: Ticket
+description: A ticket sitting with one support tier, waiting to be triaged
+index: id
+fields:
+  "...NewTicket":
+  tier:
+    type: uint8
+    label: Tier
+    description: Which support tier currently holds the ticket
+    nullable: false
+    validations:
+      min: 1
+      max: 5

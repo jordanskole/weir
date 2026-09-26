@@ -1,0 +1,19 @@
+label: Draft
+description: A manuscript as submitted, before any review round
+fields:
+  id:
+    type: utf8
+    label: id
+    description: The manuscript's identifier
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 100
+  text:
+    type: utf8
+    label: text
+    description: The manuscript body
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 2000

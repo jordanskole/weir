@@ -1,0 +1,7 @@
+label: Revise
+description: Produces the next revision, or accepts the manuscript — the loop's base case
+input: Revision
+output:
+  oneOf:
+    - Accepted
+    - Revision

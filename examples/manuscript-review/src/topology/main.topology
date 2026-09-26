@@ -1,0 +1,15 @@
+submit:
+  then:
+    revise:
+      then:
+        revise: {}
+        checkStyle:
+          then:
+            verdict: {}
+        checkFacts:
+          then:
+            confirmCitations:
+              then:
+                verdict: {}
+    checkStyle: {}
+    checkFacts: {}

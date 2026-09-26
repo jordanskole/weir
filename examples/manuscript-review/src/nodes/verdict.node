@@ -1,0 +1,7 @@
+label: Verdict
+description: Joins both checks for one revision — the fan-in this example exists to demonstrate
+input:
+  allOf:
+    - StyleReport
+    - FactReport
+output: ReviewNote

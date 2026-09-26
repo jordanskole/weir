@@ -1,0 +1,19 @@
+label: Accepted
+description: The manuscript passed review — the loop's base case
+fields:
+  id:
+    type: utf8
+    label: id
+    description: The manuscript's identifier
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 100
+  rounds:
+    type: uint8
+    label: rounds
+    description: How many rounds it took
+    nullable: false
+    validations:
+      min: 1
+      max: 10
