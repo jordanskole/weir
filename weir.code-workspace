@@ -5,6 +5,12 @@
 		},
 		{
 			"path": "../kleisli"
+		},
+		{
+			"path": "../kleisli-site"
+		},
+		{
+			"path": "../categorytheory-ai"
 		}
 	],
 	"settings": {}

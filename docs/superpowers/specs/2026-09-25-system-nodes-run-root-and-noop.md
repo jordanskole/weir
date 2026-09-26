@@ -1,6 +1,6 @@
 # System nodes: the run root and `noop`
 
-Status: draft.
+Status: Part 1 (the run root) implemented; Part 2 (`noop`) designed, deliberately not built.
 
 ## Motivation
 
