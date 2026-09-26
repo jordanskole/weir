@@ -5,6 +5,27 @@ questions — see `design-history.md` and `open-questions.md` for those.
 
 ---
 
+## 0. Principle
+
+**Decomposition is bounded by determinism.** A component can be treated as a black box, and so composed, replaced, tested, replayed or handed to an agent on its own, only to the extent that its outputs are determined by its inputs. Every source of nondeterminism a component touches must sit inside its boundary, so the granularity of any decomposition is set by how widely nondeterminism is spread. weir's rules exist to make that spread as small as possible:
+
+- nondeterminism enters only at origin nodes;
+- effects are data, performed by the runtime and recorded;
+- no node reads anything its contract does not declare.
+
+**Nondeterminism sets the floor of the recursion.** A subgraph with one input edge and one output edge is a node, so a topology can be opened up into smaller topologies. It can't be opened indefinitely. A box can be cut apart only where every piece's output depends on nothing but its input edge. Nondeterminism that isn't recorded spreads to everything that depends on it, and that whole reach has to stay in one box.
+
+weir doesn't reduce nondeterminism. It records nondeterminism where it enters, at origin nodes and as effect results, which turns it into data on an edge. After that its reach is zero, and the recursion can go all the way down to primitives: the smallest box is a single pure function. Everything else in this document builds on that.
+
+**Lineage.** None of this is new; weir makes it mechanical.
+
+- Ashby, *An Introduction to Cybernetics* (1956): a system is a set of variables chosen so its behavior is determinate. When a real system seems not to be, a variable is missing, and the remedy is to add it. His Markovian machine extends this to probabilistic behavior: the transition probabilities, not the outcomes, are fixed by the state. weir's log is the "add the missing variable" step, done by the runtime.
+- State-space theory (Zadeh & Desoer, 1963; Kalman): state is the minimal information that, with future inputs, determines future outputs. Anything else that affects the future is hidden state, and hidden state is what makes boxes big.
+- State machine replication (Lamport; Schneider, 1990): replicas agree only if each is a deterministic state machine fed the same ordered log, so nondeterminism is resolved before it enters the log, never inside a replica. Record/replay debugging applies the same rule.
+- Simon, "The Architecture of Complexity" (1962): complex systems are nearly decomposable hierarchies. Principle 0 names what binds boxes together: shared, unrecorded nondeterminism.
+
+---
+
 ## 1. Primitives
 
 **Edge** — a named schema. Pure data. The complete description of what crosses a wire.
