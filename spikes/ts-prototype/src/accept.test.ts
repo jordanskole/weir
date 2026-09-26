@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { acceptImplementation } from "./accept.js";
+import { fuzzNode } from "./fuzz.js";
 import { defineEdge, defineField } from "./define.js";
 import { hashNode } from "./hash.js";
 import { resolveImplementation } from "./implementation.js";
@@ -446,5 +447,117 @@ describe("acceptImplementation — properties", () => {
     expect(result.vacuous).toBe(true);
     // Nothing persisted: the whole point of accept-before-persist.
     expect(await readdir(dir)).toEqual([]);
+  });
+});
+
+/**
+ * The acceptance gate over a `gather`-input node
+ * (docs/superpowers/specs/2026-09-27-gather.md).
+ *
+ * Worth its own tests because a gather is the first input kind whose
+ * *generated* cases are collections rather than payloads: `generateInputCases`
+ * has to build one keyed by each entry's own index, and `fuzzNode` has to
+ * assert every entry against the one gathered edge. Both were written blind
+ * while the runtime was being built; these are them, exercised.
+ */
+describe("acceptImplementation — a gather-input node", () => {
+  let dir: string;
+  const dirs: string[] = [];
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  });
+
+  const Item = defineEdge({
+    name: "Item",
+    label: "Item",
+    description: "An item",
+    index: "id",
+    fields: { id: defineField({ type: "utf8", label: "ID", description: "d", nullable: false }) },
+  });
+  const Tally = defineEdge({
+    name: "Tally",
+    label: "Tally",
+    description: "A count",
+    fields: { n: defineField({ type: "uint8", label: "N", description: "d", nullable: false }) },
+  });
+
+  const rollUp: NodeDecl = {
+    name: "rollUp",
+    description: "Counts the items gathered from one spread",
+    input: { kind: "gather", edge: Item },
+    output: { kind: "single", edge: Tally },
+    // The bare collection, as `Fn` receives it — the TS-level `given` is the
+    // payload, not the tagged YAML form.
+    examples: [{ given: { a: { id: "a" }, b: { id: "b" } }, expect: { n: 2 } }],
+  };
+
+  it("accepts an implementation that handles collections of any size, the empty one included", async () => {
+    dir = await mkdtemp(join(tmpdir(), "weir-accept-gather-"));
+    dirs.push(dir);
+
+    const result = await acceptImplementation(
+      rollUp,
+      `export default function rollUp(items) { return { n: Object.keys(items).length }; }\n`,
+      dir,
+      { count: 20 },
+    );
+
+    expect(result.accepted).toBe(true);
+  });
+
+  /**
+   * **The gate does not catch an implementation that fails on the empty
+   * collection**, and this test exists to pin that rather than to pretend
+   * otherwise. Written first as "rejects an implementation that cannot handle
+   * an empty collection"; it failed, because a generated case that comes back
+   * `Failed<In>` is a legitimate outcome — a node is allowed to reject an
+   * input — so throwing on the empty collection is indistinguishable from
+   * declining it.
+   *
+   * What the generator does buy is that the empty collection is *reached*:
+   * `generateInputCases` varies a gather's size with the case index (`i % 3`)
+   * precisely so zero is among them, and `realOutputs` being short of `total`
+   * is that case being declined. So the coverage story for §5 is: the
+   * generator reaches it, and a **declared example** is what pins the
+   * behaviour — which is why `examples/soc-triage`'s `summarizeAlert` declares
+   * the empty case as its second example.
+   *
+   * Break-proof: with the generator's collection size fixed at one entry
+   * instead of `i % 3`, `realOutputs` equalled `total` and this reddened.
+   */
+  it("reaches the empty collection in its generated cases, but cannot reject an implementation that declines it", async () => {
+    dir = await mkdtemp(join(tmpdir(), "weir-accept-gather-"));
+    dirs.push(dir);
+
+    const result = await acceptImplementation(
+      rollUp,
+      `export default function rollUp(items) {
+  const keys = Object.keys(items);
+  if (keys.length === 0) throw new Error("nothing to roll up");
+  return { n: keys.length };
+}
+`,
+      dir,
+      { count: 20 },
+    );
+
+    // Accepted, and that is the finding, not a bug in this test.
+    expect(result.accepted).toBe(true);
+    if (!result.accepted) throw new Error("unreachable");
+
+    // The empty collection was generated and declined: fewer real outputs than
+    // cases, with the shortfall being exactly the empty ones (cases where
+    // `i % 3 === 0`, so 7 of 20).
+    const report = await fuzzNode(
+      { ...rollUp, fn: (items) => {
+        const keys = Object.keys(items as Record<string, unknown>);
+        if (keys.length === 0) throw new Error("nothing to roll up");
+        return { n: keys.length };
+      } } as never,
+      { count: 20 },
+    );
+    expect(report.total).toBe(20);
+    expect(report.realOutputs).toBe(13);
+    expect(report.failures).toEqual([]);
   });
 });

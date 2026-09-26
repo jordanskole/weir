@@ -4,4 +4,6 @@ extractEntities:
       then:
         assembleEvidence:
           then:
-            assess: {}
+            assess:
+              then:
+                summarizeAlert: {}

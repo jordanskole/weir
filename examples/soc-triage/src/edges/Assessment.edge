@@ -1,5 +1,8 @@
 label: Assessment
 description: A verdict reached for one entity, from evidence that descends from it
+# Indexed by the entity it is about, which is what lets `summarizeAlert` gather
+# these into a collection — a collection needs a real key.
+index: entityId
 fields:
   entityId:
     type: utf8

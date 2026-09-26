@@ -191,6 +191,19 @@ export function generateInputCases(input: InputSpec, seed: number, count: number
   for (let i = 0; i < count; i++) {
     if (input.kind === "single") {
       cases.push(generatePayload(input.edge, rng, i));
+    } else if (input.kind === "gather") {
+      // A keyed collection, keyed by each entry's own `index` — the shape a
+      // gather actually receives. Size varies with `i` so the generated
+      // cases include the empty collection, which is the case a gather is
+      // most likely to get wrong (spec §5: traverse over empty yields
+      // empty, never a hang).
+      const collection: Record<string, unknown> = {};
+      for (let n = 0; n < i % 3; n += 1) {
+        const entry = generatePayload(input.edge, rng, i + n) as Record<string, unknown>;
+        const key = input.edge.index === undefined ? String(n) : String(entry[input.edge.index]);
+        collection[key] = entry;
+      }
+      cases.push(collection);
     } else {
       const bag: Record<string, unknown> = {};
       for (const edge of input.edges) {

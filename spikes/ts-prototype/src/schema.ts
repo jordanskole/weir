@@ -348,6 +348,20 @@ export function nodeSchema(): object {
       if: { properties: { input: { type: "object", required: ["anyOf"] } } },
       then: { properties: { examples: { items: { properties: { given: taggedOne(objectPayload) } } } } },
     },
+    // gather (input position): N instances of one edge, so exactly one tag
+    // whose value is a keyed collection — the mirror image of `many` on the
+    // output side below, because gather is spread's dual
+    // (docs/superpowers/specs/2026-09-27-gather.md).
+    {
+      if: { properties: { input: { type: "object", required: ["gather"] } } },
+      then: {
+        properties: {
+          examples: {
+            items: { properties: { given: taggedOne({ type: "object", additionalProperties: objectPayload }) } },
+          },
+        },
+      },
+    },
   ];
   const outputShapeConditionals = [
     // single (bare-string output) or oneOf: exactly one tag, payload is an object.
@@ -418,6 +432,12 @@ export function nodeSchema(): object {
             type: "object",
             properties: { anyOf: edgeNameList },
             required: ["anyOf"],
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            properties: { gather: edgeName },
+            required: ["gather"],
             additionalProperties: false,
           },
         ],

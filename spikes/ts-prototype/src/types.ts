@@ -299,7 +299,20 @@ export interface Envelope {
  */
 export type InputSpec =
   | { kind: "single"; edge: AnyEdgeDef }
-  | { kind: "allOf"; edges: AnyEdgeDef[] };
+  | { kind: "allOf"; edges: AnyEdgeDef[] }
+  /**
+   * Every instance of one edge descended from a single spread, collected
+   * into one payload — the dual of `spread`
+   * (docs/superpowers/specs/2026-09-27-gather.md). `sequence` in the
+   * functional sense: `t (f a) → f (t a)`.
+   *
+   * Distinct from `allOf`, which takes one of several *different* edges
+   * with cardinality fixed by its declaration. A gather takes N of *one*
+   * edge, and N is decided at runtime by the spread that produced them —
+   * which is why readiness cannot come from the contract and comes from
+   * the collection token's own size instead.
+   */
+  | { kind: "gather"; edge: AnyEdgeDef };
 
 /**
  * The payload shape Fn receives for a given InputSpec: the edge's own
@@ -314,7 +327,12 @@ export type InputPayload<I extends InputSpec> = I extends {
   ? PayloadOf<E>
   : I extends { kind: "allOf"; edges: infer Es extends AnyEdgeDef[] }
     ? { [K in Es[number]["name"]]: PayloadOf<Extract<Es[number], { name: K }>> }
-    : never;
+    : // A keyed collection, the same shape a `many` output produces — keyed
+      // by the gathered edge's own `index`, never an array
+      // (design-history.md, "`many` is a collection, keyed by index").
+      I extends { kind: "gather"; edge: infer E extends AnyEdgeDef }
+      ? Record<string, PayloadOf<E>>
+      : never;
 
 /**
  * A node's output shape (docs/design.md §3) — the three fan-out modes plus
@@ -389,6 +407,49 @@ export function failedEdgeName(inputEdgeName: string): string {
 export function failedAllOfEdgeName(edges: AnyEdgeDef[]): string {
   const sortedNames = edges.map((edge) => edge.name).sort();
   return `Failed_${sortedNames.join("_")}`;
+}
+
+/**
+ * The reserved edge name a `many` output's collection is logged under
+ * (docs/superpowers/specs/2026-09-26-spread-materializes-elements.md §1).
+ * Reserved rather than synthesized as a real `.edge`, for the same reason
+ * `membrane.ts`'s `assertManyOutput` exists: a bare keyed collection is not
+ * a shape the type system can express as an edge payload. Keeping the
+ * collection at all is what leaves the vectorized path reachable — a node
+ * that wants the whole batch has something to read, and its retention cost
+ * stays per batch rather than per row.
+ *
+ * Lives here rather than in `runtime.ts`, where it was first written,
+ * because `gather` made it a convention two modules share: the runtime logs
+ * under it, `lineage.ts`'s `gatherGroups` recognizes a barrier by it, and
+ * `failedGatherEdgeName` below composes it. Three copies of the literal
+ * `Many_` would be three places for it to drift.
+ */
+export function manyEdgeName(edgeName: string): string {
+  return `Many_${edgeName}`;
+}
+
+/**
+ * The naming convention a `gather`-input node's `Failed<In>` routes through
+ * — `Failed_Many_Assessment` for `gather: Assessment`
+ * (docs/superpowers/specs/2026-09-27-gather.md §4).
+ *
+ * **Deliberately not `Failed_<X>`**, which the spec's "the usual synthesized
+ * edge" was written to mean and which is wrong. `Failed_X` is
+ * `{ input: X, reason }` — one instance of X. A gather's `Failed<In>` carries
+ * the *collection* it was holding when the group died, which is a different
+ * shape, and logging it under `Failed_X` would put a collection in a field
+ * declared to hold one entity: a payload nothing validates, since `append`
+ * takes an edge name rather than a definition. A gather of X and an ordinary
+ * node consuming X fail differently, so they route differently.
+ *
+ * Expressible as a real edge because a *field* may be `many` (`ManyEdgeDef`):
+ * `{ input: { many: X }, reason }`. That is what makes this honest rather
+ * than a cast — the same reason a bare collection could not be an edge in the
+ * first place, working in weir's favour one layer down.
+ */
+export function failedGatherEdgeName(gatheredEdgeName: string): string {
+  return failedEdgeName(manyEdgeName(gatheredEdgeName));
 }
 
 /**

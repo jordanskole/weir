@@ -1995,3 +1995,106 @@ describe("elaborate — inline edge fields are validated", () => {
     }
   });
 });
+
+/**
+ * `gather` at elaboration time
+ * (docs/superpowers/specs/2026-09-27-gather.md).
+ *
+ * Three things only the elaborator can settle: that `gather: X` parses into a
+ * real `InputSpec`, that a gathered edge declares the index its collection
+ * needs a key from, and — Rule C — that a gather has a spread above it, since
+ * a gather with no barrier never fires and the run reaches quiescence looking
+ * clean.
+ */
+describe("elaborate — gather", () => {
+  const ITEM = `label: Item\ndescription: d\nindex: id\nfields:\n  id:\n    type: utf8\n    label: I\n    description: d\n    nullable: false\n`;
+  const SEED = `label: Seed\ndescription: d\nfields:\n  v:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`;
+  const SUM = `label: Sum\ndescription: d\nfields:\n  n:\n    type: uint8\n    label: N\n    description: d\n    nullable: false\n`;
+  const SPREAD =
+    `label: Spread\ndescription: d\ninput: Seed\noutput:\n  many: Item\n` +
+    `examples:\n  - given:\n      Seed:\n        v: "x"\n    expect:\n      Item:\n        a:\n          id: "a"\n`;
+  // A gather's `given` is a keyed collection — the mirror of `many`'s `expect`.
+  const GATHER =
+    `label: Roll Up\ndescription: d\ninput:\n  gather: Item\noutput: Sum\n` +
+    `examples:\n  - given:\n      Item:\n        a:\n          id: "a"\n    expect:\n      Sum:\n        n: 1\n`;
+  const ONE =
+    `label: Make One\ndescription: d\ninput: Seed\noutput: Item\n` +
+    `examples:\n  - given:\n      Seed:\n        v: "x"\n    expect:\n      Item:\n        id: "a"\n`;
+  const TOUCH =
+    `label: Touch\ndescription: d\ninput: Item\noutput: Item\n` +
+    `examples:\n  - given:\n      Item:\n        id: "a"\n    expect:\n      Item:\n        id: "a"\n`;
+
+  it("parses `input: gather: X` into a gather InputSpec, and synthesizes its Failed_Many_X edge", async () => {
+    const root = await writeFixture({
+      "edges/Seed.edge": SEED,
+      "edges/Item.edge": ITEM,
+      "edges/Sum.edge": SUM,
+      "nodes/spread.node": SPREAD,
+      "nodes/rollUp.node": GATHER,
+      "topology/main.topology": `spread:\n  then:\n    rollUp: {}\n`,
+    });
+
+    const program = await elaborate(root);
+
+    expect(program.nodes["rollUp"]!.input).toEqual({ kind: "gather", edge: program.edges["Item"] });
+    // Its own failure edge, distinct from `Failed_Item`: a gather's
+    // `Failed<In>` carries the collection, which is a `many` field.
+    expect(program.edges["Failed_Many_Item"]!.fields).toMatchObject({ input: { many: { name: "Item" } } });
+    // And `Failed_Item` still exists, unchanged — the two are different shapes
+    // for different failures, not one replacing the other.
+    expect(program.edges["Failed_Item"]!.fields).toMatchObject({ input: { name: "Item" } });
+  });
+
+  it("rejects a gather of an edge that declares no index", async () => {
+    const root = await writeFixture({
+      "edges/Seed.edge": SEED,
+      // Same Item, without the index.
+      "edges/Item.edge": `label: Item\ndescription: d\nfields:\n  id:\n    type: utf8\n    label: I\n    description: d\n    nullable: false\n`,
+      "edges/Sum.edge": SUM,
+      "nodes/spread.node": SPREAD,
+      "nodes/rollUp.node": GATHER,
+      "topology/main.topology": `spread:\n  then:\n    rollUp: {}\n`,
+    });
+
+    await expect(elaborate(root)).rejects.toThrow(/input\.gather.*Item.*no index/s);
+  });
+
+  /**
+   * Rule C. The failure this prevents is the one this repo rates worst: the
+   * program elaborates clean, `weir check` reports ✓, and the run reaches
+   * quiescence having silently never fired the gather.
+   *
+   * Break-proof: deleting Rule C's loop from `assertWiringTypes` made this
+   * resolve rather than reject.
+   */
+  it("rejects a gather with no spread anywhere upstream", async () => {
+    const root = await writeFixture({
+      "edges/Seed.edge": SEED,
+      "edges/Item.edge": ITEM,
+      "edges/Sum.edge": SUM,
+      // `single: Item` rather than `many: Item` — so `Item` instances exist
+      // and Rule B is satisfied, but no collection token ever does.
+      "nodes/makeOne.node": ONE,
+      "nodes/rollUp.node": GATHER,
+      "topology/main.topology": `makeOne:\n  then:\n    rollUp: {}\n`,
+    });
+
+    await expect(elaborate(root)).rejects.toThrow(/rollUp.*gathers "Item".*no spread above it/s);
+  });
+
+  it("accepts a gather whose spread is several hops above it", async () => {
+    const root = await writeFixture({
+      "edges/Seed.edge": SEED,
+      "edges/Item.edge": ITEM,
+      "edges/Sum.edge": SUM,
+      "nodes/spread.node": SPREAD,
+      // A hop between the spread and the gather, so Rule C has to be
+      // transitive rather than checking the immediate parents.
+      "nodes/touch.node": TOUCH,
+      "nodes/rollUp.node": GATHER,
+      "topology/main.topology": `spread:\n  then:\n    touch:\n      then:\n        rollUp: {}\n`,
+    });
+
+    await expect(elaborate(root)).resolves.toBeDefined();
+  });
+});

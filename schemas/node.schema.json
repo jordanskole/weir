@@ -55,6 +55,19 @@
             "anyOf"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "gather": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "gather"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -281,6 +294,39 @@
                   "minProperties": 1,
                   "additionalProperties": {
                     "type": "object"
+                  },
+                  "maxProperties": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "input": {
+            "type": "object",
+            "required": [
+              "gather"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "examples": {
+            "items": {
+              "properties": {
+                "given": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object"
+                    }
                   },
                   "maxProperties": 1
                 }

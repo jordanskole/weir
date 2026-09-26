@@ -1,0 +1,36 @@
+label: Alert Assessment
+description: >-
+  One conclusion about the alert as a whole, reached from every entity's
+  assessment at once. The gather's output — what the example could not express
+  before `gather` existed, when a run ended with N Assessments and nothing able
+  to say anything about the alert.
+fields:
+  entities:
+    type: utf8
+    label: Entities
+    description: >-
+      The entity ids this covers, sorted and joined. Deliberately carries no
+      minLength: an alert naming nothing recognizable spreads to zero entities
+      and gathers immediately to an empty collection, so the empty string is a
+      real value here rather than a missing one.
+    nullable: false
+    validations:
+      maxLength: 400
+  entityCount:
+    type: uint8
+    label: Entity Count
+    description: >-
+      How many entities were assessed. Worth carrying rather than deriving from
+      the string above: it is the one number that says the gather saw the whole
+      collection, so a reader can tell a complete assessment from a partial one.
+    nullable: false
+    validations:
+      min: 0
+      max: 255
+  summary:
+    type: utf8
+    label: Summary
+    description: Every entity's verdict, in one line
+    nullable: false
+    validations:
+      maxLength: 1000

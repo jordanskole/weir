@@ -551,6 +551,67 @@ describe("nodeSchema", () => {
     expect(valid).toBe(false);
   });
 
+  /**
+   * `gather` in input position (docs/superpowers/specs/2026-09-27-gather.md).
+   * Its `given` is a keyed collection under one tag — the mirror image of
+   * `many`'s `expect` on the output side, because the two are duals.
+   */
+  it("accepts a gather input whose given is a keyed collection", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      description: "d",
+      input: { gather: "Todo" },
+      output: "TodoList",
+      examples: [
+        {
+          given: { Todo: { "1": { title: "Buy milk" }, "2": { title: "Buy eggs" } } },
+          expect: { TodoList: { title: "Groceries", tasks: [] } },
+        },
+      ],
+    });
+    expect(validate.errors).toBeNull();
+    expect(valid).toBe(true);
+  });
+
+  it("accepts a gather input whose given is an empty collection", () => {
+    // The case §5 exists for: a spread of zero elements gathers immediately to
+    // an empty collection, so `given: { Todo: {} }` is a real example, not a
+    // malformed one. `taggedOne` requires one *tag*, not one entry.
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      description: "d",
+      input: { gather: "Todo" },
+      output: "TodoList",
+      examples: [{ given: { Todo: {} }, expect: { TodoList: { title: "Groceries", tasks: [] } } }],
+    });
+    expect(validate.errors).toBeNull();
+    expect(valid).toBe(true);
+  });
+
+  it("rejects a gather input naming a list of edges — a gather is N of *one* edge", () => {
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      description: "d",
+      input: { gather: ["Todo", "TodoList"] },
+      output: "TodoList",
+      examples: [{ given: { Todo: {} }, expect: { TodoList: { title: "Groceries", tasks: [] } } }],
+    });
+    expect(valid).toBe(false);
+  });
+
+  it("rejects a gather input whose given entries are not objects", () => {
+    // A collection of scalars: the shape a hand-written example most plausibly
+    // gets wrong, since `many`'s collection was once documented as an array.
+    const validate = validatorFor(nodeSchema());
+    const valid = validate({
+      description: "d",
+      input: { gather: "Todo" },
+      output: "TodoList",
+      examples: [{ given: { Todo: { "1": "Buy milk" } }, expect: { TodoList: { title: "Groceries", tasks: [] } } }],
+    });
+    expect(valid).toBe(false);
+  });
+
   it("accepts a oneOf output with a single-tag expect", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({

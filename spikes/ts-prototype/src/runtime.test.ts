@@ -24,6 +24,24 @@ const ESCALATION_SRC = fileURLToPath(new URL("../../../examples/escalation/src",
 const REVIEW_SRC = fileURLToPath(new URL("../../../examples/manuscript-review/src", import.meta.url));
 const SOC_SRC = fileURLToPath(new URL("../../../examples/soc-triage/src", import.meta.url));
 
+/**
+ * `summarizeAlert`'s implementation, shared by the two soc-triage tests
+ * below so the gather's behaviour is described once. Sorted by key, so the
+ * output does not depend on the order the runtime happened to collect the
+ * members in — a gather's payload is a keyed collection, and a collection has
+ * no order.
+ */
+const SUMMARIZE_ALERT_IMPL = `export default function summarizeAlert(assessments) {
+  const ids = Object.keys(assessments).sort();
+  return {
+    entities: ids.join(","),
+    entityCount: ids.length,
+    summary: ids.length === 0
+      ? "no entities assessed"
+      : ids.map((id) => id + ": " + assessments[id].verdict).join("; "),
+  };
+}`;
+
 const Start = defineEdge({
   name: "Start",
   label: "Start",
@@ -2645,6 +2663,7 @@ describe("the example topologies for iteration and lineage", () => {
         return { entityId: bag.IdentityContext.entityId, identitySummary: bag.IdentityContext.summary, assetSummary: bag.AssetContext.summary };
       }`,
       assess: `export default function assess(ev) { return { entityId: ev.entityId, verdict: ev.identitySummary + " / " + ev.assetSummary }; }`,
+      summarizeAlert: SUMMARIZE_ALERT_IMPL,
     });
     const log = new InMemoryLog();
 
@@ -2659,8 +2678,8 @@ describe("the example topologies for iteration and lineage", () => {
 
     expect(result.stopped).toBe("quiescence");
     // extractEntities once, then two investigations, one join and one
-    // assessment per entity: 1 + 4 + 4 = 9.
-    expect(result.firings).toBe(9);
+    // assessment per entity, then one gather over both: 1 + 4 + 4 + 1 = 10.
+    expect(result.firings).toBe(10);
     expect(log.instances("Entity", "t")).toHaveLength(2);
 
     // The assertion the example exists for: every assessment's two halves
@@ -2672,6 +2691,74 @@ describe("the example topologies for iteration and lineage", () => {
       const value = v.entityId === "e-principal" ? "svc-backup@corp" : "web-07.corp";
       expect(v.verdict).toBe(`identity:${value} / asset:${value}`);
     }
+  });
+
+  /**
+   * Spec Testing #6 (2026-09-27-gather.md). The half of scatter/gather the
+   * outside reader pointed out was missing: the example used to end with N
+   * Assessments and nothing able to say anything about the alert.
+   *
+   * This is also the one test that checks the *synthesized* `Failed_Many_X`
+   * shape and the `gather:` parse path end to end — `gather.test.ts` builds
+   * its `Program`s by hand, so the two could otherwise drift.
+   *
+   * Break-proofs: keying the collection by each member's log id instead of
+   * `Assessment.index` reddened it with no `AlertAssessment` at all (the
+   * membrane rejects a mis-keyed collection); skipping
+   * `synthesizeGatherFailedEdges` reddened the edge-table assertion.
+   *
+   * What it does *not* catch, stated so it is not mistaken for a readiness
+   * test: relaxing completeness to "fire on any members", or grouping by the
+   * furthest collection ancestor instead of the nearest. Both leave this green
+   * — one spread, symmetric arms, both assessments landing in one pulse. The
+   * readiness rules are proved in `gather.test.ts`, which builds the
+   * asymmetry and the second spread this example does not have.
+   */
+  it("soc-triage: one gather turns both entities' assessments into one alert assessment", async () => {
+    const program = await withImplementations(SOC_SRC, {
+      extractEntities: `export default function extractEntities(alert) {
+        return {
+          "e-principal": { id: "e-principal", kind: "principal", value: alert.principal },
+          "e-asset": { id: "e-asset", kind: "asset", value: alert.asset },
+        };
+      }`,
+      investigateIdentity: `export default function investigateIdentity(e) { return { entityId: e.id, summary: "identity:" + e.value }; }`,
+      investigateAsset: `export default function investigateAsset(e) { return { entityId: e.id, summary: "asset:" + e.value }; }`,
+      assembleEvidence: `export default function assembleEvidence(bag) {
+        return { entityId: bag.IdentityContext.entityId, identitySummary: bag.IdentityContext.summary, assetSummary: bag.AssetContext.summary };
+      }`,
+      assess: `export default function assess(ev) { return { entityId: ev.entityId, verdict: ev.identitySummary + " / " + ev.assetSummary }; }`,
+      summarizeAlert: SUMMARIZE_ALERT_IMPL,
+    });
+    const log = new InMemoryLog();
+
+    await runNetlist(
+      program,
+      {
+        correlationId: "t",
+        originPayloads: { extractEntities: { id: "alert-1", principal: "svc-backup@corp", asset: "web-07.corp" } },
+      },
+      { log, budget: 50 },
+    );
+
+    // Exactly one, naming both entities. Two would mean the barrier fired per
+    // element; one naming a single entity would mean it fired early.
+    const summaries = log.instances("AlertAssessment", "t");
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.payload).toEqual({
+      entities: "e-asset,e-principal",
+      entityCount: 2,
+      summary:
+        "e-asset: identity:web-07.corp / asset:web-07.corp; e-principal: identity:svc-backup@corp / asset:svc-backup@corp",
+    });
+
+    // The synthesized failure edge a gather routes through exists, and it is
+    // `Failed_Many_Assessment` rather than `Failed_Assessment` — a gather's
+    // failure carries the collection it was holding, not one Assessment.
+    expect(Object.keys(program.edges)).toContain("Failed_Many_Assessment");
+    expect(program.edges["Failed_Many_Assessment"]!.fields).toMatchObject({
+      input: { many: { name: "Assessment" } },
+    });
   });
 
   it("manuscript-review: the fan-in fires once per revision, never pairing across revisions", async () => {

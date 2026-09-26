@@ -1,16 +1,21 @@
 # soc-triage
 
-**What this example is for: data-driven fan-out.** One alert produces N entities, each entity gets
-its own pair of independent investigations, and each pair rejoins with *its own* entity — not with
-another's.
+**What this example is for: data-driven fan-out and its dual.** One alert produces N entities, each
+entity gets its own pair of independent investigations, each pair rejoins with *its own* entity — not
+with another's — and then every entity's assessment is gathered back into one conclusion about the
+alert. Spread and gather, which together are one `traverse`.
 
 It has a second job, which is why it is worth reading even though its declarations are unremarkable:
-**it was written before the feature that makes it work.** An outside reader sketched a SOC triage app
-from weir's own documentation, checked out the repo, and wrote these files. Every `.edge` and `.node`
-is committed exactly as they wrote it — which is the point, since the fix was to make the runtime do
-what those declarations already said. Only the `.topology` has changed, and only to move the
-per-entity fan-out into a composite once composites existed; the flattened wiring is the same either
-way.
+**it was written before the features that make it work.** An outside reader sketched a SOC triage app
+from weir's own documentation, checked out the repo, and wrote these files. The original five nodes'
+declarations are committed as they wrote them — which is the point, since the fix for the first gap
+they found was to make the runtime do what those declarations already said.
+
+What has been added since, and why each addition is a change to the *example* rather than to their
+declarations: the `.topology` moved the per-entity fan-out into a composite once composites existed
+(the flattened wiring is identical either way); `Assessment` gained `index: entityId`, which a gather
+requires of the edge it collects; and `summarizeAlert` plus `AlertAssessment` are new, closing the
+second gap the same reader found by reading the committed example — the scatter without its gather.
 
 ## The topology
 
@@ -30,6 +35,10 @@ extractEntities (Alert -> many Entity, origin)
                                 |             AssetContext] -> EntityEvidence)
                                 v
                             assess (EntityEvidence -> Assessment)
+                                |
+                                |  N Assessment instances, one per entity
+                                v
+                     summarizeAlert (gather Assessment -> AlertAssessment)
 ```
 
 ```yaml
@@ -53,7 +62,9 @@ extractEntities:
       then:
         assembleEvidence:
           then:
-            assess: {}
+            assess:
+              then:
+                summarizeAlert: {}
 ```
 
 **The fan-out lives inside the composite; the root is a chain.** That is the point of a composite: a
@@ -69,14 +80,38 @@ It is also the decomposition you would draw on a whiteboard: "investigate an ent
 contract, reusable and independently runnable, rather than two nodes that happen to sit next to each
 other.
 
-Nine firings for two entities: `extractEntities` once, then two investigations, one join and one
-assessment **per entity**.
+Ten firings for two entities: `extractEntities` once, then two investigations, one join and one
+assessment **per entity**, then one gather over both — `1 + 4 + 4 + 1`.
+
+## Why the gather fires once, and once only
+
+`summarizeAlert` declares `input: { gather: Assessment }` and knows nothing about being fed by a
+spread. What makes it fire at the right moment is that **the collection token records the count**:
+`Many_Entity` holds two entries, every `Assessment` reaches it by ordinary lineage
+(`Assessment ← EntityEvidence ← IdentityContext ← Entity ← Many_Entity`), and the barrier is
+complete when two `Assessment` instances descend from it. No new notion of doneness, no scoped
+quiescence — a count and a walk that already existed.
+
+Which spread it gathers from is **not declared, and must not be.** It is the nearest collection
+ancestor the candidates share. Declaring it would make a node's contract depend on the topology above
+it, which is exactly the property this example exists to demonstrate weir does *not* have:
+`investigateIdentity` says `Entity → IdentityContext` and knows nothing about being one of N.
+
+Two consequences worth knowing before reading the declarations:
+
+- **`Assessment` gained `index: entityId`.** A gather's payload is a keyed collection, so the gathered
+  edge needs a real key — the same requirement `output: many` already carried.
+- **An alert naming nothing recognizable still produces an `AlertAssessment`.** Zero entities spread
+  to an empty collection, which gathers immediately to an empty collection rather than waiting for the
+  first of zero things. `summarizeAlert` declares that as its second example, because it is the case
+  most likely to be got wrong.
 
 ## What it used to do
 
 Before spread, this exact program elaborated cleanly, ran, and reported `stopped: "quiescence"` with
-`failures: []`. Three of its five nodes fired. `investigateIdentity` and `investigateAsset` each
-fired **once**, holding the whole `Entity` collection, and returned `Failed<In>`:
+`failures: []`. Three of the five nodes it had then fired — `summarizeAlert` did not exist yet.
+`investigateIdentity` and `investigateAsset` each fired **once**, holding the whole `Entity`
+collection, and returned `Failed<In>`:
 
 ```
 Entity: id should be string, got undefined; kind should be string,
@@ -99,9 +134,11 @@ piece (1)'s existing rule takes it from there: *a single-input node fires once p
 instance reaching it along a declared arc*. Two `Entity` instances arrive on the arc, so it fires
 twice. No `each:`, no new input kind, no runtime branch.
 
-The collection is still logged, under the reserved name `Many_Entity`. Nothing reads it yet; keeping
-it is what leaves a future vectorized consumer — one node taking the whole batch, paying retention
-per batch rather than per row — reachable.
+The collection is still logged, under the reserved name `Many_Entity`. It was kept to leave a future
+vectorized consumer — one node taking the whole batch, paying retention per batch rather than per row
+— reachable, and that consumer still does not exist. **`gather` is what actually reads it**, for a
+purpose nobody had in mind when the decision was made: it is the barrier's count. A speculative
+justification turned out to be load-bearing for a different feature.
 
 ## Why the join does not cross entities
 
@@ -143,22 +180,22 @@ reader who wrote the original sketch, reading the committed example.)*
 
 ## What it still cannot express
 
-A second alert in the same run. `extractEntities` is an origin, and origins fire once — one alert is
-one external event, so one run. Several alerts are several runs, and nothing joins across
+**A second alert in the same run.** `extractEntities` is an origin, and origins fire once — one alert
+is one external event, so one run. Several alerts are several runs, and nothing joins across
 correlations by design.
 
-**And the dual of its own fan-out.** The example does *one alert → N entities → independent work per
-entity → rejoin each entity's branches*. It does not do *N entity assessments → one alert
-assessment*, which is the next thing a real triage workflow wants:
+**A summary that knows which alert it is about.** Read `AlertAssessment`'s fields and the gap is
+visible: entity ids and a count, no alert id. `summarizeAlert` sees every `Assessment` and cannot see
+the `Alert` those assessments came from, because a gather takes N of *one* edge and nothing else. The
+shape it wants is `allOf: [gather: Assessment, Alert]`, which no input kind expresses. Worked around
+elsewhere by having the spread copy whatever the gather needs into every element — duplication in the
+payload standing in for a missing combinator (docs/open-questions.md, "A gather composes with
+nothing").
 
-```
-summarizeAlert:
-  input: many Assessment
-  output: AlertAssessment
-```
-
-That asks something `allOf` does not: `allOf`'s cardinality is statically known, while here the count
-comes from a runtime `many Entity`. There is no `Many_Assessment` token either — spread produces
-element instances and keeps the *original* collection, so regathering descendants would need a
-lineage-aware collect that does not exist. Whether `many` is a compositional type or only a one-way
-fan-out mechanism is genuinely open (docs/open-questions.md).
+**A property over the gathered collection.** `assembleEvidence` carries a property asserting its
+output names the entity *both* its inputs were about — the fix for a real false green. The analogous
+claim about `summarizeAlert` ("the summary names every assessment it gathered") **cannot be written**:
+weir's property language resolves dotted paths over fixed keys, and a gathered collection's keys are
+runtime data. So `summarizeAlert` declares no properties at all rather than one that passes because it
+checks nothing. Its examples — including the empty-collection one — are what cover it
+(docs/open-questions.md).

@@ -26,18 +26,31 @@
  * kept even while the two are equivalent.
  *
  * Deliberately narrow, stated here rather than left implicit:
- * - **`Failed<In>` routing exists for `single`- and `allOf`-input nodes —
- *   every InputSpec kind there is.** A `single`-input node's failure logs
- *   under `failedEdgeName(inputEdge)` (`Failed_Todo` for a `Todo`-input
- *   node, synthesized automatically by `elaborate()`'s
- *   `synthesizeFailedEdges`); an `allOf`-input node's bag-shaped failure
- *   (`{A: ..., B: ...}`) logs under `failedAllOfEdgeName(edges)`
- *   (`Failed_A_B`, sorted and order-independent, synthesized by
- *   `synthesizeAllOfFailedEdges` for whichever combos are actually
- *   declared) — both cases route through the same readiness mechanism a
- *   downstream node declaring that edge as its own input already uses, no
+ * - **`Failed<In>` routing exists for every InputSpec kind.** A
+ *   `single`-input node's failure logs under `failedEdgeName(inputEdge)`
+ *   (`Failed_Todo` for a `Todo`-input node, synthesized automatically by
+ *   `elaborate()`'s `synthesizeFailedEdges`); an `allOf`-input node's
+ *   bag-shaped failure (`{A: ..., B: ...}`) logs under
+ *   `failedAllOfEdgeName(edges)` (`Failed_A_B`, sorted and
+ *   order-independent, synthesized by `synthesizeAllOfFailedEdges` for
+ *   whichever combos are actually declared); a `gather`-input node's
+ *   collection-shaped failure logs under
+ *   `failedGatherEdgeName(gatheredEdge)` (`Failed_Many_Assessment`,
+ *   synthesized by `synthesizeGatherFailedEdges` for whichever edges are
+ *   actually gathered). All three route through the same readiness mechanism
+ *   a downstream node declaring that edge as its own input already uses, no
  *   new mechanism needed (docs/design-history.md, "The runtime, built
- *   narrow on purpose... `Failed<In>` routing").
+ *   narrow on purpose... `Failed<In>` routing"). This list said "every
+ *   InputSpec kind there is" while there were two; `gather` made it three,
+ *   which is why the claim is now written as a property rather than a census.
+ * - **`gather`-input nodes fire once per *barrier*.** The runtime offers the
+ *   unconsumed candidates on the declared arc (`eligibleForEdge`, unchanged)
+ *   to `gatherGroups`, which groups them by the `Many_*` collection token
+ *   they descend from and reports the groups whose size matches that
+ *   collection's entry count. A group that can no longer complete — some
+ *   element has a `Failed_*` descendant — fires a failure instead of waiting,
+ *   because a gather is `sequence` and a silent stall is the worse outcome
+ *   (docs/superpowers/specs/2026-09-27-gather.md).
  * - **Disambiguating a real `Failed<In>` from a genuine `single`-output
  *   success value is a heuristic** (`looksLikeFailed`), not a real
  *   discriminant — the same open, undecided wire-format question. Safe
@@ -70,10 +83,11 @@
 
 import { assertOutput, membrane } from "./membrane.js";
 import type { InstanceEnvelope, InvocationContext, Log, LoggedInstance } from "./membrane.js";
-import { joinRows } from "./lineage.js";
+import { gatherGroups, joinRows } from "./lineage.js";
+import type { GatherGroup } from "./lineage.js";
 import type { Program } from "./implementation.js";
 import type { AnyEdgeDef, Envelope, Failed, InputSpec, NodeDef, OutputSpec, PayloadOf } from "./types.js";
-import { Identity, failedEdgeName, failedAllOfEdgeName } from "./types.js";
+import { Identity, failedEdgeName, failedAllOfEdgeName, failedGatherEdgeName, manyEdgeName } from "./types.js";
 import { hashEdge } from "./hash.js";
 import type { Trace } from "./trace.js";
 
@@ -100,6 +114,13 @@ type AnyAllOfInvoke = (
   bag: Record<string, unknown>,
   context: InvocationContext,
 ) => Promise<{ result: unknown; envelope?: Envelope }>;
+/**
+ * `AnyAllOfInvoke`'s shape exactly — one object argument — but named
+ * separately because what the object *is* differs: a bag keyed by edge name
+ * there, a collection keyed by the gathered edge's own `index` here. Two
+ * names for one call shape, so a call site reads as the thing it is.
+ */
+type AnyGatherInvoke = AnyAllOfInvoke;
 
 /**
  * One (node, input) pair a pulse may fire, as the snapshot found it.
@@ -108,14 +129,17 @@ type AnyAllOfInvoke = (
  * convenience: a `single`-input node consumes one `instance` (absent for an
  * origin, whose payload comes from `originPayloads` and is not a logged
  * instance); an `allOf` node consumes a whole `row`, one instance per
- * declared edge, as chosen by `joinRows`. Modelled as two optional fields
- * rather than a discriminated union because `tryFire` already re-reads
- * `nodeDef.input.kind` — the real discriminant — to decide how to invoke.
+ * declared edge, as chosen by `joinRows`; a `gather` node consumes a whole
+ * `group`, every instance of one edge descended from one spread, as chosen by
+ * `gatherGroups`. Modelled as optional fields rather than a discriminated
+ * union because `tryFire` already re-reads `nodeDef.input.kind` — the real
+ * discriminant — to decide how to invoke.
  */
 interface Candidate {
   nodeName: string;
   instance?: LoggedInstance;
   row?: Map<string, LoggedInstance>;
+  group?: GatherGroup;
 }
 
 export interface RunResult {
@@ -309,17 +333,13 @@ export interface Host {
 export const RUN_ROOT_EDGE = "Run";
 
 /**
- * The reserved edge name a `many` output's collection is logged under.
- * Reserved rather than synthesized as a real `.edge`, for the same reason
- * `fuzz.ts`'s `assertManyOutput` exists: a bare keyed collection is not a
- * shape the type system can express as an edge payload. Keeping the
- * collection at all is what leaves the vectorized path reachable — a node
- * that wants the whole batch has something to read, and its retention cost
- * stays per batch rather than per row.
+ * Re-exported rather than defined here, where it used to live: `gather` made
+ * the `Many_` prefix a convention this module shares with `lineage.ts` and
+ * with `failedGatherEdgeName`, so it moved to `types.ts` alongside
+ * `failedEdgeName` and `failedAllOfEdgeName` — the other synthesized-name
+ * conventions two modules have to agree on.
  */
-export function manyEdgeName(edgeName: string): string {
-  return `Many_${edgeName}`;
-}
+export { manyEdgeName };
 
 /** Generous enough that no correct run reaches it; small enough to fail a spin fast. See `Host.maxPulses`. */
 const DEFAULT_MAX_PULSES = 10_000;
@@ -451,7 +471,7 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
    * rather than from the candidate list.
    */
   async function tryFire(
-    { nodeName, instance, row }: Candidate,
+    { nodeName, instance, row, group }: Candidate,
     pulse: number,
   ): Promise<boolean> {
     const nodeDef = program.nodes[nodeName];
@@ -505,6 +525,57 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
             );
       result = invocation.result;
       envelope = invocation.envelope;
+    } else if (nodeDef.input.kind === "gather") {
+      if (group === undefined) return false;
+      const gatheredEdge = nodeDef.input.edge;
+      // The collection is keyed by each member's own `index`, the same key
+      // the spread that produced them used — a gather's payload is the shape
+      // a `many` output produces, not a new one (design-history.md, "`many`
+      // is a collection, keyed by index, not an array"). `index` is required
+      // of a gathered edge at elaboration (`resolveInputSpec`); the fallback
+      // exists only for a directly constructed `NodeDef` that skipped it, and
+      // the membrane rejects that collection anyway rather than inventing a
+      // key convention of its own.
+      const collection: Record<string, unknown> = {};
+      // The collection token first, then the members. Citing the barrier as
+      // well as its contents is what puts the gather's output *downstream of
+      // the spread* in lineage rather than merely downstream of N elements —
+      // which is what a later reader needs to answer "which spread was this
+      // the gather of". The members alone would give the same nearest common
+      // ancestor, so this costs one id and buys a directly recorded answer.
+      const causationIds: string[] = [group.collection.id];
+      for (const member of group.members) {
+        const payload = member.payload as Record<string, unknown>;
+        collection[gatheredEdge.index === undefined ? member.id : String(payload[gatheredEdge.index])] = payload;
+        causationIds.push(member.id);
+      }
+      input = collection;
+      const invocation = await (membrane as AnyGatherInvoke)(
+        // A dead group fires a *failure*, and it fires it through the
+        // membrane rather than around it: wrapping `fn` so it throws reuses
+        // the whole path — the envelope is built, the throw becomes
+        // `Failed<In>` carrying the partial collection, the trace records the
+        // attempt — instead of hand-assembling a failure instance that would
+        // be the one failure in the system with no invocation behind it. Same
+        // wrapping trick the effect branch above uses, for the same reason.
+        group.dead
+          ? ({
+              ...nodeDef,
+              fn: () => {
+                throw new Error(
+                  `gather of "${gatheredEdge.name}" can no longer complete: ` +
+                    `${group.members.length} of ${group.size} arrived and an element failed. ` +
+                    `A gather is \`sequence\`, so one element's failure is the whole result's ` +
+                    `(docs/superpowers/specs/2026-09-27-gather.md §4).`,
+                );
+              },
+            } as NodeDef)
+          : nodeDef,
+        collection,
+        { correlationId, identity, step: pulse, causationIds, nodeName },
+      );
+      result = invocation.result;
+      envelope = invocation.envelope;
     } else {
       // The bag and the causation both come from the row. The membrane no
       // longer resolves this bag itself (it only asserts it), and the row is
@@ -539,8 +610,16 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
     // Every instance in the row, for an `allOf` node: consumption is what
     // stops the next pulse rebuilding the same group and firing it again,
     // now that nothing caps the node at one firing per run.
-    if (nodeDef.input.kind !== "single") {
+    if (nodeDef.input.kind === "allOf") {
       for (const consumedInstance of row!.values()) consumedBy(nodeName).add(consumedInstance.seq);
+    } else if (nodeDef.input.kind === "gather") {
+      // The whole group, *and the collection token itself*. The token is what
+      // makes this total: an empty collection has no members, so consuming
+      // only members would leave the barrier eligible every pulse and fire an
+      // empty gather forever. The token is the barrier's identity, so
+      // consuming it is what "this barrier has fired" means.
+      consumedBy(nodeName).add(group!.collection.seq);
+      for (const member of group!.members) consumedBy(nodeName).add(member.seq);
     } else if (origins.has(nodeName)) originsFired.add(nodeName);
     else if (instance !== undefined) consumedBy(nodeName).add(instance.seq);
 
@@ -569,9 +648,16 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
       const failedName =
         nodeDef.input.kind === "single"
           ? failedEdgeName(nodeDef.input.edge.name)
-          : failedAllOfEdgeName(nodeDef.input.edges);
+          : nodeDef.input.kind === "gather"
+            ? failedGatherEdgeName(nodeDef.input.edge.name)
+            : failedAllOfEdgeName(nodeDef.input.edges);
       const failedEnvelope = await instanceEnvelope(envelope, program.edges[failedName]);
-      if (nodeDef.input.kind === "single") {
+      if (nodeDef.input.kind === "single" || nodeDef.input.kind === "gather") {
+        // Both are `{ input, reason }` already — nested, not flat. A gather's
+        // `input` is the collection it was holding, which `Failed_Many_<X>`
+        // declares as a `many` field (see `failedGatherEdgeName`), so the
+        // shape the membrane produced is the shape the edge expects with no
+        // reassembly.
         log.append(failedName, correlationId, result, failedEnvelope);
       } else {
         // The synthesized combo edge is flat (elaborate.ts's synthesizeAllOfFailedEdges:
@@ -621,6 +707,33 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
   /** Sorted, so a run is reproducible — order within a pulse cannot change *which* nodes fire (the snapshot fixed that), only `seq` assignment and the interleaving of appends. */
   const scanned = [...reachable].sort();
 
+  /**
+   * Where a gather's barriers can be: the reserved collection name of every
+   * `many` output the program declares. Derived from the nodes rather than
+   * scanned for by prefix, so it names exactly the collections something in
+   * this program can actually produce.
+   *
+   * Computed once, outside the loop, because it is a property of the program
+   * rather than of the log.
+   */
+  const collectionEdgeNames = [
+    ...new Set(
+      Object.values(program.nodes).flatMap((node) =>
+        node.output.kind === "many" ? [manyEdgeName(node.output.edge.name)] : [],
+      ),
+    ),
+  ];
+
+  /**
+   * Every synthesized failure edge in the program — what a gather reads to
+   * decide a group has died (spec §4). By prefix rather than by re-deriving
+   * each name from the nodes, because a failure edge is synthesized for
+   * *every* declared edge (`synthesizeFailedEdges`) plus each declared `allOf`
+   * combo and gather, and the union of those is exactly "the names starting
+   * with `Failed_`".
+   */
+  const failedEdgeNames = Object.keys(program.edges).filter((name) => name.startsWith(failedEdgeName("")));
+
   let firings = 0;
   let pulse = 0;
 
@@ -635,7 +748,32 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
     const candidates: Candidate[] = [];
     for (const nodeName of scanned) {
       const nodeDef = program.nodes[nodeName];
-      if (nodeDef.input.kind !== "single") {
+      if (nodeDef.input.kind === "gather") {
+        // A gather contributes one candidate per barrier that may fire.
+        // `eligibleForEdge` supplies the candidates on exactly the same terms
+        // a `single`-input node gets them — the arc rule is unchanged, so a
+        // gather is no more able to eat its own output than anything else —
+        // and `gatherGroups` decides which of them constitute a complete (or
+        // dead) group. Collections are read straight from the log rather than
+        // through `eligibleForEdge`: a collection token is not on an arc *to*
+        // this node, it is the barrier the candidates descend from, and
+        // "which barrier does this belong to" is a lineage question rather
+        // than an arc one. `consumedBy` still filters it, which is what stops
+        // a fired barrier re-forming.
+        const eaten = consumedBy(nodeName);
+        candidates.push(
+          ...gatherGroups(
+            log,
+            collectionEdgeNames.flatMap((edgeName) =>
+              log.instances(edgeName, correlationId).filter((collection) => !eaten.has(collection.seq)),
+            ),
+            eligibleForEdge(program, log, eaten, nodeName, nodeDef.input.edge.name, correlationId),
+            failedEdgeNames.flatMap((edgeName) => log.instances(edgeName, correlationId)),
+          ).map((group) => ({ nodeName, group })),
+        );
+        continue;
+      }
+      if (nodeDef.input.kind === "allOf") {
         // An `allOf` node contributes one candidate per joined row. Gathering
         // is per *declared edge* — the same arc rule a `single`-input node
         // gets, so a node's own output is no more eligible for it here than

@@ -35,7 +35,7 @@ export interface ContractEdgeShape {
   fields: Record<string, ContractField>;
 }
 
-export type ContractInputSpec = ContractEdgeShape | { allOf: ContractEdgeShape[] };
+export type ContractInputSpec = ContractEdgeShape | { allOf: ContractEdgeShape[] } | { gather: ContractEdgeShape };
 
 export type ContractOutputSpec =
   | ContractEdgeShape
@@ -91,7 +91,10 @@ function edgeShape(edge: AnyEdgeDef): ContractEdgeShape {
 
 function contractInputSpec(input: NodeDecl["input"]): ContractInputSpec {
   if (input.kind === "single") return edgeShape(input.edge);
-  return { allOf: input.edges.map(edgeShape) };
+  if (input.kind === "allOf") return { allOf: input.edges.map(edgeShape) };
+  // A gather's contract says "N of this edge" and never how many: the count
+  // belongs to the spread that produced them, not to this declaration.
+  return { gather: edgeShape(input.edge) };
 }
 
 function contractOutputSpec(output: NodeDecl["output"]): ContractOutputSpec {

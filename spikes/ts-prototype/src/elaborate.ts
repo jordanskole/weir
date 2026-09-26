@@ -20,7 +20,7 @@ import { basename } from "node:path";
 import { parse } from "yaml";
 import { defineEdge, defineField } from "./define.js";
 import { assertDeclaration } from "./schema.js";
-import { failedEdgeName, failedAllOfEdgeName } from "./types.js";
+import { failedEdgeName, failedAllOfEdgeName, failedGatherEdgeName } from "./types.js";
 import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
 
 /**
@@ -85,6 +85,36 @@ function synthesizeFailedEdges(edges: Record<string, AnyEdgeDef>): void {
  * already carries; not guarded against here either, for the same reason
  * (no real edge in this repo collides today).
  */
+/**
+ * Synthesizes one `Failed_Many_<X>` edge per edge some `.node` file actually
+ * declares `gather: X` on — `{ input: many X, reason }`
+ * (docs/superpowers/specs/2026-09-27-gather.md §4).
+ *
+ * Conditional on a declaration, like `synthesizeAllOfFailedEdges` and unlike
+ * `synthesizeFailedEdges`: a gather's failure edge is only meaningful where a
+ * gather exists, and synthesizing one per declared edge would double the edge
+ * table for nothing.
+ *
+ * The `many` field is what makes this expressible. A gather's `Failed<In>`
+ * carries the partial collection, and a bare keyed collection is not an edge
+ * payload — but a *field* may be `many` (`ManyEdgeDef`), so the collection
+ * sits inside one that is. Nested under `input` rather than flattened, which
+ * is `synthesizeFailedEdges`' shape rather than `synthesizeAllOfFailedEdges`':
+ * a gather's input is one thing with one name, not a bag of several.
+ */
+function synthesizeGatherFailedEdges(edges: Record<string, AnyEdgeDef>, gathered: AnyEdgeDef[]): void {
+  for (const edge of gathered) {
+    const name = failedGatherEdgeName(edge.name);
+    if (name in edges) continue;
+    edges[name] = defineEdge({
+      name,
+      label: `Failed (gather of ${edge.label})`,
+      description: `A node gathering "${edge.name}" failed — the collection it was holding, plus why. A gather is \`sequence\`, so one element's failure is the whole group's (docs/design.md §3).`,
+      fields: { input: { many: edge }, reason: reasonField() },
+    });
+  }
+}
+
 function synthesizeAllOfFailedEdges(edges: Record<string, AnyEdgeDef>, combos: AnyEdgeDef[][]): void {
   for (const combo of combos) {
     const name = failedAllOfEdgeName(combo);
@@ -289,6 +319,20 @@ function resolveInputSpec(input: unknown, resolveEdge: EdgeResolver): InputSpec 
   }
   if (input !== null && typeof input === "object" && "allOf" in input) {
     return { kind: "allOf", edges: resolveEdgeNameList(input.allOf, "input.allOf", resolveEdge) };
+  }
+  if (input !== null && typeof input === "object" && "gather" in input) {
+    const ref = (input as { gather: unknown }).gather;
+    if (typeof ref !== "string" || ref.length === 0) {
+      throw new Error(`"input.gather" must be a bare edge-name reference.`);
+    }
+    const edge = resolveEdge(ref);
+    // The same requirement `output.many` carries, for the same reason: the
+    // payload is a collection keyed by each entry's own index, so an edge with
+    // no index has no key to be collected under. Checked here rather than left
+    // to the membrane so a gather of an index-less edge fails at `weir check`
+    // instead of three pulses into a run.
+    requireIndex(edge, `"input.gather"`);
+    return { kind: "gather", edge };
   }
   throw new Error(`Unrecognized "input" shape: ${JSON.stringify(input)}.`);
 }
@@ -599,14 +643,17 @@ function mergeWiring(a: Wiring, b: Wiring): Wiring {
 }
 
 /**
- * What a node's declared output can actually put on the wire, with the
- * multiplicity it arrives at. `oneOf`/`allOf` contribute each of their
- * branches at single multiplicity — the runtime logs one instance per
- * tagged branch (`runtime.ts`'s `logOutput`) — while `many` contributes
- * its one edge flagged `many`, because a `many` result is a single token
- * carrying a keyed collection, never N separate instances
- * (docs/design-history.md, "`many` is a collection, keyed by index, not an
- * array").
+ * What a node's declared output can actually put on the wire. Every kind
+ * contributes its edges at single multiplicity: `oneOf`/`allOf` because the
+ * runtime logs one instance per tagged branch, and `many` because spread
+ * materializes a collection's entries as real instances of the declared edge
+ * (`runtime.ts`'s `logOutput`, 2026-09-26-spread-materializes-elements.md).
+ *
+ * This comment used to claim `many` was returned "flagged `many`", and Rule A
+ * used to reject a `many X` output wired into a `single X` input on the
+ * strength of it. Spread made that wiring correct — it is how per-element
+ * work happens — so the flag and the rule went, and the comment describing
+ * them outlived both by a day. Corrected while building `gather`.
  */
 function producedEdges(node: NodeDecl): { name: string }[] {
   const output = node.output;
@@ -625,37 +672,43 @@ function producedEdges(node: NodeDecl): { name: string }[] {
   const failed =
     node.input.kind === "single"
       ? failedEdgeName(node.input.edge.name)
-      : failedAllOfEdgeName(node.input.edges);
+      : node.input.kind === "gather"
+        ? // Not `Failed_<X>`: a gather's failure carries the *collection* it
+          // was holding, a different shape from one `X`, so it routes under
+          // its own synthesized edge (see `failedGatherEdgeName`).
+          failedGatherEdgeName(node.input.edge.name)
+        : failedAllOfEdgeName(node.input.edges);
 
   return [...declared, { name: failed }];
 }
 
 /**
- * The edge names a node declares needing. Always single multiplicity:
- * `resolveInputSpec` builds only `single` and `allOf`, so no input is ever
- * `many` — which is what makes the `many`-output rule below total rather
- * than a special case.
+ * The edge names a node declares needing, whatever multiplicity it needs them
+ * at. A `gather` needs N of one edge, but they arrive one instance at a time
+ * on one arc, so the *arc* question this answers has the same shape as a
+ * `single` input's — which is why a gather adds no case to either wiring rule
+ * below beyond Rule C, its own.
  */
 function consumedEdges(input: InputSpec): string[] {
-  return input.kind === "single" ? [input.edge.name] : input.edges.map((edge) => edge.name);
+  if (input.kind === "single" || input.kind === "gather") return [input.edge.name];
+  return input.edges.map((edge) => edge.name);
 }
 
 /**
  * Elaboration-time wiring checks — the "will not compile" gate for a
  * topology whose arcs don't typecheck against the contracts they connect.
- * Two rules:
+ * Three rules:
  *
  * **A, arc soundness.** Every arc must carry at least one edge the consumer
- * declares, at single multiplicity. The motivating failure is a `many X`
- * output wired into a `single X` input: the names match, so it looks right,
- * but no input is ever `many`, so nothing on that arc can ever satisfy the
- * consumer. Before this check that program elaborated clean, ran to
- * `quiescence` with `failures: []`, and surfaced as a schema error two
- * nodes downstream complaining that `X` was missing fields it never had —
- * because the payload was a *collection of* `X` checked against the schema
- * for one `X` (docs/open-questions.md, "There is no fan-out primitive").
- * An arc matching no name at all is the plainer miswiring, reported
- * separately so the message can say what each side actually declares.
+ * declares. The motivating failure was a `many X` output wired into a
+ * `single X` input — before `spread`, no input was ever `many`, so nothing on
+ * that arc could satisfy the consumer, and the program elaborated clean, ran
+ * to `quiescence` with `failures: []`, and surfaced as a schema error two
+ * nodes downstream complaining that `X` was missing fields it never had.
+ * Spread made that wiring legitimate (it materializes the entries as real
+ * `X` instances), so what is left of A is the plainer miswiring: an arc whose
+ * two sides name no edge in common, reported so the message can say what each
+ * side actually declares.
  *
  * **B, node reachability.** The union of a node's parents must cover every
  * edge it declares needing, so a node that can never become ready is
@@ -668,6 +721,15 @@ function consumedEdges(input: InputSpec): string[] {
  * A self-loop satisfies B through itself, which is correct: a node wired
  * back to its own input genuinely does supply it (`countToThree`'s shape,
  * docs/superpowers/specs/2026-09-24-instance-retention-and-iteration.md).
+ *
+ * **C, a gather has a spread above it.** A `gather: X` node fires on a
+ * barrier — the collection token a `many` output logged — so a gather with no
+ * spread anywhere upstream has no count to fire on and simply never fires.
+ * B does not catch it: something does produce `X`, so the node looks ready.
+ * Checked here because it is the one thing about a gather that is decidable
+ * from the topology, and because the alternative is the failure mode this
+ * repo rates worst — a run that reaches quiescence having silently skipped a
+ * node, with `weir check` reporting ✓.
  */
 function assertWiringTypes(
   nodes: Record<string, NodeDecl>,
@@ -743,6 +805,25 @@ function assertWiringTypes(
     }
     throw new Error(
       `Wiring: "${name}" declares needing ${missing.map((edge) => `"${edge}"`).join(", ")}, but nothing wired into it produces ${missing.length === 1 ? "it" : "them"} — its parents are ${parents.length === 0 ? "none" : parents.map((p) => `"${p}"`).join(", ")}.`,
+    );
+  }
+
+  // Rule C, per gather node.
+  for (const [name, node] of Object.entries(nodes)) {
+    if (node.input.kind !== "gather" || !wired.has(name)) continue;
+    const seen = new Set<string>([name]);
+    const frontier = [...(parentsOf.get(name) ?? [])];
+    let spread: string | undefined;
+    while (frontier.length > 0 && spread === undefined) {
+      const ancestor = frontier.pop()!;
+      if (seen.has(ancestor)) continue;
+      seen.add(ancestor);
+      if (nodes[ancestor]?.output.kind === "many") spread = ancestor;
+      else frontier.push(...(parentsOf.get(ancestor) ?? []));
+    }
+    if (spread !== undefined) continue;
+    throw new Error(
+      `Wiring: "${name}" gathers "${(node.input as { edge: AnyEdgeDef }).edge.name}", but nothing upstream of it declares a "many" output — a gather's barrier is the collection a spread produced, so with no spread above it there is no count to fire on and it would never fire.`,
     );
   }
 }
@@ -969,16 +1050,25 @@ export async function elaborate(root: string): Promise<Elaborated> {
   // exist can only be discovered by looking at what's actually declared —
   // unlike synthesizeFailedEdges, synthesizing for every possible subset
   // isn't an option (that's a powerset, not a linear scan).
+  // The same pre-scan serves `gather:`, for the same reason: `Failed_Many_X`
+  // exists only where a gather of `X` is declared, and a `.node` file may
+  // itself declare `input: Failed_Many_X` to route one.
   const allOfCombosByKey = new Map<string, AnyEdgeDef[]>();
+  const gatheredByName = new Map<string, AnyEdgeDef>();
   for (const { text } of nodeTextByName.values()) {
     const raw = parse(text) as { input?: unknown };
     if (raw.input === null || typeof raw.input !== "object" || Array.isArray(raw.input)) continue;
+    if ("gather" in raw.input && typeof raw.input.gather === "string") {
+      const edge = resolveEdge(raw.input.gather);
+      gatheredByName.set(edge.name, edge);
+    }
     if (!("allOf" in raw.input) || !Array.isArray(raw.input.allOf)) continue;
     const comboEdges = raw.input.allOf.map((n) => resolveEdge(n as string));
     const key = [...comboEdges].map((edge) => edge.name).sort().join(",");
     if (!allOfCombosByKey.has(key)) allOfCombosByKey.set(key, comboEdges);
   }
   synthesizeAllOfFailedEdges(edges, [...allOfCombosByKey.values()]);
+  synthesizeGatherFailedEdges(edges, [...gatheredByName.values()]);
 
   const nodes: Record<string, NodeDecl> = {};
   const anyOfAliases = new Map<string, string[]>();

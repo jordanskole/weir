@@ -1,6 +1,130 @@
 import type { Log, LoggedInstance } from "./membrane.js";
 
 /**
+ * One gather barrier that may fire: the collection token it is the gather
+ * of, the instances it collected, and whether it is firing because it
+ * completed or because it died.
+ */
+export interface GatherGroup {
+  /**
+   * The `Many_*` collection token every member descends from — the barrier's
+   * identity. Consumed along with the members, which is what stops the next
+   * pulse re-forming the group; for an empty collection it is the *only*
+   * thing there is to consume.
+   */
+  collection: LoggedInstance;
+  /** The collection's own entry count — the barrier's target. */
+  size: number;
+  /** The members, oldest first. `size` of them for a live group, fewer for a dead one. */
+  members: LoggedInstance[];
+  /** An element of the collection has a `Failed_*` descendant, so `members` can never reach `size` (spec §4). */
+  dead: boolean;
+}
+
+/**
+ * Which gather barriers may fire now, one per firing — `joinRows`' opposite
+ * number, for `gather` rather than `allOf`
+ * (docs/superpowers/specs/2026-09-27-gather.md §3).
+ *
+ * **The collection token records the count, and that is what makes this
+ * tractable.** An `allOf` node's cardinality is in its declaration, so "am I
+ * complete" is answerable from the contract. A gather's is decided at runtime
+ * by the spread that produced the elements — so the first framing of this
+ * concluded it needed a lineage-scoped barrier the pulse loop has no notion
+ * of. It does not: `spread` logs the collection it was handed alongside the
+ * elements it materialized, and every descendant reaches it by ordinary
+ * lineage (`Assessment ← EntityEvidence ← IdentityContext ← Entity ←
+ * Many_Entity`). So the barrier has a known target — a count, and a walk
+ * that already existed.
+ *
+ * That the collection is reachable at all is a consequence of a decision
+ * taken for an unrelated reason (keeping the vectorized consumer reachable,
+ * 2026-09-26-spread-materializes-elements.md §1). Noted as evidence for
+ * keeping it rather than treating it as dead weight.
+ *
+ * **Grouping is by *nearest* collection ancestor**, the same discriminator
+ * `joinRows` uses and for the same reason: two spreads in one run would
+ * otherwise both be ancestors of everything downstream of either. The
+ * nearest is the highest-`seq` one, since an ancestor is always strictly
+ * earlier.
+ *
+ * **A candidate with no collection ancestor is not gathered.** It has no
+ * barrier to belong to, so there is no honest count to fire on, and inventing
+ * one (a group of one, say) would make a misdrawn topology quietly produce
+ * per-element results that look like gathers. `assertWiringTypes`' Rule C
+ * rejects that topology at elaboration instead, which is why this case does
+ * not stall a well-formed program. Deliberately *not* given the
+ * latest-wins-with-no-lineage tier `joinRows` has: there the tier is what
+ * makes a staged bag work at all, here it would be a second readiness rule
+ * whose only users are tests.
+ */
+export function gatherGroups(
+  log: Log,
+  collections: LoggedInstance[],
+  candidates: LoggedInstance[],
+  failures: LoggedInstance[],
+): GatherGroup[] {
+  if (collections.length === 0) return [];
+  const collectionById = new Map(collections.map((collection) => [collection.id, collection]));
+
+  const nearestCollection = (instance: LoggedInstance): LoggedInstance | undefined => {
+    let nearest: LoggedInstance | undefined;
+    for (const ancestorId of selfAndAncestorIds(log, instance.id)) {
+      const collection = collectionById.get(ancestorId);
+      if (collection === undefined) continue;
+      if (nearest === undefined || collection.seq > nearest.seq) nearest = collection;
+    }
+    return nearest;
+  };
+
+  const membersByCollection = new Map<string, LoggedInstance[]>();
+  for (const candidate of candidates) {
+    const collection = nearestCollection(candidate);
+    if (collection === undefined) continue;
+    membersByCollection.set(collection.id, [...(membersByCollection.get(collection.id) ?? []), candidate]);
+  }
+
+  // Deadness, spec §4: a group can no longer complete once an element's
+  // subgraph has produced a `Failed_*` instead of the gathered edge. Decided
+  // by asking the *failures* which barrier they descend from — the same
+  // nearest-ancestor walk, read the other way round — because `Log` indexes
+  // ancestors, not descendants, so "does this element have a failed
+  // descendant" is only answerable from the failure's side.
+  const dead = new Set<string>();
+  for (const failure of failures) {
+    const collection = nearestCollection(failure);
+    if (collection !== undefined) dead.add(collection.id);
+  }
+
+  const groups: GatherGroup[] = [];
+  for (const collection of collections) {
+    const members = [...(membersByCollection.get(collection.id) ?? [])].sort((a, b) => a.seq - b.seq);
+    const size = entryCount(collection.payload);
+    // An empty collection fires immediately with an empty collection, never
+    // waits for the first of zero things (spec §5): `traverse` over an empty
+    // structure yields an empty structure, and `extractEntities` finding
+    // nothing recognizable in an alert is an ordinary outcome rather than a
+    // hypothetical. It falls out of the count rather than needing a case —
+    // `0 === 0` — which is the check this comment exists to keep honest.
+    const isDead = dead.has(collection.id) && members.length < size;
+    if (!isDead && members.length !== size) continue;
+    groups.push({ collection, size, members, dead: isDead });
+  }
+  return groups;
+}
+
+/**
+ * How many entries a collection token holds. A `many` payload is a keyed
+ * collection; anything else is a producer that emitted a non-collection,
+ * which `logOutput` already declines to materialize elements from — so zero
+ * elements can descend from it and zero is the honest count.
+ */
+function entryCount(payload: unknown): number {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return 0;
+  return Object.keys(payload as Record<string, unknown>).length;
+}
+
+/**
  * Every transitive ancestor of an instance, oldest first, each appearing
  * once.
  *

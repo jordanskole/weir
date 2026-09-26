@@ -25,7 +25,7 @@ export interface NetlistEdge {
   schemaHash: string;
 }
 
-export type NetlistInputSpec = string | { allOf: string[] };
+export type NetlistInputSpec = string | { allOf: string[] } | { gather: string };
 export type NetlistOutputSpec = string | { oneOf: string[] } | { allOf: string[] } | { many: string };
 
 export interface NetlistNode {
@@ -85,6 +85,7 @@ async function serializeEdges(edges: Record<string, AnyEdgeDef>): Promise<Record
 
 function serializeInput(input: InputSpec): NetlistInputSpec {
   if (input.kind === "single") return input.edge.name;
+  if (input.kind === "gather") return { gather: input.edge.name };
   return { allOf: input.edges.map((edge) => edge.name) };
 }
 

@@ -113,6 +113,19 @@ function assertGeneratedCase(input: InputSpec, generatedCase: unknown, caseIndex
     }
     return;
   }
+  if (input.kind === "gather") {
+    for (const [key, entry] of Object.entries(generatedCase as Record<string, unknown>)) {
+      try {
+        assertPayload(input.edge, entry);
+      } catch (cause) {
+        throw new Error(
+          `fuzzNode: generated case ${caseIndex} entry "${key}" is not valid input for "${input.edge.name}" — this is a generator defect, not a node outcome: ${(cause as Error).message}`,
+        );
+      }
+    }
+    return;
+  }
+
   const bag = generatedCase as Record<string, unknown>;
   for (const edge of input.edges) {
     try {

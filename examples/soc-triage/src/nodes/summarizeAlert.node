@@ -1,0 +1,37 @@
+label: Summarize Alert
+description: >-
+  Reach one conclusion about the alert from every entity's assessment — the
+  gather, and the half of scatter/gather this example was missing.
+input:
+  gather: Assessment
+output: AlertAssessment
+examples:
+  # A gather's `given` is a keyed collection, the same shape a `many` output's
+  # `expect` is — the two are duals. Keyed by Assessment's own `index`
+  # (`entityId`), which is what the runtime keys it by.
+  - given:
+      Assessment:
+        e-principal:
+          entityId: "e-principal"
+          verdict: "identity:svc-backup@corp / asset:svc-backup@corp"
+        e-asset:
+          entityId: "e-asset"
+          verdict: "identity:web-07.corp / asset:web-07.corp"
+    expect:
+      AlertAssessment:
+        entities: "e-asset,e-principal"
+        entityCount: 2
+        summary: >-
+          e-asset: identity:web-07.corp / asset:web-07.corp; e-principal:
+          identity:svc-backup@corp / asset:svc-backup@corp
+  # The empty case, declared rather than left to the reader's imagination: an
+  # alert naming nothing recognizable spreads to zero entities, and its gather
+  # fires immediately with an empty collection rather than waiting for the
+  # first of zero things (2026-09-27-gather.md §5).
+  - given:
+      Assessment: {}
+    expect:
+      AlertAssessment:
+        entities: ""
+        entityCount: 0
+        summary: "no entities assessed"

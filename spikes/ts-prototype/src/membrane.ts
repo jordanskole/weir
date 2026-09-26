@@ -724,9 +724,68 @@ export async function membrane<In extends InputSpec, O extends OutputSpec>(
     }
   }
 
-  // Exhaustiveness guard: InputSpec is a closed union of single/allOf, so
-  // nodeDef.input is `never` here — a future sibling kind would fail loudly
-  // instead of silently falling through to this branch's behavior.
+  if (nodeDef.input.kind === "gather") {
+    // A gather receives one keyed collection, not a bag of differently-named
+    // edges — every entry is the same edge type, so every entry is asserted
+    // against that one edge. The runtime chose which instances belong here,
+    // by lineage; the membrane only checks what it was handed, exactly as in
+    // the `allOf` branch above.
+    const gatheredEdge = nodeDef.input.edge;
+    const [rawCollection, context] = args as unknown as [raw: Record<string, unknown>, context: InvocationContext];
+    const raw = rawCollection ?? {};
+
+    let envelope: Envelope;
+    try {
+      envelope = await buildEnvelope(nodeDef, context);
+    } catch (cause) {
+      return { result: { input: raw as InputPayload<In>, reason: reasonOf(cause) } } as MembraneResult<In, O>;
+    }
+
+    const collection: Record<string, unknown> = {};
+    const errors: string[] = [];
+    for (const [key, entry] of Object.entries(raw)) {
+      try {
+        const validated = assertPayload(gatheredEdge, entry) as Record<string, unknown>;
+        collection[key] = validated;
+        // The key must be the entry's own `index`, the same check
+        // `assertManyOutput` makes of a spread's collection and `assertPayload`
+        // makes of a `many` field. Without it, "keyed by the gathered edge's
+        // own index" would be a claim about a gather's payload that nothing
+        // anywhere enforces — and the runtime keys it correctly, so the only
+        // caller this can catch is a direct one (`invokeWithInput`, a test),
+        // which is exactly the caller with no other check on it.
+        if (gatheredEdge.index === undefined) {
+          errors.push(`["${key}"]: "${gatheredEdge.name}" declares no index — a collection needs a real key`);
+        } else if (String(validated[gatheredEdge.index]) !== key) {
+          errors.push(
+            `["${key}"]: keyed by "${key}" but its own "${gatheredEdge.index}" is "${String(validated[gatheredEdge.index])}"`,
+          );
+        }
+      } catch (cause) {
+        errors.push(`["${key}"]: ${reasonOf(cause)}`);
+      }
+    }
+    if (errors.length > 0) {
+      return {
+        result: { input: raw as InputPayload<In>, reason: errors.join("; ") },
+        envelope,
+      } as MembraneResult<In, O>;
+    }
+
+    try {
+      return {
+        result: await callFn(nodeDef, collection as InputPayload<In>, envelope),
+        envelope,
+      } as MembraneResult<In, O>;
+    } catch (cause) {
+      return { result: { input: raw as InputPayload<In>, reason: reasonOf(cause) }, envelope } as MembraneResult<In, O>;
+    }
+  }
+
+  // Exhaustiveness guard: InputSpec is a closed union, so nodeDef.input is
+  // `never` here — a future sibling kind fails loudly instead of silently
+  // falling through to this branch's behavior. It did exactly that when
+  // `gather` was added, which is why this comment can be specific.
   const unreachable: never = nodeDef.input;
   throw new Error(`Unrecognized InputSpec kind: ${JSON.stringify(unreachable)}`);
 }

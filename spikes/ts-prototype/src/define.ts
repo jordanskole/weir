@@ -219,6 +219,21 @@ export function many<E extends AnyEdgeDef>(edge: E): { kind: "many"; edge: E } {
 }
 
 /**
+ * The dual of `many`, in input position: every instance of one edge
+ * descended from a single spread, collected into one keyed payload
+ * (docs/superpowers/specs/2026-09-27-gather.md). `sequence` in the
+ * functional sense — `t (f a) → f (t a)`.
+ *
+ * Not shared between input and output positions the way `single` and `allOf`
+ * are. A `many` output *builds* a collection from one input; a `gather`
+ * input *consumes* N instances that already exist. The structural shapes are
+ * duals rather than identical, so they get two functions.
+ */
+export function gather<E extends AnyEdgeDef>(edge: E): { kind: "gather"; edge: E } {
+  return { kind: "gather", edge };
+}
+
+/**
  * The TS-level equivalent of `elaborate.ts`'s `parseAnyOfNodeFile` — builds
  * N ordinary single-input `NodeDef`s, one per listed edge, named
  * `<name>__<edgeName>` (same double-underscore convention, for the same
