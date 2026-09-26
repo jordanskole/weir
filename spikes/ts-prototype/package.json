@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "generate:schemas": "tsx scripts/generate-schemas.ts"
+    "generate:schemas": "tsx scripts/generate-schemas.ts",
+    "weir": "tsx bin/weir.ts"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
@@ -24,5 +25,8 @@
   },
   "dependencies": {
     "yaml": "^2.9.0"
+  },
+  "bin": {
+    "weir": "./bin/weir.ts"
   }
 }
