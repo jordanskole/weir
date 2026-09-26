@@ -13,7 +13,9 @@ questions — see `design-history.md` and `open-questions.md` for those.
 - effects are data, performed by the runtime and recorded;
 - no node reads anything its contract does not declare.
 
-Under these rules the smallest box is a single pure function, and any subgraph with one input edge and one output edge is again a box. Everything else in this document builds on that.
+**Nondeterminism sets the floor of the recursion.** A subgraph with one input edge and one output edge is a node, so a topology can be opened up into smaller topologies. It can't be opened indefinitely. A box can be cut apart only where every piece's output depends on nothing but its input edge. Nondeterminism that isn't recorded spreads to everything that depends on it, and that whole reach has to stay in one box.
+
+weir doesn't reduce nondeterminism. It records nondeterminism where it enters, at origin nodes and as effect results, which turns it into data on an edge. After that its reach is zero, and the recursion can go all the way down to primitives: the smallest box is a single pure function. Everything else in this document builds on that.
 
 ---
 
