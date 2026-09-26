@@ -5,6 +5,18 @@ questions — see `design-history.md` and `open-questions.md` for those.
 
 ---
 
+## 0. Principle
+
+**Decomposition is bounded by determinism.** A component can be treated as a black box, and so composed, replaced, tested, replayed or handed to an agent on its own, only to the extent that its outputs are determined by its inputs. Every source of nondeterminism a component touches must sit inside its boundary, so the granularity of any decomposition is set by how widely nondeterminism is spread. weir's rules exist to make that spread as small as possible:
+
+- nondeterminism enters only at origin nodes;
+- effects are data, performed by the runtime and recorded;
+- no node reads anything its contract does not declare.
+
+Under these rules the smallest box is a single pure function, and any subgraph with one input edge and one output edge is again a box. Everything else in this document builds on that.
+
+---
+
 ## 1. Primitives
 
 **Edge** — a named schema. Pure data. The complete description of what crosses a wire.

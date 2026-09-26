@@ -143,6 +143,14 @@ The consumer's input type *is* the proof the decision was made, so it is never r
 
 **Failure is an edge, not a mechanism.** Every node's real output signature includes `Failed<In>`, carrying the original payload so a retry node has something to re-emit. Retry is a node consuming `Failed<In>`. Dead-letter is a node with no output. Unhandled failure is a type error rather than a 3am surprise. Authors don't write the catch — an uncaught exception becomes `Failed<In>` automatically.
 
+## Why the boxes are small
+
+**The smallest box you can draw is as big as the nondeterminism it has to contain.**
+
+A black box is only a box if you can describe it by what goes in and what comes out. Anything that depends on something outside its inputs, like a global, a clock, or a database read halfway through, can't be cut away from that thing. The box has to grow until it encloses it. In a conventional stack, hidden state is everywhere, so the smallest honest boxes are huge and there are only a few of them. Nobody can reason about the inside, human or agent.
+
+weir moves nondeterminism to the edges. The outside world enters only at origins: a cron, a request, a queue. A node that needs the world returns a description of the effect, and the runtime performs it. A model call is an effect like any other: its result is recorded, and replay feeds the recording back. With nothing hidden holding the interior together, every pure function can be its own box, and decomposition continues all the way down. A subgraph is a box, a node is a box, and the recursion ends at a primitive.
+
 ## No ambient state, and therefore no `while`
 
 Nothing a node can read is invisible in its contract. No instance fields, no module globals, no context object threaded through, no accumulator carried between calls. Everything a node sees arrives as a declared edge, which is what makes a node testable without constructing a world around it, and replayable without reconstructing one.
