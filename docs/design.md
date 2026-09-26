@@ -17,6 +17,13 @@ questions — see `design-history.md` and `open-questions.md` for those.
 
 weir doesn't reduce nondeterminism. It records nondeterminism where it enters, at origin nodes and as effect results, which turns it into data on an edge. After that its reach is zero, and the recursion can go all the way down to primitives: the smallest box is a single pure function. Everything else in this document builds on that.
 
+**Lineage.** None of this is new; weir makes it mechanical.
+
+- Ashby, *An Introduction to Cybernetics* (1956): a system is a set of variables chosen so its behavior is determinate. When a real system seems not to be, a variable is missing, and the remedy is to add it. His Markovian machine extends this to probabilistic behavior: the transition probabilities, not the outcomes, are fixed by the state. weir's log is the "add the missing variable" step, done by the runtime.
+- State-space theory (Zadeh & Desoer, 1963; Kalman): state is the minimal information that, with future inputs, determines future outputs. Anything else that affects the future is hidden state, and hidden state is what makes boxes big.
+- State machine replication (Lamport; Schneider, 1990): replicas agree only if each is a deterministic state machine fed the same ordered log, so nondeterminism is resolved before it enters the log, never inside a replica. Record/replay debugging applies the same rule.
+- Simon, "The Architecture of Complexity" (1962): complex systems are nearly decomposable hierarchies. Principle 0 names what binds boxes together: shared, unrecorded nondeterminism.
+
 ---
 
 ## 1. Primitives
