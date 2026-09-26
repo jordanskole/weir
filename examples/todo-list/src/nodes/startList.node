@@ -1,0 +1,16 @@
+label: Start List
+description: Opens the list this task will live on
+input: Todo
+output: TodoList
+examples:
+  - given:
+      Todo:
+        id: "todo-1"
+        title: "Buy milk and eggs"
+        description: "Get 2% milk from the store"
+        is_complete: false
+    expect:
+      TodoList:
+        title: "Buy milk and eggs"
+        description: "Get 2% milk from the store"
+        tasks: {}

@@ -426,6 +426,165 @@ function mergeWiring(a: Wiring, b: Wiring): Wiring {
   };
 }
 
+/**
+ * What a node's declared output can actually put on the wire, with the
+ * multiplicity it arrives at. `oneOf`/`allOf` contribute each of their
+ * branches at single multiplicity — the runtime logs one instance per
+ * tagged branch (`runtime.ts`'s `logOutput`) — while `many` contributes
+ * its one edge flagged `many`, because a `many` result is a single token
+ * carrying a keyed collection, never N separate instances
+ * (docs/design-history.md, "`many` is a collection, keyed by index, not an
+ * array").
+ */
+function producedEdges(node: NodeDecl): { name: string; many: boolean }[] {
+  const output = node.output;
+  const declared =
+    output.kind === "single"
+      ? [{ name: output.edge.name, many: false }]
+      : output.kind === "many"
+        ? [{ name: output.edge.name, many: true }]
+        : output.edges.map((edge) => ({ name: edge.name, many: false }));
+
+  // Every node can also emit `Failed<In>`, which the runtime logs under a
+  // synthesized edge named for the node's *input* (`runtime.ts`'s
+  // `failedEdgeName`/`failedAllOfEdgeName`). It never appears in an
+  // `output:` declaration, but it is genuinely on the wire, and a topology
+  // is allowed to route it — `examples/person-birthday` wires an
+  // anyOf-desugared handler to exactly these edges. Omitting it here made
+  // the arc rule reject that legitimate wiring.
+  const failed =
+    node.input.kind === "single"
+      ? failedEdgeName(node.input.edge.name)
+      : failedAllOfEdgeName(node.input.edges);
+
+  return [...declared, { name: failed, many: false }];
+}
+
+/**
+ * The edge names a node declares needing. Always single multiplicity:
+ * `resolveInputSpec` builds only `single` and `allOf`, so no input is ever
+ * `many` — which is what makes the `many`-output rule below total rather
+ * than a special case.
+ */
+function consumedEdges(input: InputSpec): string[] {
+  return input.kind === "single" ? [input.edge.name] : input.edges.map((edge) => edge.name);
+}
+
+/**
+ * Elaboration-time wiring checks — the "will not compile" gate for a
+ * topology whose arcs don't typecheck against the contracts they connect.
+ * Two rules:
+ *
+ * **A, arc soundness.** Every arc must carry at least one edge the consumer
+ * declares, at single multiplicity. The motivating failure is a `many X`
+ * output wired into a `single X` input: the names match, so it looks right,
+ * but no input is ever `many`, so nothing on that arc can ever satisfy the
+ * consumer. Before this check that program elaborated clean, ran to
+ * `quiescence` with `failures: []`, and surfaced as a schema error two
+ * nodes downstream complaining that `X` was missing fields it never had —
+ * because the payload was a *collection of* `X` checked against the schema
+ * for one `X` (docs/open-questions.md, "There is no fan-out primitive").
+ * An arc matching no name at all is the plainer miswiring, reported
+ * separately so the message can say what each side actually declares.
+ *
+ * **B, node reachability.** The union of a node's parents must cover every
+ * edge it declares needing, so a node that can never become ready is
+ * rejected rather than silently never firing. Origins are exempt: their
+ * input arrives as an `originPayload`, not along an arc (`runtime.ts`'s
+ * `Run.originPayloads`), so they have no parents by construction. A node
+ * that is neither an origin nor fed by anything is *not* exempt — it can
+ * never fire, which is exactly what this rule is for.
+ *
+ * A self-loop satisfies B through itself, which is correct: a node wired
+ * back to its own input genuinely does supply it (`countToThree`'s shape,
+ * docs/superpowers/specs/2026-09-24-instance-retention-and-iteration.md).
+ */
+function assertWiringTypes(
+  nodes: Record<string, NodeDecl>,
+  wiring: Wiring,
+  anyOfAliases: Map<string, string[]>,
+): void {
+  // One authored topology mention of an `anyOf` node expands into N shadow
+  // nodes, one per declared input edge — so the elaborator writes N arcs
+  // where the author wrote one. Only the shadow whose edge actually shows up
+  // can ever fire; that is what `anyOf` means. Both rules below therefore
+  // ask their question of the *group*, not of each shadow separately:
+  // holding an author to a per-arc rule on arcs they never wrote would
+  // reject every legitimate `anyOf` wiring.
+  const siblingsOf = new Map<string, string[]>();
+  for (const shadows of anyOfAliases.values()) {
+    for (const shadow of shadows) siblingsOf.set(shadow, shadows);
+  }
+  const groupOf = (name: string): string[] => siblingsOf.get(name) ?? [name];
+
+  const parentsOf = new Map<string, string[]>();
+  for (const [parent, children] of Object.entries(wiring.feeds)) {
+    for (const child of children) {
+      if (!parentsOf.has(child)) parentsOf.set(child, []);
+      parentsOf.get(child)!.push(parent);
+    }
+  }
+
+  // Rule A, per arc.
+  for (const [parent, children] of Object.entries(wiring.feeds)) {
+    const produced = producedEdges(nodes[parent]!);
+    for (const child of children) {
+      const group = groupOf(child);
+      const satisfiable = group.some((sibling) => {
+        const consumed = new Set(consumedEdges(nodes[sibling]!.input));
+        return produced.some((p) => !p.many && consumed.has(p.name));
+      });
+      if (satisfiable) continue;
+
+      const consumed = new Set(group.flatMap((sibling) => consumedEdges(nodes[sibling]!.input)));
+      const collectionMatch = produced.find((p) => p.many && consumed.has(p.name));
+      if (collectionMatch) {
+        throw new Error(
+          `Wiring: "${child}" consumes "${collectionMatch.name}", but its parent "${parent}" produces "many ${collectionMatch.name}" — a many output is one token carrying a keyed collection, not one instance per element, so nothing on this arc can satisfy it.`,
+        );
+      }
+      throw new Error(
+        `Wiring: the arc "${parent}" -> "${child}" carries nothing "${child}" can use — "${parent}" produces ${produced.map((p) => `"${p.many ? `many ${p.name}` : p.name}"`).join(", ")}; "${child}" consumes ${[...consumed].map((name) => `"${name}"`).join(", ")}.`,
+      );
+    }
+  }
+
+  // Rule B, per node. Only nodes the topology actually mentions are in
+  // scope: "can this node become ready" is a question about a wiring, and a
+  // declared-but-unwired node isn't in one. Without this, every fixture that
+  // exercises `.node` parsing with no `.topology` file at all would be
+  // rejected for having no parents — and whether an unreferenced declaration
+  // is itself an error is a separate question this check doesn't answer.
+  const origins = new Set(wiring.origins);
+  const wired = new Set([...origins, ...Object.keys(wiring.feeds), ...Object.values(wiring.feeds).flat()]);
+  for (const name of Object.keys(nodes)) {
+    if (origins.has(name) || !wired.has(name)) continue;
+    const parents = parentsOf.get(name) ?? [];
+    const covered = new Set(
+      parents.flatMap((parent) => producedEdges(nodes[parent]!).filter((p) => !p.many).map((p) => p.name)),
+    );
+    const missing = consumedEdges(nodes[name]!.input).filter((edge) => !covered.has(edge));
+    if (missing.length === 0) continue;
+    // A shadow that can never become ready is fine as long as one of its
+    // siblings can — the group, not the shadow, is what the author wired.
+    const group = groupOf(name);
+    if (group.length > 1) {
+      const anySiblingReady = group.some((sibling) => {
+        const siblingCovered = new Set(
+          (parentsOf.get(sibling) ?? []).flatMap((parent) =>
+            producedEdges(nodes[parent]!).filter((p) => !p.many).map((p) => p.name),
+          ),
+        );
+        return consumedEdges(nodes[sibling]!.input).every((edge) => siblingCovered.has(edge));
+      });
+      if (anySiblingReady) continue;
+    }
+    throw new Error(
+      `Wiring: "${name}" declares needing ${missing.map((edge) => `"${edge}"`).join(", ")}, but nothing wired into it produces ${missing.length === 1 ? "it" : "them"} — its parents are ${parents.length === 0 ? "none" : parents.map((p) => `"${p}"`).join(", ")}.`,
+    );
+  }
+}
+
 export interface Elaborated {
   fields: Record<string, FieldDef>;
   edges: Record<string, AnyEdgeDef>;
@@ -548,6 +707,8 @@ export async function elaborate(root: string): Promise<Elaborated> {
     const text = await readFile(`${root}/${file}`, "utf8");
     wiring = mergeWiring(wiring, parseTopologyFile(text, resolveNodeName));
   }
+
+  assertWiringTypes(nodes, wiring, anyOfAliases);
 
   return { fields, edges, nodes, wiring };
 }

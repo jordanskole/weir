@@ -1168,7 +1168,7 @@ output: Ghost
   it("loads the real todo-list example — proving allOf: input resolves against real hand-authored files", async () => {
     const result = await elaborate(TODO_LIST_SRC);
 
-    expect(Object.keys(result.nodes).sort()).toEqual(["AddTodoToList", "CompleteTodo", "CreateTodo"]);
+    expect(Object.keys(result.nodes).sort()).toEqual(["AddTodoToList", "CompleteTodo", "CreateTodo", "startList"]);
     expect(result.nodes.AddTodoToList!.input).toEqual({
       kind: "allOf",
       edges: [result.edges.TodoList, result.edges.Todo],
@@ -1238,11 +1238,16 @@ Ghost:
     expect(result.wiring.feeds).toEqual({ birthday: ["expect_Person_age_42"] });
   });
 
-  it("loads the real todo-list example's topology — a fan-out from CreateTodo", async () => {
+  it("loads the real todo-list example's topology — an asymmetric diamond converging on AddTodoToList", async () => {
     const result = await elaborate(TODO_LIST_SRC);
 
     expect(result.wiring.origins).toEqual(["CreateTodo"]);
-    expect(result.wiring.feeds.CreateTodo?.sort()).toEqual(["AddTodoToList", "CompleteTodo"]);
+    expect(result.wiring.feeds.CreateTodo?.sort()).toEqual(["AddTodoToList", "CompleteTodo", "startList"]);
+    // Both arms of the join descend from CreateTodo's one Todo instance:
+    // Todo reaches AddTodoToList in one hop, TodoList in two via startList.
+    // That shared ancestor is what gives the allOf a lineage group to form
+    // on — see docs/design-history.md, "A join is a topology boundary".
+    expect(result.wiring.feeds.startList).toEqual(["AddTodoToList"]);
   });
 
   it("lets a .topology file reference an anyOf-desugared node's original name, expanding to all shadows", async () => {
@@ -1274,17 +1279,21 @@ fields:
     description: d
     nullable: false
 `,
+      // Emits Failed_Todo so one of HandleFailed's two shadows can actually
+      // consume what this produces. Before assertWiringTypes existed this
+      // fixture emitted Start, which neither shadow takes — the test only
+      // ever asserted name expansion, so an unwireable topology went unnoticed.
       "nodes/failing.node": `
 description: d
 input: Start
-output: Start
+output: Failed_Todo
 examples:
   - given:
       Start:
         value: "a"
     expect:
-      Start:
-        value: "a"
+      Failed_Todo:
+        input: "bad todo"
 `,
       "nodes/HandleFailed.node": `
 description: Handles whichever failure shows up first
@@ -1357,5 +1366,142 @@ failing:
     expect(result.wiring.feeds.mix).toEqual(["bake"]);
     expect(result.wiring.feeds.preheatOven).toEqual(["bake"]);
     expect(result.wiring.feeds.bake).toEqual(["cool"]);
+  });
+});
+
+/**
+ * Elaboration-time wiring checks (assertWiringTypes). Two rules, both
+ * running against the assembled Wiring before elaborate() returns:
+ *
+ *   A (arc soundness)      every arc must carry at least one edge the
+ *                          consumer declares, at single multiplicity.
+ *   B (node reachability)  the union of a node's parents must cover every
+ *                          edge it declares needing. Origins are exempt —
+ *                          their input arrives as an originPayload, not
+ *                          along an arc.
+ *
+ * The motivating case is A's `many` branch: no InputSpec is ever `many`
+ * (resolveInputSpec builds only `single`/`allOf`), so a `many X` output
+ * can never satisfy any input. Before this check, wiring one into a
+ * `single X` input elaborated clean, ran to quiescence, and failed as a
+ * schema error two nodes downstream — see examples/soc-triage's history
+ * in docs/open-questions.md ("There is no fan-out primitive").
+ */
+const ITEM_EDGE = `
+description: One item
+index: id
+fields:
+  id:
+    type: utf8
+    label: Id
+    description: d
+    nullable: false
+`;
+
+const PLAIN_EDGE = (name: string) => `
+description: ${name}
+fields:
+  ${name.toLowerCase()}Value:
+    type: utf8
+    label: V
+    description: d
+    nullable: false
+`;
+
+describe("elaborate — wiring type checks", () => {
+  it("rejects a many output wired into a single input, naming both nodes and the edge", async () => {
+    const root = await writeFixture({
+      "edges/Seed.edge": PLAIN_EDGE("Seed"),
+      "edges/Item.edge": ITEM_EDGE,
+      "edges/Report.edge": PLAIN_EDGE("Report"),
+      "nodes/extract.node": `label: E\ndescription: d\ninput: Seed\noutput:\n  many: Item\n`,
+      "nodes/use.node": `label: U\ndescription: d\ninput: Item\noutput: Report\n`,
+      "topology/main.topology": `extract:\n  then:\n    use: {}\n`,
+    });
+
+    await expect(elaborate(root)).rejects.toThrow(/use.*extract.*many Item/s);
+  });
+
+  it("rejects an arc whose parent produces nothing the child consumes", async () => {
+    const root = await writeFixture({
+      "edges/Seed.edge": PLAIN_EDGE("Seed"),
+      "edges/Other.edge": PLAIN_EDGE("Other"),
+      "edges/Report.edge": PLAIN_EDGE("Report"),
+      "nodes/a.node": `label: A\ndescription: d\ninput: Seed\noutput: Seed\n`,
+      "nodes/b.node": `label: B\ndescription: d\ninput: Other\noutput: Report\n`,
+      "topology/main.topology": `a:\n  then:\n    b: {}\n`,
+    });
+
+    await expect(elaborate(root)).rejects.toThrow(/carries nothing/i);
+  });
+
+  it("rejects a node whose parents cover only part of its allOf input", async () => {
+    const root = await writeFixture({
+      "edges/Seed.edge": PLAIN_EDGE("Seed"),
+      "edges/Left.edge": PLAIN_EDGE("Left"),
+      "edges/Right.edge": PLAIN_EDGE("Right"),
+      "edges/Report.edge": PLAIN_EDGE("Report"),
+      "nodes/split.node": `label: S\ndescription: d\ninput: Seed\noutput: Left\n`,
+      "nodes/join.node": `label: J\ndescription: d\ninput:\n  allOf:\n    - Left\n    - Right\noutput: Report\n`,
+      "topology/main.topology": `split:\n  then:\n    join: {}\n`,
+    });
+
+    await expect(elaborate(root)).rejects.toThrow(/join.*Right/s);
+  });
+
+  it("accepts a diamond where each arm supplies only half of the fan-in's allOf", async () => {
+    const root = await writeFixture({
+      "edges/Seed.edge": PLAIN_EDGE("Seed"),
+      "edges/Left.edge": PLAIN_EDGE("Left"),
+      "edges/Right.edge": PLAIN_EDGE("Right"),
+      "edges/Report.edge": PLAIN_EDGE("Report"),
+      "nodes/origin.node": `label: O\ndescription: d\ninput: Seed\noutput: Seed\n`,
+      "nodes/left.node": `label: L\ndescription: d\ninput: Seed\noutput: Left\n`,
+      "nodes/right.node": `label: R\ndescription: d\ninput: Seed\noutput: Right\n`,
+      "nodes/join.node": `label: J\ndescription: d\ninput:\n  allOf:\n    - Left\n    - Right\noutput: Report\n`,
+      "topology/main.topology": `origin:\n  then:\n    left:\n      then:\n        join: {}\n    right:\n      then:\n        join: {}\n`,
+    });
+
+    const result = await elaborate(root);
+    expect(result.wiring.feeds.left).toEqual(["join"]);
+    expect(result.wiring.feeds.right).toEqual(["join"]);
+  });
+
+  it("accepts a oneOf output feeding a child that consumes one of its branches", async () => {
+    const root = await writeFixture({
+      "edges/Seed.edge": PLAIN_EDGE("Seed"),
+      "edges/Pass.edge": PLAIN_EDGE("Pass"),
+      "edges/Fail.edge": PLAIN_EDGE("Fail"),
+      "edges/Report.edge": PLAIN_EDGE("Report"),
+      "nodes/check.node": `label: C\ndescription: d\ninput: Seed\noutput:\n  oneOf:\n    - Pass\n    - Fail\n`,
+      "nodes/onPass.node": `label: P\ndescription: d\ninput: Pass\noutput: Report\n`,
+      "topology/main.topology": `check:\n  then:\n    onPass: {}\n`,
+    });
+
+    const result = await elaborate(root);
+    expect(result.wiring.feeds.check).toEqual(["onPass"]);
+  });
+
+  it("exempts an origin node from the coverage rule — its input is an originPayload, not an arc", async () => {
+    const root = await writeFixture({
+      "edges/Seed.edge": PLAIN_EDGE("Seed"),
+      "edges/Report.edge": PLAIN_EDGE("Report"),
+      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Report\n`,
+      "topology/main.topology": `start: {}\n`,
+    });
+
+    const result = await elaborate(root);
+    expect(result.wiring.origins).toEqual(["start"]);
+  });
+
+  it("accepts a self-loop, where a node's own output covers its own input", async () => {
+    const root = await writeFixture({
+      "edges/Tick.edge": PLAIN_EDGE("Tick"),
+      "nodes/count.node": `label: C\ndescription: d\ninput: Tick\noutput: Tick\n`,
+      "topology/main.topology": `count:\n  then:\n    count: {}\n`,
+    });
+
+    const result = await elaborate(root);
+    expect(result.wiring.feeds.count).toEqual(["count"]);
   });
 });

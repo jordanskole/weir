@@ -1,4 +1,7 @@
 CreateTodo:
   then:
+    startList:
+      then:
+        AddTodoToList: {}
     AddTodoToList: {}
     CompleteTodo: {}

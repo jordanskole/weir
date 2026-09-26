@@ -654,7 +654,19 @@ describe("runNetlist", () => {
     }
   });
 
-  it("runs the real todo-list topology — CompleteTodo fires from CreateTodo's output; AddTodoToList never becomes ready", async () => {
+  /**
+   * Every node fires, which is the point: this test used to be named
+   * "AddTodoToList never becomes ready" and asserted `log.latest("TodoList")`
+   * was undefined — a dead node recorded as expected behaviour. Nothing
+   * produced `TodoList`, so the allOf could never be satisfied; the only
+   * test where it fired staged `TodoList` into the log by hand.
+   * `startList` now gives the join a real second arm, and both arms descend
+   * from CreateTodo's one `Todo` instance, so the lineage group forms.
+   * The arms are deliberately different lengths — `Todo` reaches the join in
+   * one hop, `TodoList` in two — so the join is exercised on ordering rather
+   * than on a symmetric coincidence.
+   */
+  it("runs the real todo-list topology — an asymmetric diamond, every node fires", async () => {
     const dir = await mkdtemp(join(tmpdir(), "weir-runtime-"));
     try {
       const raw = await elaborate(TODO_LIST_SRC);
@@ -662,7 +674,14 @@ describe("runNetlist", () => {
       for (const [name, fn] of [
         ["CreateTodo", `export default function CreateTodo(payload) { return payload; }`],
         ["CompleteTodo", `export default function CompleteTodo(payload) { return { ...payload, is_complete: true }; }`],
-        ["AddTodoToList", `export default function AddTodoToList(payload) { return payload.TodoList; }`],
+        [
+          "startList",
+          `export default function startList(todo) { return { title: todo.title, description: todo.description, tasks: {} }; }`,
+        ],
+        [
+          "AddTodoToList",
+          `export default function AddTodoToList(bag) { return { ...bag.TodoList, tasks: { [bag.Todo.id]: bag.Todo } }; }`,
+        ],
       ] as const) {
         const hash = (await hashNode(raw.nodes[name]!)).short;
         await mkdir(join(dir, name), { recursive: true });
@@ -675,8 +694,17 @@ describe("runNetlist", () => {
 
       const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { CreateTodo: todo } }, { log });
 
+      // CreateTodo, startList, CompleteTodo, AddTodoToList — all four.
+      expect(result.firings).toBe(4);
+      expect(result.stopped).toBe("quiescence");
+
+      // The join fired, and folded the Todo it was actually paired with.
+      expect(log.latest("TodoList", "thread-1")).toEqual({
+        title: todo.title,
+        description: todo.description,
+        tasks: { "todo-1": todo },
+      });
       expect(log.latest("Todo", "thread-1")).toEqual({ ...todo, is_complete: true });
-      expect(log.latest("TodoList", "thread-1")).toBeUndefined();
       expect(result.failures).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -691,6 +719,10 @@ describe("runNetlist", () => {
       for (const [name, fn] of [
         ["CreateTodo", `export default function CreateTodo(payload) { return payload; }`],
         ["CompleteTodo", `export default function CompleteTodo(payload) { return { ...payload, is_complete: true }; }`],
+        [
+          "startList",
+          `export default function startList(todo) { return { title: todo.title, description: todo.description, tasks: {} }; }`,
+        ],
         ["AddTodoToList", `export default function AddTodoToList(payload) { return payload.TodoList; }`],
       ] as const) {
         const hash = (await hashNode(raw.nodes[name]!)).short;
@@ -723,6 +755,10 @@ describe("runNetlist", () => {
       for (const [name, fn] of [
         ["CreateTodo", `export default function CreateTodo(payload) { return payload; }`],
         ["CompleteTodo", `export default function CompleteTodo(payload) { return { ...payload, is_complete: true }; }`],
+        [
+          "startList",
+          `export default function startList(todo) { return { title: todo.title, description: todo.description, tasks: {} }; }`,
+        ],
         ["AddTodoToList", `export default function AddTodoToList(payload) { return payload.TodoList; }`],
       ] as const) {
         const hash = (await hashNode(raw.nodes[name]!)).short;
