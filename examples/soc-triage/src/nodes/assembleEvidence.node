@@ -1,7 +1,0 @@
-label: Assemble Evidence
-description: Join both investigation branches for one entity — the fan-in
-input:
-  allOf:
-    - IdentityContext
-    - AssetContext
-output: EntityEvidence
