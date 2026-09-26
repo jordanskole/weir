@@ -172,6 +172,45 @@ export function joinRows(
   /** The node that produced an instance, or `undefined` for a staged one. */
   const producerOf = (id: string): string | undefined => log.instanceById(id)?.envelope?.node;
 
+  /**
+   * Which *invocation* produced an instance — shared by every edge one
+   * `allOf`-output firing emits, distinct between two firings of the same
+   * node. `undefined` for a staged instance, which has no envelope.
+   */
+  const firingOf = (id: string): string | undefined => log.instanceById(id)?.envelope?.id;
+
+  /**
+   * May this candidate group at `ancestorId`, given that an *external*
+   * ancestor is not a join point?
+   *
+   * An ancestor with no envelope was not produced by any invocation: it is
+   * the run root, or an instance a host staged into the log. The run root
+   * exists to make ancestry **total** — so a lineage walk terminates, and so
+   * a composite node handed the whole log can rely on it — and that is a
+   * different job from being somewhere to join. Left as an ordinary
+   * ancestor it would be a common ancestor of *everything* in the run, which
+   * is precisely the pairing free-for-all the `held` rule exists to prevent,
+   * reintroduced one level up and immune to `held`'s peer clause (two
+   * different origin *nodes* are not peers).
+   *
+   * The rule: at an external ancestor, only its **direct** children group.
+   * Two instances that both descend from the root through intermediate
+   * invocations share nothing but the fact that they happened in the same
+   * run, which is not a reason to pair them. Two instances the root produced
+   * directly — an origin's outputs, or several origins triggered by one
+   * event — genuinely do belong to that one trigger, which is the case
+   * `design.md` §5 blesses.
+   *
+   * An envelope-less *candidate* is unaffected: it is a wildcard with no
+   * lineage to contradict, and that behaviour predates this rule.
+   */
+  const externalAncestorAllows = (instance: LoggedInstance, ancestorId: string): boolean => {
+    if (log.instanceById(ancestorId)?.envelope !== undefined) return true;
+    if (instance.envelope === undefined) return true;
+    if (instance.id === ancestorId) return true;
+    return instance.envelope.causationIds.includes(ancestorId);
+  };
+
   const lineages = new Map<string, Set<string>>();
   const lineageOf = (instanceId: string): Set<string> => {
     let found = lineages.get(instanceId);
@@ -256,6 +295,17 @@ export function joinRows(
       for (const peerId of byAncestor.keys()) {
         if (peerId === nearerId || own.has(peerId)) continue;
         if (producerOf(peerId) !== node) continue;
+        // Same node is not enough: a peer must be a different *firing*. An
+        // `allOf`-output node emits several edges from one invocation, and
+        // every instance of that emission carries the same envelope `id`
+        // (`runtime.ts`'s `instanceEnvelope` spreads the invocation envelope
+        // onto each). Those are two halves of one emission, not two items
+        // mid-flight in opposite directions — treating them as peers holds
+        // each out on account of the other and the group never forms. Found
+        // by execution once the run root made their shared ancestry
+        // reachable: before it, they had no common ancestor to be held out
+        // of, so the bug was unreachable rather than absent.
+        if (firingOf(peerId) !== undefined && firingOf(peerId) === firingOf(nearerId)) continue;
         const atPeer = unclaimedAt(peerId);
         if (missing.some((name) => atPeer.get(name)!.length > 0)) return true;
       }
@@ -268,7 +318,9 @@ export function joinRows(
     let complete = true;
 
     for (const name of edgeNames) {
-      const merged = unclaimedAt(ancestorId).get(name)!.filter((i) => !held(i, ancestorId));
+      const merged = unclaimedAt(ancestorId)
+        .get(name)!
+        .filter((i) => externalAncestorAllows(i, ancestorId) && !held(i, ancestorId));
       if (merged.length === 0) {
         complete = false;
         break;

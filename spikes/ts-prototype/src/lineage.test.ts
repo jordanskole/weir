@@ -157,7 +157,12 @@ describe("ancestorsOf", () => {
     await runNetlist(chainProgram, { correlationId: "c1", originPayloads: { chainOrigin: { value: "a" } } }, { log, budget: 20 });
     const last = log.instances("Tripled", "c1")[0];
 
+    // The run root is the oldest ancestor of everything now: an origin
+    // node's output cites it, so a chain's lineage terminates there rather
+    // than at the origin's own output (the run root, spec
+    // 2026-09-25-system-nodes-run-root-and-noop.md).
     expect(ancestorsOf(log, last.id).map((i) => i.payload)).toEqual([
+      { correlationId: "c1", triggeredAt: expect.any(String) },
       { value: "a" },
       { value: "aa" },
     ]);
@@ -172,10 +177,11 @@ describe("ancestorsOf", () => {
 
     const ids = ancestorsOf(log, joined.id).map((i) => i.id);
     expect(new Set(ids).size).toBe(ids.length);
-    // Not just deduped but present: left, right, and the shared source —
-    // three, not fewer. A dedup so aggressive it dropped a branch entirely
-    // would still pass the Set-size check above without this.
-    expect(ids.length).toBe(3);
+    // Not just deduped but present: left, right, the shared source, and the
+    // run root the source itself descends from — four, not fewer. A dedup so
+    // aggressive it dropped a branch entirely would still pass the Set-size
+    // check above without this.
+    expect(ids.length).toBe(4);
   });
 
   it("terminates on a topology with a cycle, returning each ancestor once", async () => {
@@ -215,7 +221,8 @@ describe("selfAndAncestorIds", () => {
     const mid = log.instances("Doubled", "c1")[0];
     const first = log.instances("Value", "c1")[0];
 
-    expect(selfAndAncestorIds(log, last.id)).toEqual(new Set([last.id, mid.id, first.id]));
+    const root = log.instances("Run", "c1")[0];
+    expect(selfAndAncestorIds(log, last.id)).toEqual(new Set([last.id, mid.id, first.id, root.id]));
   });
 
   it("returns a diamond's shared ancestor once", async () => {
@@ -228,8 +235,9 @@ describe("selfAndAncestorIds", () => {
     const joined = log.instances("Joined", "c1")[0];
 
     const ids = selfAndAncestorIds(log, joined.id);
-    // 1 joined + left + right + source = 4, with source reached by two paths.
-    expect(ids.size).toBe(4);
+    // 1 joined + left + right + source + run root = 5, with source reached
+    // by two paths and the root by two more.
+    expect(ids.size).toBe(5);
   });
 
   it("returns just the instance for one with no envelope", () => {

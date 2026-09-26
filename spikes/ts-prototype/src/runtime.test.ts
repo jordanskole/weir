@@ -1385,18 +1385,19 @@ describe("runNetlist — iteration", () => {
     expect(new Set(out.map((i) => i.seq)).size).toBe(3);
   });
 
-  it("never fires an allOf node whose arms come from two independent origins — no shared lineage, no group", async () => {
-    // This test used to pin "still fires an allOf node at most once", which
-    // was the `firedAllOf` cap: joining was a later spec, so the cap was
-    // pinned to make its removal visible rather than silent. It is removed
-    // now, and the *reason* this fixture's join does not fire has changed
-    // with it. `a` and `b` are two separate origins, so `A` and `B` have no
-    // common ancestor — not even the run's own start, since a correlation
-    // has no single origin instance here. joinRows groups by nearest common
-    // ancestor and there is none, so no row exists to fire on: zero
-    // firings, not one. A lineage-blind latest-wins bag would still pair
-    // these two, which is exactly the pairing the join now declines to
-    // invent.
+  it("fires an allOf node whose arms come from two independent origins — the run root is their shared ancestor", async () => {
+    // A history worth keeping, because this fixture has now pinned three
+    // different behaviours. It began as "still fires an allOf node at most
+    // once" — the `firedAllOf` cap — pinned so its removal would be visible
+    // rather than silent. When joining landed, the cap went and the reason
+    // changed: `a` and `b` are two separate origins, so `A` and `B` had no
+    // common ancestor at all and joinRows could form no group, so the test
+    // asserted zero firings and an empty `Joined`.
+    //
+    // That was the multi-origin gap (docs/open-questions.md), and the run
+    // root closes it: every origin output now cites the one `Run` instance,
+    // so `A` and `B` do share an ancestor and the row exists. The join no
+    // longer declines a pairing it cannot justify — it can justify this one.
     const log = new InMemoryLog();
     const result = await runNetlist(
       allOfInCycleProgram,
@@ -1405,12 +1406,24 @@ describe("runNetlist — iteration", () => {
     );
 
     expect(result.stopped).toBe("quiescence");
-    expect(log.instances("Joined", "c1")).toEqual([]);
-    // Both arms really did produce their instance — the join declined a
-    // group it could see, rather than passing because nothing ran.
-    expect(result.firings).toBe(2);
-    expect(log.instances("A", "c1")).toHaveLength(1);
+    expect(log.instances("Joined", "c1")).toHaveLength(1);
+    // Two `A`s now: `a`'s original, plus the one `recycle` fed back once the
+    // join actually fired. The cycle only turns because the join does — under
+    // the old behaviour `recycle` never ran and this was 1.
+    expect(log.instances("A", "c1")).toHaveLength(2);
     expect(log.instances("B", "c1")).toHaveLength(1);
+    // The second turn finds no unconsumed `B`, so the cycle stops there
+    // rather than spinning: one join, not one per pulse.
+    expect(result.firings).toBe(4);
+
+    // The row really was grouped at the root, not paired by latest-wins:
+    // the join's causation names both arms, and both descend from the root.
+    const joined = log.instances("Joined", "c1")[0]!;
+    const rootId = log.instances("Run", "c1")[0]!.id;
+    expect(joined.envelope?.causationIds).toHaveLength(2);
+    for (const id of joined.envelope!.causationIds) {
+      expect(selfAndAncestorIds(log, id).has(rootId)).toBe(true);
+    }
   });
 
   it("fires an allOf node once inside a genuine cycle — the row consumed the only B", async () => {
@@ -1766,7 +1779,11 @@ describe("runNetlist — causation", () => {
     expect(outputs[0]?.envelope?.causationIds).toEqual([first]);
   });
 
-  it("records an empty causationIds for an origin node", async () => {
+  it("records the run root as an origin node's causation, not an empty list", async () => {
+    // This asserted `[]` until the run root landed: nothing produced an
+    // origin's output, so it descended from nothing, which is what made
+    // ancestry partial and left two origins with no ancestor to group on.
+    // The trigger is now a token and the origin cites it.
     const log = new InMemoryLog();
     const result = await runNetlist(
       chainProgram,
@@ -1774,9 +1791,15 @@ describe("runNetlist — causation", () => {
       { log, budget: 20 },
     );
 
-    // Assert the run actually fired, so `[]` cannot come from nothing happening.
+    // Assert the run actually fired, so the causation cannot come from
+    // nothing happening.
     expect(result.firings).toBeGreaterThan(0);
-    expect(log.instances("Value", "c1")[0]?.envelope?.causationIds).toEqual([]);
+    const rootId = log.instances("Run", "c1")[0]?.id;
+    expect(rootId).toBeDefined();
+    expect(log.instances("Value", "c1")[0]?.envelope?.causationIds).toEqual([rootId]);
+    // The root itself has no causation, and that is true of it rather than
+    // the gap it used to be everywhere else.
+    expect(log.instances("Run", "c1")[0]?.envelope).toBeUndefined();
   });
 
   it("records causation for a rejected attempt too", async () => {
@@ -2314,5 +2337,219 @@ describe("runNetlist — allOf joins by lineage", () => {
     const left = log.instances("Left", "c1")[0];
     const right = log.instances("Right", "c1")[0];
     expect(new Set(joined.envelope!.causationIds)).toEqual(new Set([left.id, right.id]));
+  });
+});
+
+/**
+ * The run root (docs/superpowers/specs/2026-09-25-system-nodes-run-root-and-noop.md).
+ *
+ * An origin node's output used to carry `causationIds: []` — nothing
+ * produced it, so it descended from nothing. That made ancestry partial:
+ * two instances emitted by one origin firing, and descendants of two
+ * different origin nodes, shared no ancestor *instance* at all, so no
+ * lineage group ever formed and the fan-in silently never fired. The run
+ * root is the external trigger represented as a token: one instance per
+ * run that every origin output cites, which makes ancestry total.
+ */
+describe("runNetlist — the run root", () => {
+  const Left = defineEdge({
+    name: "Left",
+    label: "Left",
+    description: "d",
+    fields: { value: defineField({ type: "utf8", label: "V", description: "d", nullable: false }) },
+  });
+  const Right = defineEdge({
+    name: "Right",
+    label: "Right",
+    description: "d",
+    fields: { value: defineField({ type: "utf8", label: "V", description: "d", nullable: false }) },
+  });
+  const Joined = defineEdge({
+    name: "Joined",
+    label: "Joined",
+    description: "d",
+    fields: { value: defineField({ type: "utf8", label: "V", description: "d", nullable: false }) },
+  });
+
+  it("appends exactly one Run instance per run, carrying the correlationId", async () => {
+    const doubled = defineNode({
+      name: "doubled",
+      input: single(Start),
+      output: single(Start),
+      fn: (s) => ({ value: s.value + s.value }),
+    });
+    const program = programWith({ doubled }, { origins: ["doubled"], feeds: {} });
+    const log = new InMemoryLog();
+
+    await runNetlist(program, { correlationId: "thread-1", originPayloads: { doubled: { value: "a" } } }, { log });
+
+    const roots = log.instances("Run", "thread-1");
+    expect(roots).toHaveLength(1);
+    expect((roots[0]!.payload as { correlationId: string }).correlationId).toBe("thread-1");
+  });
+
+  it("makes an origin node's output cite the root rather than nothing", async () => {
+    const doubled = defineNode({
+      name: "doubled",
+      input: single(Start),
+      output: single(Start),
+      fn: (s) => ({ value: s.value + s.value }),
+    });
+    const program = programWith({ doubled }, { origins: ["doubled"], feeds: {} });
+    const log = new InMemoryLog();
+
+    await runNetlist(program, { correlationId: "thread-1", originPayloads: { doubled: { value: "a" } } }, { log });
+
+    const rootId = log.instances("Run", "thread-1")[0]!.id;
+    const emitted = log.instances("Start", "thread-1")[0]!;
+    expect(emitted.envelope?.causationIds).toEqual([rootId]);
+  });
+
+  it("joins two edges emitted by one origin firing — the allOf-output shape that reached quiescence unfired", async () => {
+    // Exactly the shape that failed by execution while reshaping
+    // examples/todo-list: both emitted instances carried causationIds: [],
+    // so selfAndAncestors(Left) and selfAndAncestors(Right) were disjoint
+    // and `join` never became ready.
+    const split = defineNode({
+      name: "split",
+      input: single(Start),
+      output: allOf(Left, Right),
+      fn: (s) => [
+        { edge: "Left" as const, payload: { value: `L:${s.value}` } },
+        { edge: "Right" as const, payload: { value: `R:${s.value}` } },
+      ],
+    });
+    const join = defineNode({
+      name: "join",
+      input: allOf(Left, Right),
+      output: single(Joined),
+      fn: (bag) => ({ value: `${bag.Left.value}+${bag.Right.value}` }),
+    });
+    const program: Program = {
+      fields: {},
+      edges: { Start, Left, Right, Joined },
+      nodes: { split, join },
+      wiring: { origins: ["split"], feeds: { split: ["join"] } },
+    };
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      program,
+      { correlationId: "thread-1", originPayloads: { split: { value: "a" } } },
+      { log },
+    );
+
+    expect(result.firings).toBe(2);
+    expect(log.latest("Joined", "thread-1")).toEqual({ value: "L:a+R:a" });
+  });
+
+  it("refuses to group at the root when the candidates are not its direct children", async () => {
+    // The root makes ancestry total; it is not a place to join. Here the two
+    // arms descend from two *different* origin nodes and are each one hop
+    // further down, so their only common ancestor is the root — and they are
+    // not its direct children. Grouping there would pair two lineages whose
+    // only relationship is having happened in the same run, and `held`'s peer
+    // clause cannot stop it, because two different origin *nodes* are not
+    // peers. Contrast the test below, where both candidates *are* direct
+    // origin outputs and the group is legitimate.
+    const Left2 = defineEdge({
+      name: "Left2",
+      label: "Left2",
+      description: "d",
+      fields: { value: defineField({ type: "utf8", label: "V", description: "d", nullable: false }) },
+    });
+    const Right2 = defineEdge({
+      name: "Right2",
+      label: "Right2",
+      description: "d",
+      fields: { value: defineField({ type: "utf8", label: "V", description: "d", nullable: false }) },
+    });
+    const leftOrigin = defineNode({
+      name: "leftOrigin",
+      input: single(Start),
+      output: single(Left),
+      fn: (s) => ({ value: `L:${s.value}` }),
+    });
+    const rightOrigin = defineNode({
+      name: "rightOrigin",
+      input: single(Start),
+      output: single(Right),
+      fn: (s) => ({ value: `R:${s.value}` }),
+    });
+    const stepL = defineNode({ name: "stepL", input: single(Left), output: single(Left2), fn: (v) => v });
+    const stepR = defineNode({ name: "stepR", input: single(Right), output: single(Right2), fn: (v) => v });
+    const join = defineNode({
+      name: "join",
+      input: allOf(Left2, Right2),
+      output: single(Joined),
+      fn: (bag) => ({ value: `${bag.Left2.value}+${bag.Right2.value}` }),
+    });
+    const program: Program = {
+      fields: {},
+      edges: { Start, Left, Right, Left2, Right2, Joined },
+      nodes: { leftOrigin, rightOrigin, stepL, stepR, join },
+      wiring: {
+        origins: ["leftOrigin", "rightOrigin"],
+        feeds: { leftOrigin: ["stepL"], rightOrigin: ["stepR"], stepL: ["join"], stepR: ["join"] },
+      },
+    };
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      program,
+      {
+        correlationId: "thread-1",
+        originPayloads: { leftOrigin: { value: "a" }, rightOrigin: { value: "b" } },
+      },
+      { log },
+    );
+
+    expect(result.stopped).toBe("quiescence");
+    expect(log.instances("Joined", "thread-1")).toEqual([]);
+    // Both arms really did produce their candidate — the join declined a row
+    // it could see, rather than passing because nothing ran.
+    expect(result.firings).toBe(4);
+    expect(log.instances("Left2", "thread-1")).toHaveLength(1);
+    expect(log.instances("Right2", "thread-1")).toHaveLength(1);
+  });
+
+  it("joins descendants of two independent origin nodes — the multi-origin gap", async () => {
+    const leftOrigin = defineNode({
+      name: "leftOrigin",
+      input: single(Start),
+      output: single(Left),
+      fn: (s) => ({ value: `L:${s.value}` }),
+    });
+    const rightOrigin = defineNode({
+      name: "rightOrigin",
+      input: single(Start),
+      output: single(Right),
+      fn: (s) => ({ value: `R:${s.value}` }),
+    });
+    const join = defineNode({
+      name: "join",
+      input: allOf(Left, Right),
+      output: single(Joined),
+      fn: (bag) => ({ value: `${bag.Left.value}+${bag.Right.value}` }),
+    });
+    const program: Program = {
+      fields: {},
+      edges: { Start, Left, Right, Joined },
+      nodes: { leftOrigin, rightOrigin, join },
+      wiring: { origins: ["leftOrigin", "rightOrigin"], feeds: { leftOrigin: ["join"], rightOrigin: ["join"] } },
+    };
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      program,
+      {
+        correlationId: "thread-1",
+        originPayloads: { leftOrigin: { value: "a" }, rightOrigin: { value: "b" } },
+      },
+      { log },
+    );
+
+    expect(result.firings).toBe(3);
+    expect(log.latest("Joined", "thread-1")).toEqual({ value: "L:a+R:b" });
   });
 });

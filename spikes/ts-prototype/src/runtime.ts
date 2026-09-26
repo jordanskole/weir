@@ -252,8 +252,17 @@ export interface Host {
   maxPulses?: number;
 }
 
+/**
+ * The edge name the run root is logged under. Not a declared `.edge` today:
+ * nothing references it from a `.node` file, and synthesizing it for every
+ * program would add `Run` and `Failed_Run` to every edge table for no
+ * current consumer. Promote it to a synthesized edge when something needs
+ * to declare `input: Run`.
+ */
+export const RUN_ROOT_EDGE = "Run";
+
 /** Generous enough that no correct run reaches it; small enough to fail a spin fast. See `Host.maxPulses`. */
-export const DEFAULT_MAX_PULSES = 10_000;
+const DEFAULT_MAX_PULSES = 10_000;
 
 /**
  * Unconsumed instances of one edge that may fire one node, oldest first.
@@ -315,6 +324,22 @@ export function eligibleInstances(
 export async function runNetlist(program: Program, run: Run, host: Host): Promise<RunResult> {
   const { correlationId, originPayloads, identity } = run;
   const { log, trace, budget, maxPulses = DEFAULT_MAX_PULSES } = host;
+
+  // The run root: the external trigger represented as a token
+  // (docs/superpowers/specs/2026-09-25-system-nodes-run-root-and-noop.md).
+  // Appended before any node fires, so every origin output has something to
+  // descend from and ancestry is total rather than partial. Deliberately
+  // carries no envelope: an envelope records *an invocation*, and nothing
+  // invoked this — `causationIds: []` would be true of the root rather than
+  // the gap it used to be everywhere else. Deliberately does not carry the
+  // trigger payload either: origin payloads already reach their nodes
+  // through `originPayloads`, and copying them here would make the root's
+  // shape depend on the program.
+  const rootId = log.append(RUN_ROOT_EDGE, correlationId, {
+    correlationId,
+    triggeredAt: new Date().toISOString(),
+  });
+
   const failures: RunResult["failures"] = [];
   const consumed = new Map<string, Set<number>>();
   const originsFired = new Set<string>();
@@ -362,7 +387,10 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         payload = instance.payload;
       }
       input = payload;
-      const causationIds = instance === undefined ? [] : [instance.id];
+      // `instance === undefined` means an origin node, whose payload came
+      // from `originPayloads` rather than from the log. It cites the run
+      // root: the trigger is what produced it.
+      const causationIds = instance === undefined ? [rootId] : [instance.id];
       const invocation = await (membrane as AnySingleInvoke)(nodeDef, payload, {
         correlationId,
         identity,
