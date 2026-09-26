@@ -18,7 +18,7 @@ Resolution: schemas are data; edges (as wiring) are `(from_node, output_port, to
 
 ## Prior art: bankql already proves the edge half
 
-Partway through, it became clear that a sibling project — [bankql](../../bankql) — is already running the "edges" half of this design in production, just without the name. Verified against the actual source (`packages/schema/src/`):
+Partway through, it became clear that a sibling project — bankql, a private repo — is already running the "edges" half of this design in production, just without the name. Verified against the actual source (`packages/schema/src/`):
 
 - `defineField` / `defineDataset` (`define.ts`) are identity functions that exist purely to pin TypeScript inference on a rich `FieldDef` / `DatasetDef` shape (`types.ts`) — label, description, measure, format, unit, enumValues, a typed `relation` to another dataset, and a `sourceKey` mapping back to the raw source column. That `DatasetDef` is, functionally, an edge definition.
 - One `DatasetDef` already drives multiple downstream artifacts from a single source of truth (`index.ts`): DuckDB `CREATE TABLE` DDL (`duckdb.ts`), an LLM-facing description/system prompt (`llm.ts`), agent tool specs (`agent/queryDataTool.ts`), and the foreign-key graph via each field's `relation` (`relations.ts`). That's the "edges are the tables" claim from this design, already shipped rather than proposed.

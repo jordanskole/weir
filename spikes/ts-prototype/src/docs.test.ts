@@ -10,12 +10,20 @@
  * Two narrow things are, and both earned their place by catching a real
  * mistake rather than by being tidy:
  *
- * 1. **Every relative link resolves.** Writing the §10 paragraph about the
- *    implementation pin, I cited
+ * 1. **Every relative link resolves, and stays inside the repo.** Writing the
+ *    §10 paragraph about the implementation pin, I cited
  *    `superpowers/specs/2026-09-27-the-implementation-pin.md`, which does not
  *    exist — the pin was built alongside the determinism check without a spec
  *    of its own. A dead link in a doc whose whole job is pointing at evidence
  *    is worse than no link, because it reads as evidence.
+ *
+ *    The in-repo half was added after this file's own first CI run, which is
+ *    the more interesting story: it passed locally and failed on CI, because
+ *    `design-history.md` and `getting-started.md` linked `../../bankql` — a
+ *    sibling repo that exists on the author's machine and nowhere else. The
+ *    local pass was a false green bought by a checkout that happened to be
+ *    next door, so existence alone is not the check; a link a reader can
+ *    follow is, and only an in-repo target is one.
  * 2. **Every spec marked implemented is reachable from a doc a reader starts
  *    from.** A spec nobody links is a spec nobody finds, and the status line
  *    is exactly the signal that it is worth finding.
@@ -62,7 +70,15 @@ describe("docs — relative links resolve", () => {
     it(`${doc} links all point at something that exists`, async () => {
       const markdown = await readFile(join(REPO, doc), "utf8");
       const base = dirname(join(REPO, doc));
-      const broken = relativeLinks(markdown).filter((target) => !existsSync(resolve(base, target)));
+      const broken = relativeLinks(markdown).filter((target) => {
+        const full = resolve(base, target);
+        // Outside the repo is broken *even when it exists*: it resolves only
+        // on a machine that happens to have that directory next door. See
+        // this file's header — the check passed locally for exactly that
+        // reason before CI caught it.
+        if (!full.startsWith(REPO + "/")) return true;
+        return !existsSync(full);
+      });
       expect(broken).toEqual([]);
     });
   }
