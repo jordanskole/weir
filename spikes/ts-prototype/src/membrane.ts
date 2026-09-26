@@ -416,6 +416,17 @@ export interface InvocationContext {
   step?: number;
   /** See `Envelope.causationIds`. Defaults to `[]` — a caller with no notion of a consumed instance records nothing. */
   causationIds?: string[];
+  /**
+   * The node's *position* in the wiring, when that differs from its
+   * declared name. An inlined composite's inner nodes are keyed by position
+   * (`investigate/investigateIdentity`) while keeping their original `name`,
+   * because `name` is in the contract hash and is the implementation
+   * resolution path. Provenance wants the position: it is what distinguishes
+   * two instances of the same composite, and it is what the arc rule matches
+   * a producer against. Defaults to `nodeDef.name`, correct for every node
+   * that is not an inlined copy.
+   */
+  nodeName?: string;
 }
 
 /**
@@ -506,7 +517,7 @@ async function buildEnvelope(nodeDef: NodeDecl, context: InvocationContext): Pro
     timestamp: new Date().toISOString(),
     step: context.step ?? 0,
     identity: narrowIdentity(nodeDef.scope, context.identity ?? SYSTEM_IDENTITY),
-    node: nodeDef.name,
+    node: context.nodeName ?? nodeDef.name,
     contractHash: (await hashNode(nodeDef)).hash,
   };
 }

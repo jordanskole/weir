@@ -1,0 +1,11 @@
+input: Entity
+output:
+  allOf:
+    - IdentityContext
+    - AssetContext
+terminals:
+  - investigateIdentity
+  - investigateAsset
+wiring:
+  investigateIdentity: {}
+  investigateAsset: {}

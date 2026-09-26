@@ -16,27 +16,55 @@ extractEntities (Alert -> many Entity, origin)
         |
         |  one Entity instance per element
         v
-     Entity ---+-- investigateIdentity (-> IdentityContext) --+
-               |                                               v
-               |                              assembleEvidence (allOf [IdentityContext,
-               |                                               |        AssetContext] -> EntityEvidence)
-               +-- investigateAsset    (-> AssetContext) ------+
-                                                               v
-                                                           assess (EntityEvidence -> Assessment)
+   +----------------- investigate (composite) ------------------+
+   |  Entity --+-- investigateIdentity (-> IdentityContext) --+  |
+   |           |                                              |  |
+   |           +-- investigateAsset    (-> AssetContext) -----+  |
+   +-------------------------- exit: allOf ---------------------+
+                                |
+                                v
+                     assembleEvidence (allOf [IdentityContext,
+                                |             AssetContext] -> EntityEvidence)
+                                v
+                            assess (EntityEvidence -> Assessment)
 ```
 
 ```yaml
+# investigate.topology — a composite: the per-entity investigation
+input: Entity
+output:
+  allOf:
+    - IdentityContext
+    - AssetContext
+terminals:
+  - investigateIdentity
+  - investigateAsset
+wiring:
+  investigateIdentity: {}
+  investigateAsset: {}
+
+# main.topology — a chain. No node is named twice.
 extractEntities:
   then:
-    investigateIdentity:
+    investigate:
       then:
         assembleEvidence:
           then:
             assess: {}
-    investigateAsset:
-      then:
-        assembleEvidence: {}
 ```
+
+**The fan-out lives inside the composite; the root is a chain.** That is the point of a composite: a
+`.topology` file is geometrically a tree and cannot express reconvergence, so the join moves to a
+boundary. `investigate` fans out internally — two top-level keys, still a tree — and its *exit*
+contract is `allOf[IdentityContext, AssetContext]`. The root then consumes that as one step.
+
+Written flat, `assembleEvidence` would have to be named twice, once under each investigation, the way
+`examples/recipe` names `bake` twice. Composites are inlined at elaboration, so the flattened wiring
+is identical either way; what changes is that no authored file has to mention a node twice.
+
+It is also the decomposition you would draw on a whiteboard: "investigate an entity" is a unit with a
+contract, reusable and independently runnable, rather than two nodes that happen to sit next to each
+other.
 
 Nine firings for two entities: `extractEntities` once, then two investigations, one join and one
 assessment **per entity**.

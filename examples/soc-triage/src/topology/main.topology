@@ -1,10 +1,7 @@
 extractEntities:
   then:
-    investigateIdentity:
+    investigate:
       then:
         assembleEvidence:
           then:
             assess: {}
-    investigateAsset:
-      then:
-        assembleEvidence: {}

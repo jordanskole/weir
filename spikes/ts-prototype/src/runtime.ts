@@ -362,9 +362,19 @@ export function eligibleInstances(
   consumed: ReadonlySet<number>,
   nodeDef: NodeDef,
   correlationId: string,
+  /**
+   * The node's key in `program.nodes` and `wiring.feeds`, which is not always
+   * `nodeDef.name`. An inlined composite's nodes are keyed by position
+   * (`investigate/investigateIdentity`) while keeping their original `name`,
+   * because `name` is in the contract hash and is the implementation
+   * resolution path. The arc rule is about *position*, so it must use the
+   * key; passing `name` here silently made every composite's inner nodes
+   * ineligible, and the run reached quiescence having fired only the origin.
+   */
+  nodeName: string = nodeDef.name,
 ): LoggedInstance[] {
   if (nodeDef.input.kind !== "single") return [];
-  return eligibleForEdge(program, log, consumed, nodeDef.name, nodeDef.input.edge.name, correlationId);
+  return eligibleForEdge(program, log, consumed, nodeName, nodeDef.input.edge.name, correlationId);
 }
 
 export async function runNetlist(program: Program, run: Run, host: Host): Promise<RunResult> {
@@ -442,6 +452,7 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         identity,
         step: pulse,
         causationIds,
+        nodeName,
       });
       result = invocation.result;
       envelope = invocation.envelope;
@@ -469,6 +480,7 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         identity,
         step: pulse,
         causationIds,
+        nodeName,
       });
       result = invocation.result;
       envelope = invocation.envelope;
@@ -604,7 +616,7 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         }
         continue;
       }
-      for (const instance of eligibleInstances(program, log, consumedBy(nodeName), nodeDef, correlationId)) {
+      for (const instance of eligibleInstances(program, log, consumedBy(nodeName), nodeDef, correlationId, nodeName)) {
         candidates.push({ nodeName, instance });
       }
     }
