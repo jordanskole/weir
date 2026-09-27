@@ -32,6 +32,23 @@ export async function resolveImplementationAt<In extends InputSpec, O extends Ou
   implRoot: string,
   contractHash: string,
 ): Promise<NodeDef<In, O>> {
+  // An effect node's behaviour comes from a host-supplied handler, not from
+  // a drafted implementation, so there is no file to find and nothing for
+  // the acceptance gate to have accepted
+  // (docs/superpowers/specs/2026-09-27-effects-are-data.md §1). Its `fn`
+  // exists only to satisfy the type; the runtime never calls it, and calling
+  // it directly is a bug loud enough to say so.
+  if (node.effect !== undefined) {
+    return {
+      ...node,
+      fn: (() => {
+        throw new Error(
+          `"${node.name}" is an effect ("${node.effect}") — it is performed by the runtime's handler, never called as an ordinary Fn.`,
+        );
+      }) as NodeDef<In, O>["fn"],
+    };
+  }
+
   const short = contractHash.slice(0, 8);
   const path = `${implRoot}/${node.name}/${short}.ts`;
 

@@ -55,6 +55,15 @@ export async function replayInvocation(
   node: NodeDecl,
   implRoot: string,
 ): Promise<unknown> {
+  // An effect is where nondeterminism entered the run. Replaying it means
+  // feeding back what was recorded, never performing it again: a replay that
+  // re-fetches is not a replay
+  // (docs/superpowers/specs/2026-09-27-effects-are-data.md §3). The recorded
+  // result *is* the answer, so there is nothing to resolve and nothing to
+  // call — which is also why `verify` must not treat the comparison that
+  // follows as a check, since it can only ever agree with itself.
+  if (node.effect !== undefined) return entry.result;
+
   const current = (await hashNode(node)).hash;
   if (current !== entry.envelope.contractHash) {
     throw new Error(

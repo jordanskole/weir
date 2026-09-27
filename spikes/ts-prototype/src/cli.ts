@@ -244,12 +244,18 @@ async function verify(dir: string, flags: Map<string, string>): Promise<CliResul
 
   const report = await verifyRun(entries, elaborated.nodes, resolve(implRoot));
   const skipped = report.skipped.map((s) => `  ? ${s.node.padEnd(28)} ${s.reason}`);
+  // Never folded into the pass count: an effect's replay is its own record,
+  // so the comparison can only ever agree with itself.
+  const effects = report.declaredNondeterministic.map(
+    (d) => `  ~ ${d.node.padEnd(28)} effect "${d.effect}" — nondeterminism enters here by declaration`,
+  );
 
   if (report.mismatches.length === 0) {
     return {
       code: 0,
       out: [
         `✓ ${report.checked} invocation(s) replayed identically`,
+        ...(effects.length > 0 ? ["", `  ${effects.length} declared nondeterministic:`, ...effects] : []),
         ...(skipped.length > 0 ? ["", `  ${skipped.length} not checked:`, ...skipped] : []),
         "",
         // Said plainly rather than implied: this finds violations, it does
@@ -272,6 +278,7 @@ async function verify(dir: string, flags: Map<string, string>): Promise<CliResul
       `✗ ${report.mismatches.length} of ${report.checked} invocation(s) did not replay identically`,
       "",
       ...detail,
+      ...(effects.length > 0 ? ["", `  ${effects.length} declared nondeterministic:`, ...effects] : []),
       ...(skipped.length > 0 ? ["", `  ${skipped.length} not checked:`, ...skipped] : []),
       "",
       // The pin is contract-shaped, so a mismatch has two possible causes and

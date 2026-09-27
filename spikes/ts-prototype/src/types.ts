@@ -455,6 +455,22 @@ export interface NodeDef<In extends InputSpec = InputSpec, O extends OutputSpec 
   input: In;
   output: O;
   fn: Fn<In, O>;
+  /**
+   * Names a host-supplied effect handler instead of a drafted
+   * implementation (docs/superpowers/specs/2026-09-27-effects-are-data.md).
+   * An effect node is where nondeterminism legitimately enters a program:
+   * the runtime performs the effect, records the result as an ordinary edge
+   * instance, and feeds that record back on replay rather than performing
+   * again — which is what lets everything downstream of it stay pure.
+   *
+   * Everything else about such a node is unchanged. It is wired in a
+   * `.topology` like any node, its input is asserted at the membrane, its
+   * output is asserted against the declared edge, and lineage threads
+   * through it. What differs is only where its behaviour comes from — and
+   * that it is deliberately *not* checked by `weir verify`, since it is the
+   * one place a program is supposed to be nondeterministic.
+   */
+  effect?: string;
   examples?: Example<In, O>[];
   /**
    * Invariants checked against generated inputs (docs/design.md §6).

@@ -307,12 +307,13 @@ export function parseNodeFile(yamlText: string, name: string, resolveEdge: EdgeR
   if ("fn" in raw) {
     throw new Error(`.node files declare the contract only (docs/design.md §10) — "fn" belongs in the implementation tree, not here.`);
   }
-  const { label, description, input, output, examples, closure, properties } = raw as {
+  const { label, description, input, output, examples, closure, properties, effect } = raw as {
     label?: unknown;
     description?: unknown;
     input?: unknown;
     output?: unknown;
     examples?: unknown;
+    effect?: unknown;
     closure?: unknown;
     properties?: unknown;
   };
@@ -326,6 +327,7 @@ export function parseNodeFile(yamlText: string, name: string, resolveEdge: EdgeR
     ...(examples !== undefined && { examples: examples as NodeDecl["examples"] }),
     ...(closure !== undefined && { closure: closure as NodeDecl["closure"] }),
     ...(properties !== undefined && { properties: properties as NodeDecl["properties"] }),
+    ...(typeof effect === "string" && { effect }),
   };
 }
 

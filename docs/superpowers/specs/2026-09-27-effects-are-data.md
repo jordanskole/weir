@@ -1,6 +1,6 @@
 # Effects are data
 
-Status: draft.
+Status: implemented.
 
 ## Motivation
 
@@ -49,7 +49,11 @@ runNetlist(program, run, { log, trace, effects: { http: async (payload) => … }
 
 An effect node named in `effect:` resolves to `effects[name]`. Missing handler is a **hard failure at run start**, not at fire time: a program whose effects cannot be performed should not begin, and discovering it three pulses in leaves a half-written log. `elaborate` cannot check this — handlers are a runtime concern — so `runNetlist` checks the program's declared effects against the supplied map before pulse 1.
 
-**The handler's result is asserted against the declared output edge**, exactly as a drafted implementation's is. A handler is host code and no more trusted than `Fn`; an effect that returns the wrong shape must produce `Failed<In>`, not a malformed instance in the log.
+**The handler's result is asserted against the declared output edge.** Corrected during the build: this spec originally said *"exactly as a drafted implementation's is"*, which is false — the membrane asserts **inputs only**, and a drafted implementation's output is guaranteed by the *acceptance gate*, which ran its examples, generated cases and properties before it was allowed to persist.
+
+An effect handler never passes through that gate. Effect outputs are therefore the one class with no check anywhere, where a drafted `Fn` at least had one at acceptance time — so asserting at runtime is not an inconsistency, it is where the equivalent check has to live. Ordinary nodes are checked earlier; effects can only be checked later. The assertion is wrapped *inside* the membrane rather than around it, so a bad result becomes `Failed<In>` by the same path as any other throw.
+
+This moved `assertOutput`/`assertManyOutput` from `fuzz.ts` to `membrane.ts`: asserting a payload against an edge is the membrane's job, and `fuzz.ts` already imports `runtime.ts`, so leaving them there would have made the dependency circular.
 
 **Effect failure needs no new machinery.** A fetch that 404s is not an exception, it is an outcome: the handler returns a `oneOf[Response, HttpError]` and the topology routes both, which is §3's "failure is an edge" applied unchanged.
 

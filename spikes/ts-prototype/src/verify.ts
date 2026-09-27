@@ -39,6 +39,17 @@ export interface VerifyReport {
   checked: number;
   /** Entries whose node is not in the program — reported rather than counted as passing. */
   skipped: { node: string; invocationId: string; reason: string }[];
+  /**
+   * Effect nodes, which are neither checked nor skipped: they are where
+   * nondeterminism enters a program *by declaration*, so their determinism
+   * was never claimed and is not in question.
+   *
+   * A third category rather than a pass, because replay feeds an effect's
+   * recorded result straight back — so comparing it to the record is
+   * vacuous by construction, and counting it as a passing check would build
+   * this repo's most frequent bug into the feature itself.
+   */
+  declaredNondeterministic: { node: string; effect: string; invocationId: string }[];
   mismatches: Mismatch[];
 }
 
@@ -82,7 +93,7 @@ export async function verifyRun(
   nodes: Record<string, NodeDecl>,
   implRoot: string,
 ): Promise<VerifyReport> {
-  const report: VerifyReport = { checked: 0, skipped: [], mismatches: [] };
+  const report: VerifyReport = { checked: 0, skipped: [], declaredNondeterministic: [], mismatches: [] };
 
   for (const entry of entries) {
     const node = nodes[entry.envelope.node];
@@ -91,6 +102,15 @@ export async function verifyRun(
         node: entry.envelope.node,
         invocationId: entry.envelope.id,
         reason: "not declared in this program",
+      });
+      continue;
+    }
+
+    if (node.effect !== undefined) {
+      report.declaredNondeterministic.push({
+        node: entry.envelope.node,
+        effect: node.effect,
+        invocationId: entry.envelope.id,
       });
       continue;
     }

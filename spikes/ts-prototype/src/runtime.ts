@@ -68,7 +68,7 @@
  *   still one past the longest path feeding it.
  */
 
-import { membrane } from "./membrane.js";
+import { assertOutput, membrane } from "./membrane.js";
 import type { InstanceEnvelope, InvocationContext, Log, LoggedInstance } from "./membrane.js";
 import { joinRows } from "./lineage.js";
 import type { Program } from "./implementation.js";
@@ -271,6 +271,20 @@ export interface Run {
 export interface Host {
   log: Log;
   trace?: Trace;
+  /**
+   * Handlers for the program's declared effects, keyed by the name a
+   * `.node`'s `effect:` field gives
+   * (docs/superpowers/specs/2026-09-27-effects-are-data.md §2). An effect is
+   * where nondeterminism legitimately enters: the runtime performs it, the
+   * result is logged as an ordinary edge instance, and replay feeds that
+   * record back rather than performing again.
+   *
+   * Checked against the program before pulse 1, not at fire time. A program
+   * whose effects cannot be performed should not begin — discovering it
+   * three pulses in leaves a half-written log, which is worse than a refused
+   * start.
+   */
+  effects?: Record<string, (payload: unknown) => Promise<unknown> | unknown>;
   budget?: number;
   /**
    * Maximum *pulses* before the run stops, defaulting to
@@ -379,7 +393,19 @@ export function eligibleInstances(
 
 export async function runNetlist(program: Program, run: Run, host: Host): Promise<RunResult> {
   const { correlationId, originPayloads, identity } = run;
-  const { log, trace, budget, maxPulses = DEFAULT_MAX_PULSES } = host;
+  const { log, trace, budget, maxPulses = DEFAULT_MAX_PULSES, effects = {} } = host;
+
+  // Before anything is appended, including the run root: a program whose
+  // effects cannot be performed should not begin.
+  const unhandled = [
+    ...new Set(Object.values(program.nodes).flatMap((n) => (n.effect === undefined ? [] : [n.effect]))),
+  ].filter((name) => typeof effects[name] !== "function");
+  if (unhandled.length > 0) {
+    throw new Error(
+      `No handler for effect(s) ${unhandled.map((e) => `"${e}"`).join(", ")}. ` +
+        `Supply them as \`host.effects\` — an effect is performed by the runtime, not by a drafted implementation.`,
+    );
+  }
 
   // The run root: the external trigger represented as a token
   // (docs/superpowers/specs/2026-09-25-system-nodes-run-root-and-noop.md).
@@ -447,13 +473,36 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
       // from `originPayloads` rather than from the log. It cites the run
       // root: the trigger is what produced it.
       const causationIds = instance === undefined ? [rootId] : [instance.id];
-      const invocation = await (membrane as AnySingleInvoke)(nodeDef, payload, {
-        correlationId,
-        identity,
-        step: pulse,
-        causationIds,
-        nodeName,
-      });
+      const context = { correlationId, identity, step: pulse, causationIds, nodeName };
+      // An effect node's behaviour is the host's handler. It still goes
+      // through the membrane — the input is asserted, the output is asserted
+      // against the declared edge, a throw becomes `Failed<In>`, and an
+      // envelope is built — because a handler is host code and no more
+      // trusted than a drafted `Fn`. What differs is only where the function
+      // came from.
+      const invocation =
+        nodeDef.effect === undefined
+          ? await (membrane as AnySingleInvoke)(nodeDef, payload, context)
+          : await (membrane as AnySingleInvoke)(
+              {
+                ...nodeDef,
+                // The handler is wrapped so its result is asserted against
+                // the declared output edge before it can reach the log. A
+                // drafted implementation's output is guaranteed by the
+                // acceptance gate; an effect handler never passes through
+                // it, so this is the only place the equivalent check can
+                // live. A throw here becomes `Failed<In>` like any other,
+                // which is why the wrap goes inside the membrane rather than
+                // around it.
+                fn: async (input: unknown) => {
+                  const produced = await effects[nodeDef.effect!]!(input);
+                  assertOutput(nodeDef.output, produced);
+                  return produced;
+                },
+              } as NodeDef,
+              payload,
+              context,
+            );
       result = invocation.result;
       envelope = invocation.envelope;
     } else {
