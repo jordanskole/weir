@@ -193,3 +193,66 @@ describe("checkProperty", () => {
     expect((outputErr as PropertyPathError).message).toMatch(/bogus output path/);
   });
 });
+
+/**
+ * The false green shipped 2026-09-27 and caught by an outside reader, kept
+ * as a regression because the class of mistake matters more than the
+ * instance: a property that relates the output to only *one* input of a
+ * fan-in asserts far less than its prose claims.
+ *
+ * `assembleEvidence` declared "both halves came from the same entity" and
+ * compared `output.entityId` to `input.IdentityContext.entityId` alone. An
+ * implementation handed Alice's identity and Bob's asset could project
+ * Alice and pass — which is precisely the cross-entity pairing the property
+ * existed to rule out.
+ *
+ * Worth recording why the obvious repair is also wrong. Asserting input
+ * coherence directly (`IdentityContext.entityId == AssetContext.entityId`)
+ * fails nearly every *generated* case, since `generateInputCases` builds
+ * each edge of a bag independently — it is a precondition, not an
+ * invariant. And wrapping it in `implies` passes vacuously exactly when the
+ * inputs disagree, which is the same false green in a different hat.
+ *
+ * Conjunction against both inputs is what bites: a mismatched bag admits no
+ * valid output, so the only way to satisfy the contract is to reject the
+ * input as `Failed<In>` — and properties are never evaluated against a
+ * failure.
+ */
+describe("a fan-in property must relate the output to every input", () => {
+  const crossed = {
+    input: { IdentityContext: { entityId: "Alice" }, AssetContext: { entityId: "Bob" } },
+    output: { entityId: "Alice" },
+  };
+  const coherent = {
+    input: { IdentityContext: { entityId: "Alice" }, AssetContext: { entityId: "Alice" } },
+    output: { entityId: "Alice" },
+  };
+  const prop = (expr: PropertyExpr): PropertyDecl => ({ name: "n", description: "d", expr });
+
+  it("passes a cross-paired bag when it names only one input — the shipped bug", () => {
+    const oneSided = prop({ eq: [{ get: "output.entityId" }, { get: "input.IdentityContext.entityId" }] });
+    expect(checkProperty(oneSided, crossed)).toBe(true);
+  });
+
+  it("passes a cross-paired bag vacuously when written as an implication", () => {
+    const implied = prop({
+      implies: [
+        { eq: [{ get: "input.IdentityContext.entityId" }, { get: "input.AssetContext.entityId" }] },
+        { eq: [{ get: "output.entityId" }, { get: "input.IdentityContext.entityId" }] },
+      ],
+    });
+    // The antecedent is false precisely in the case that matters.
+    expect(checkProperty(implied, crossed)).toBe(true);
+  });
+
+  it("catches it when conjoined against both inputs, and still admits a coherent bag", () => {
+    const conjoined = prop({
+      and: [
+        { eq: [{ get: "output.entityId" }, { get: "input.IdentityContext.entityId" }] },
+        { eq: [{ get: "output.entityId" }, { get: "input.AssetContext.entityId" }] },
+      ],
+    });
+    expect(checkProperty(conjoined, crossed)).toBe(false);
+    expect(checkProperty(conjoined, coherent)).toBe(true);
+  });
+});

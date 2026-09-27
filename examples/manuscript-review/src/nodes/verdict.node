@@ -25,10 +25,17 @@ properties:
   # gate rather than in a run.
   - name: note names the revision its reports were about
     description: >-
-      A note is about one revision. If the lineage join ever paired reports
-      from different rounds this is what would catch it, at the acceptance
-      gate rather than in a run.
+      Against BOTH reports, deliberately. Comparing the output to only the
+      style report was a false green: an implementation handed reports from
+      different rounds could project one of them and pass, which is the
+      cross-revision pairing this example exists to rule out. Conjoined, a
+      mismatched bag admits no valid output, so the contract forces the
+      implementation to reject it.
     expr:
-      eq:
-        - get: output.revision_id
-        - get: input.StyleReport.revision_id
+      and:
+        - eq:
+            - get: output.revision_id
+            - get: input.StyleReport.revision_id
+        - eq:
+            - get: output.revision_id
+            - get: input.FactReport.revision_id

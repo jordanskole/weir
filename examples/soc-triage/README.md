@@ -116,8 +116,49 @@ materializing elements, every investigation's output would have descended from t
 the join would have had no way to tell the two entities apart. That is the reason spread appends
 rather than iterates.
 
+## What the domain nouns are and are not
+
+Worth saying plainly, because the names invite more credit than the example
+has earned. This is a lineage test wearing SOC vocabulary. There is no IdP,
+EDR, SIEM, threat-intel lookup, temporal context, confidence score or model
+reasoning; "evidence" is an entity id and a string, and the assessment
+concatenates two of them.
+
+More pointedly, **both investigations run on every entity**. Nothing routes on
+`kind`, so a principal gets an asset investigation and an asset gets an
+identity one. The examples quietly demonstrate only the sensible half of
+that — identity is shown with a principal, asset with an asset — while the
+topology runs both branches for both. What the example is actually proving
+is *N things × 2 independent branches → N correctly paired joins*, and the
+domain names are how that stays readable.
+
+That is a fair thing for a fixture to be. It stops being fair the moment the
+README implies otherwise, which is why this section exists. Making the
+investigations real — routing on `kind`, acquiring evidence through
+`effect:` nodes that can fail — is the obvious next pressure test and is not
+done here.
+
+*(Both this limitation and the property bug above were found by the outside
+reader who wrote the original sketch, reading the committed example.)*
+
 ## What it still cannot express
 
 A second alert in the same run. `extractEntities` is an origin, and origins fire once — one alert is
 one external event, so one run. Several alerts are several runs, and nothing joins across
 correlations by design.
+
+**And the dual of its own fan-out.** The example does *one alert → N entities → independent work per
+entity → rejoin each entity's branches*. It does not do *N entity assessments → one alert
+assessment*, which is the next thing a real triage workflow wants:
+
+```
+summarizeAlert:
+  input: many Assessment
+  output: AlertAssessment
+```
+
+That asks something `allOf` does not: `allOf`'s cardinality is statically known, while here the count
+comes from a runtime `many Entity`. There is no `Many_Assessment` token either — spread produces
+element instances and keeps the *original* collection, so regathering descendants would need a
+lineage-aware collect that does not exist. Whether `many` is a compositional type or only a one-way
+fan-out mechanism is genuinely open (docs/open-questions.md).

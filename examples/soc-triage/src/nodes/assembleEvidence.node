@@ -21,10 +21,19 @@ examples:
 properties:
   - name: evidence names the entity both branches were about
     description: >-
-      The fan-in this example exists to demonstrate is only meaningful if
-      both halves came from the same entity. Declared here so the acceptance
-      gate checks it, rather than leaving it to a runtime test.
+      Against BOTH inputs, deliberately. Comparing the output to only one of
+      them was a false green: an implementation handed IdentityContext for
+      Alice and AssetContext for Bob could project Alice and pass, which is
+      exactly the cross-entity pairing the property claims to prevent.
+      Conjoined, a mismatched bag admits no valid output at all, so the only
+      way to satisfy this contract is to reject the input as Failed<In> --
+      which turns the property from a claim an implementation can dodge into
+      a constraint forcing it to check its inputs cohere.
     expr:
-      eq:
-        - get: output.entityId
-        - get: input.IdentityContext.entityId
+      and:
+        - eq:
+            - get: output.entityId
+            - get: input.IdentityContext.entityId
+        - eq:
+            - get: output.entityId
+            - get: input.AssetContext.entityId
