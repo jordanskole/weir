@@ -107,10 +107,10 @@ describe("runCli", () => {
     const unknown = await runCli(["frobnicate"], "/nowhere");
     expect(unknown.code).toBe(1);
     expect(unknown.out).toContain(`unknown command "frobnicate"`);
-    // `replay` is deliberately absent — replayInvocation reads a Trace, and
-    // only the Log is durable — and the help says so rather than leaving
-    // someone to discover it.
-    expect(unknown.out).toContain('no "replay" yet');
+    // The help names Principle 0 and which command checks it, because that
+    // is the least obvious thing about the surface.
+    expect(unknown.out).toContain("weir verify");
+    expect(unknown.out).toContain("Principle 0");
   });
 });
 
@@ -176,5 +176,53 @@ describe("runCli — run", () => {
     const result = await runCli(["run", RECIPE_SRC], "/nowhere");
     expect(result.code).toBe(1);
     expect(result.out).toContain("--impl and --payload");
+  });
+});
+
+describe("runCli — verify", () => {
+  /** Runs a one-node program end to end, then returns what verify says about it. */
+  async function runThenVerify(fn: string): Promise<{ run: Awaited<ReturnType<typeof runCli>>; verify: Awaited<ReturnType<typeof runCli>> }> {
+    const workdir = await fixture({
+      "edges/Reading.edge": `description: R\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "nodes/observe.node": `label: O\ndescription: d\ninput: Reading\noutput: Reading\n`,
+      "topology/main.topology": `observe: {}\n`,
+    });
+    const { hashNode } = await import("./hash.js");
+    const { elaborate } = await import("./elaborate.js");
+    const hash = (await hashNode((await elaborate(workdir)).nodes.observe!)).short;
+    const implRoot = join(workdir, "impl");
+    await mkdir(join(implRoot, "observe"), { recursive: true });
+    await writeFile(join(implRoot, "observe", `${hash}.ts`), `${fn}\n`, "utf8");
+    const payload = join(workdir, "payload.json");
+    await writeFile(payload, JSON.stringify({ observe: { value: "x" } }), "utf8");
+
+    const common = [workdir, "--impl", implRoot, "--run", "r1", "--trace", join(workdir, "t.jsonl")];
+    const run = await runCli(["run", ...common, "--log", join(workdir, "l.jsonl"), "--payload", payload], workdir);
+    const verify = await runCli(["verify", ...common], workdir);
+    return { run, verify };
+  }
+
+  it("passes a deterministic node, and says a clean result is evidence rather than proof", async () => {
+    const { run, verify } = await runThenVerify(
+      `export default function observe(r) { return { value: r.value + "!" }; }`,
+    );
+
+    expect(run.code).toBe(0);
+    expect(verify.code).toBe(0);
+    expect(verify.out).toContain("1 invocation(s) replayed identically");
+    expect(verify.out).toContain("evidence, not proof");
+  });
+
+  it("fails a node that reads a clock, and does not accuse it of the wrong cause", async () => {
+    const { verify } = await runThenVerify(
+      `export default function observe(r) { return { value: r.value + process.hrtime.bigint().toString() }; }`,
+    );
+
+    expect(verify.code).toBe(1);
+    expect(verify.out).toContain("did not replay identically");
+    expect(verify.out).toContain("recorded");
+    expect(verify.out).toContain("replayed");
+    // A mismatch has two possible causes while the pin is contract-shaped.
+    expect(verify.out).toContain("the version pin pins the");
   });
 });

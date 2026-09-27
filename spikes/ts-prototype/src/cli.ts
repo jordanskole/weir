@@ -27,6 +27,9 @@ import { exportContract } from "./contract.js";
 import { elaborateWithImplementations } from "./implementation.js";
 import { runNetlist } from "./runtime.js";
 import { FileLog } from "./file-log.js";
+import { FileTrace } from "./file-trace.js";
+import { replayInvocation } from "./replay.js";
+import { verifyRun } from "./verify.js";
 
 export interface CliResult {
   code: number;
@@ -41,13 +44,18 @@ usage
   weir contract <node> [dir]    print one node's sealed contract, as an agent receives it
   weir run [dir] --impl <dir> --payload <file.json> [--log <file>] [--run <id>]
                                 elaborate, resolve implementations, and execute
+  weir replay [dir] --impl <dir> --run <id> [--trace <file>]
+                                re-run each recorded invocation against its pinned implementation
+  weir verify [dir] --impl <dir> --run <id> [--trace <file>]
+                                replay and compare — a mismatch means undeclared nondeterminism
 
   dir defaults to the current directory.
   --payload is a JSON object of origin node name -> that node's payload.
   --log defaults to ./weir.jsonl and is appended to, never truncated.
 
-There is deliberately no "replay" yet: replayInvocation reads a Trace
-entry, and only the Log is durable so far.`;
+  --trace defaults to ./weir-trace.jsonl, written by run and read by the
+  other two. Principle 0 (design.md §0) says decomposition is bounded by
+  determinism; verify is what checks it.`;
 
 /** Renders an elaboration failure without a stack trace — the message is the product. */
 function failure(error: unknown, dir: string): CliResult {
@@ -165,9 +173,11 @@ async function run(dir: string, flags: Map<string, string>): Promise<CliResult> 
   }
 
   const logPath = resolve(flags.get("log") ?? "weir.jsonl");
+  const tracePath = resolve(flags.get("trace") ?? "weir-trace.jsonl");
   const log = FileLog.open(logPath);
+  const trace = FileTrace.open(tracePath);
   const correlationId = flags.get("run") ?? crypto.randomUUID();
-  const result = await runNetlist(program, { correlationId, originPayloads }, { log });
+  const result = await runNetlist(program, { correlationId, originPayloads }, { log, trace });
 
   return {
     code: 0,
@@ -178,6 +188,97 @@ async function run(dir: string, flags: Map<string, string>): Promise<CliResult> 
       `  firings   ${result.firings}`,
       `  pulses    ${result.pulses}`,
       `  log       ${logPath}`,
+      `  trace     ${tracePath}`,
+    ].join("\n"),
+  };
+}
+
+/** Replays each recorded invocation against the implementation its contract hash pins. No verdict — that is `verify`. */
+async function replay(dir: string, flags: Map<string, string>): Promise<CliResult> {
+  const implRoot = flags.get("impl");
+  const runId = flags.get("run");
+  if (implRoot === undefined || runId === undefined) {
+    return { code: 1, out: `✗ replay needs --impl and --run.\n\n${USAGE}` };
+  }
+  let elaborated;
+  try {
+    elaborated = await elaborate(dir);
+  } catch (error) {
+    return failure(error, dir);
+  }
+  const entries = FileTrace.open(resolve(flags.get("trace") ?? "weir-trace.jsonl")).entries(runId);
+  if (entries.length === 0) return { code: 1, out: `✗ no recorded invocations for run "${runId}".` };
+
+  const lines: string[] = [];
+  for (const entry of entries) {
+    const node = elaborated.nodes[entry.envelope.node];
+    if (node === undefined) {
+      lines.push(`  ? ${entry.envelope.node.padEnd(28)} not declared in this program`);
+      continue;
+    }
+    try {
+      const result = await replayInvocation(entry, node, resolve(implRoot));
+      lines.push(`  · ${entry.envelope.node.padEnd(28)} ${JSON.stringify(result)}`);
+    } catch (error) {
+      lines.push(`  ✗ ${entry.envelope.node.padEnd(28)} ${(error as Error).message}`);
+    }
+  }
+  return { code: 0, out: [`replayed ${entries.length} invocation(s) of run ${runId}`, "", ...lines].join("\n") };
+}
+
+/** Replays and compares. A mismatch is evidence the node read something its contract does not declare. */
+async function verify(dir: string, flags: Map<string, string>): Promise<CliResult> {
+  const implRoot = flags.get("impl");
+  const runId = flags.get("run");
+  if (implRoot === undefined || runId === undefined) {
+    return { code: 1, out: `✗ verify needs --impl and --run.\n\n${USAGE}` };
+  }
+  let elaborated;
+  try {
+    elaborated = await elaborate(dir);
+  } catch (error) {
+    return failure(error, dir);
+  }
+  const entries = FileTrace.open(resolve(flags.get("trace") ?? "weir-trace.jsonl")).entries(runId);
+  if (entries.length === 0) return { code: 1, out: `✗ no recorded invocations for run "${runId}".` };
+
+  const report = await verifyRun(entries, elaborated.nodes, resolve(implRoot));
+  const skipped = report.skipped.map((s) => `  ? ${s.node.padEnd(28)} ${s.reason}`);
+
+  if (report.mismatches.length === 0) {
+    return {
+      code: 0,
+      out: [
+        `✓ ${report.checked} invocation(s) replayed identically`,
+        ...(skipped.length > 0 ? ["", `  ${skipped.length} not checked:`, ...skipped] : []),
+        "",
+        // Said plainly rather than implied: this finds violations, it does
+        // not certify their absence. A clock read at second granularity
+        // passes when the replay lands in the same second.
+        `  (a clean result is evidence, not proof — nondeterminism that agrees twice is invisible here)`,
+      ].join("\n"),
+    };
+  }
+
+  const detail = report.mismatches.flatMap((m) => [
+    `  ✗ ${m.node}  (invocation ${m.invocationId})`,
+    `      input     ${JSON.stringify(m.input)}`,
+    `      recorded  ${JSON.stringify(m.recorded)}`,
+    `      replayed  ${JSON.stringify(m.replayed)}`,
+  ]);
+  return {
+    code: 1,
+    out: [
+      `✗ ${report.mismatches.length} of ${report.checked} invocation(s) did not replay identically`,
+      "",
+      ...detail,
+      ...(skipped.length > 0 ? ["", `  ${skipped.length} not checked:`, ...skipped] : []),
+      "",
+      // The pin is contract-shaped, so a mismatch has two possible causes and
+      // the output must not accuse the node of the wrong one.
+      `  Either the node read something its contract does not declare, or the`,
+      `  implementation changed since the run — the version pin pins the`,
+      `  contract, not the implementation (docs/open-questions.md).`,
     ].join("\n"),
   };
 }
@@ -226,6 +327,10 @@ export async function runCli(argv: string[], cwd: string): Promise<CliResult> {
       return graph(rest[0] ?? cwd, json);
     case "run":
       return run(rest[0] ?? cwd, flags);
+    case "replay":
+      return replay(rest[0] ?? cwd, flags);
+    case "verify":
+      return verify(rest[0] ?? cwd, flags);
     case "contract": {
       if (rest[0] === undefined) return { code: 1, out: `✗ contract needs a node name.\n\n${USAGE}` };
       return contract(rest[0], rest[1] ?? cwd);
