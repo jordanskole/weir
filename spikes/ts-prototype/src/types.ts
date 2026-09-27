@@ -315,6 +315,26 @@ export type InputSpec =
   | { kind: "gather"; edge: AnyEdgeDef };
 
 /**
+ * The edge names an input declares needing, whatever multiplicity it needs them
+ * at. A `gather` needs N of one edge, but they arrive one instance at a time on
+ * one arc, so the *arc* question this answers has the same shape as a `single`
+ * input's.
+ *
+ * Lives here rather than in either consumer because both ask the identical
+ * question of the same closed union and neither owns it: `elaborate.ts`'s wiring
+ * rules ask "can anything wired into this node satisfy it", and `runtime.ts`'s
+ * residue check asks "is anything still waiting at it"
+ * (docs/superpowers/specs/2026-09-27-quiescence-is-not-success.md §2). Two copies
+ * would be two places for a fourth input kind to be forgotten — which is exactly
+ * what happened when `gather` was added and `InputSpec`'s consumers had to be
+ * enumerated by the typechecker one at a time.
+ */
+export function inputEdgeNames(input: InputSpec): string[] {
+  if (input.kind === "single" || input.kind === "gather") return [input.edge.name];
+  return input.edges.map((edge) => edge.name);
+}
+
+/**
  * The payload shape Fn receives for a given InputSpec: the edge's own
  * payload for `single`; a bag keyed by edge name for `allOf`, matching the
  * `given`/`expect` name-as-key tagging convention already decided for

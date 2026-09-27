@@ -1,6 +1,6 @@
 # Quiescence is not success
 
-Status: draft.
+Status: (a) implemented; (b) specified but not built — see §4.
 
 ## Motivation
 
@@ -87,12 +87,21 @@ it usable is what it excludes *by construction* rather than by special case:
 - **An incomplete `gather` group is residue.** Which is the motivating case.
 
 **The population is multi-input nodes, and the predicate is general on purpose.**
-A `single`-input node with an eligible unconsumed instance at quiescence should
-be impossible: the pulse loop would have offered it as a candidate and fired it.
-So if one ever appears, the pulse loop dropped something, and the check has
-found a **runtime bug** rather than a program bug. Writing the predicate over
-every input kind rather than narrowing it to `allOf`/`gather` costs nothing and
-buys that invariant.
+A `single`-input node with an eligible unconsumed instance **at quiescence**
+should be impossible: the pulse loop would have offered it as a candidate and
+fired it. So if one appears there, the pulse loop dropped something, and the
+check has found a **runtime bug** rather than a program bug. Writing the
+predicate over every input kind rather than narrowing it to `allOf`/`gather`
+costs nothing and buys that invariant.
+
+**Corrected during the build: that invariant holds only at quiescence.** A
+`budget`- or `maxPulses`-stopped run routinely leaves a `single`-input node
+holding input — it was simply cut off mid-flight — and the first version of this
+paragraph said "at quiescence" loosely enough to read as "always". The test for
+§7 reports exactly that (`lookOrSkip needs Item`), which is correct behaviour and
+would have looked like the runtime bug this paragraph describes. `stopped` is
+what separates them, which is the same reason the two are reported separately
+rather than collapsed into an error flag.
 
 The scan runs once, at quiescence, over the same `scanned` set a pulse already
 walks — one extra pulse's worth of work for the whole run.
@@ -193,10 +202,24 @@ since three of `gather`'s did not and saying so is the only thing that kept them
 honest.
 
 1. The motivating program — spread, a `oneOf` that skips one element, a gather —
-   reports residue naming `summarizeAlert` and `Looked`, with a count of 1.
-2. A run that completes normally reports **no** residue. The check must not fire
-   on the recipe, the todo list, `soc-triage`, or any other passing example — a
-   safeguard that cries wolf on every healthy run gets switched off.
+   reports residue naming the gather node and `Looked`, with a count of 1. *Built*
+   (`residue.test.ts`). Its break-proof is the one worth reading: with the scan
+   disabled, every other observable is **identical** to a healthy run —
+   `quiescence`, no output, no failure — and only the residue assertion reddens.
+   That is the whole bug, stated as a test.
+2. A run that completes normally reports **no** residue. *Built*, and it landed
+   somewhere better than specced. The twelve `expect(result.failures).toEqual([])`
+   assertions in `runtime.test.ts` were asserting an always-empty field; renaming
+   the field made all twelve **meaningful for the first time**, and none of them
+   reddened, so no existing example stalls.
+
+   Then the gap: the four richest example runs — escalation (iteration),
+   manuscript-review (a per-lineage join), and both soc-triage tests (spread and
+   gather) — asserted nothing about residue at all. A comment in `residue.test.ts`
+   claimed they did before they did; the fix was to add the assertions rather than
+   soften the comment. What guards it going forward is not another example run but
+   a check that **every root under `examples/` is asserted residue-free by some
+   test**, since the failure mode is a new example silently falling off the list.
 3. A terminal output is not residue. Assert specifically that `Cookies` — an
    unconsumed instance with no declared consumer — does not appear.
 4. An unrouted `oneOf` branch is not residue. Same assertion for `Skipped`,
@@ -207,13 +230,15 @@ honest.
    `✓ quiescence` and exits 0. Assert the exit code, not just the text — the
    whole point is that a script notices.
 7. A run stopped by `budget` or `maxPulses` reports residue too, and is not
-   confused with a stall. A bounded run has unconsumed input by construction, so
-   these must be distinguishable in the report rather than conflated.
+   confused with a stall. *Built*, and it is what produced §2's correction above.
+   Break-proof: computing residue only on the quiescence exit left it empty —
+   which is why all three exits now go through one `finish` helper, so a future
+   exit cannot reintroduce the omission by forgetting the scan.
 
 ## Explicitly out of scope
 
 - **(b), declared terminal edges on a root topology.** Specified above as far as
-  the two open decisions; not built here.
+  the two open decisions; not built. Tracked in `open-questions.md`.
 - **Making residue a `Failed` edge** (§3), which the log cannot honestly carry.
 - **Deciding *why* a node stalled.** The report says a node is waiting and on
   what; whether the cause is a miswired arc, a `oneOf` that skips, or a node that

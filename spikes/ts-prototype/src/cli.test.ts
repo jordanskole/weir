@@ -245,3 +245,142 @@ describe("runCli — verify", () => {
     expect(verify.out).toContain("unchanged since the run");
   });
 });
+
+/**
+ * Spec Testing #6 (2026-09-27-quiescence-is-not-success.md). The exit code is
+ * the assertion that matters — the whole point is that a script notices, and a
+ * run that stalls used to print `✓ quiescence` and exit 0.
+ */
+describe("runCli — run reports a stall", () => {
+  /**
+   * A spread whose element is routed to a branch nothing consumes, so the
+   * gather waits for two and only ever sees one. `Skipped` is not a failure —
+   * that is what makes this invisible to gather's own deadness rule.
+   */
+  async function stallingFixture(): Promise<{ workdir: string; implRoot: string; payload: string }> {
+    const indexed = (name: string, index: string) =>
+      `label: ${name}\ndescription: d\nindex: ${index}\nfields:\n  ${index}:\n    type: utf8\n    label: I\n    description: d\n    nullable: false\n`;
+    const workdir = await fixture({
+      "edges/Seed.edge": EDGE("Seed"),
+      "edges/Item.edge": indexed("Item", "id"),
+      "edges/Looked.edge": indexed("Looked", "itemId"),
+      "edges/Skipped.edge": indexed("Skipped", "itemId"),
+      "edges/Summary.edge": `label: Summary\ndescription: d\nfields:\n  n:\n    type: uint8\n    label: N\n    description: d\n    nullable: false\n    validations:\n      min: 0\n      max: 255\n`,
+      "nodes/explode.node":
+        `label: Explode\ndescription: d\ninput: Seed\noutput:\n  many: Item\n` +
+        `examples:\n  - given:\n      Seed:\n        v: "x"\n    expect:\n      Item:\n        a:\n          id: "a"\n`,
+      "nodes/lookOrSkip.node":
+        `label: Look\ndescription: d\ninput: Item\noutput:\n  oneOf:\n    - Looked\n    - Skipped\n` +
+        `examples:\n  - given:\n      Item:\n        id: "a"\n    expect:\n      Looked:\n        itemId: "a"\n`,
+      "nodes/summarize.node":
+        `label: Sum\ndescription: d\ninput:\n  gather: Looked\noutput: Summary\n` +
+        `examples:\n  - given:\n      Looked:\n        a:\n          itemId: "a"\n    expect:\n      Summary:\n        n: 1\n`,
+      "topology/main.topology": `explode:\n  then:\n    lookOrSkip:\n      then:\n        summarize: {}\n`,
+    });
+
+    const { hashNode } = await import("./hash.js");
+    const { elaborate } = await import("./elaborate.js");
+    const nodes = (await elaborate(workdir)).nodes;
+    const impls: Record<string, string> = {
+      explode: `export default function explode() { return { a: { id: "a" }, b: { id: "b" } }; }`,
+      lookOrSkip: `export default function lookOrSkip(i) {
+  return i.id === "a"
+    ? { edge: "Looked", payload: { itemId: i.id } }
+    : { edge: "Skipped", payload: { itemId: i.id } };
+}`,
+      summarize: `export default function summarize(c) { return { n: Object.keys(c).length }; }`,
+    };
+    const implRoot = join(workdir, "impl");
+    for (const [name, fn] of Object.entries(impls)) {
+      const hash = (await hashNode(nodes[name]!)).short;
+      await mkdir(join(implRoot, name), { recursive: true });
+      await writeFile(join(implRoot, name, `${hash}.ts`), `${fn}\n`, "utf8");
+    }
+    const payload = join(workdir, "payload.json");
+    await writeFile(payload, JSON.stringify({ explode: { v: "x" } }), "utf8");
+    return { workdir, implRoot, payload };
+  }
+
+  it("exits non-zero and names the waiting node, where it used to print a checkmark", async () => {
+    const { workdir, implRoot, payload } = await stallingFixture();
+
+    const result = await runCli(
+      [
+        "run",
+        workdir,
+        "--impl",
+        implRoot,
+        "--run",
+        "r1",
+        "--payload",
+        payload,
+        "--log",
+        join(workdir, "l.jsonl"),
+        "--trace",
+        join(workdir, "t.jsonl"),
+      ],
+      workdir,
+    );
+
+    // The assertion the spec is about: a script can tell.
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("stalled");
+    // Named specifically enough to act on without re-running.
+    expect(result.out).toContain("summarize needs Looked");
+    expect(result.out).toContain("1 unconsumed");
+    // And it must not also claim success.
+    expect(result.out).not.toContain("✓");
+  });
+
+  it("still exits zero, with no waiting line, for a run that completes", async () => {
+    // The guard against a check that fires on healthy runs — the failure mode
+    // that gets a safeguard switched off. `examples/recipe` runs clean.
+    const workdir = await fixture({ "placeholder.txt": "" });
+    const { hashNode } = await import("./hash.js");
+    const { elaborate } = await import("./elaborate.js");
+    const nodes = (await elaborate(RECIPE_SRC)).nodes;
+    const impls: Record<string, string> = {
+      mix: `export default function mix(r) { return { title: r.title, servings: r.servings }; }`,
+      preheatOven: `export default function preheatOven(r) { return { temperature: r.temperature, preheated: true }; }`,
+      bake: `export default function bake(b) { return { title: b.Dough.title, servings: b.Dough.servings, done: false }; }`,
+      cool: `export default function cool(c) { return { ...c, done: true }; }`,
+    };
+    const implRoot = join(workdir, "impl");
+    for (const [name, fn] of Object.entries(impls)) {
+      const hash = (await hashNode(nodes[name]!)).short;
+      await mkdir(join(implRoot, name), { recursive: true });
+      await writeFile(join(implRoot, name, `${hash}.ts`), `${fn}\n`, "utf8");
+    }
+    const payload = join(workdir, "payload.json");
+    await writeFile(
+      payload,
+      JSON.stringify({
+        mix: { title: "Chocolate Chip Cookies", servings: 24, temperature: 375, ingredients: {} },
+        preheatOven: { title: "Chocolate Chip Cookies", servings: 24, temperature: 375, ingredients: {} },
+      }),
+      "utf8",
+    );
+
+    const result = await runCli(
+      [
+        "run",
+        RECIPE_SRC,
+        "--impl",
+        implRoot,
+        "--run",
+        "r1",
+        "--payload",
+        payload,
+        "--log",
+        join(workdir, "l.jsonl"),
+        "--trace",
+        join(workdir, "t.jsonl"),
+      ],
+      workdir,
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("✓ quiescence");
+    expect(result.out).not.toContain("waiting");
+  });
+});

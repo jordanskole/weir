@@ -66,7 +66,7 @@ describe("runNetlist", () => {
 
     const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { doubled: { value: "a" } } }, { log });
 
-    expect(result.failures).toEqual([]);
+    expect(result.residue).toEqual([]);
     expect(log.latest("Start", "thread-1")).toEqual({ value: "aa" });
   });
 
@@ -434,7 +434,7 @@ describe("runNetlist", () => {
 
     const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { failing: { value: "a" } } }, { log });
 
-    expect(result.failures).toEqual([]);
+    expect(result.residue).toEqual([]);
     expect(log.latest("Failed_Start", "thread-1")).toEqual({ input: { value: "a" }, reason: "kaboom" });
     expect(log.latest("Start", "thread-1")).toBeUndefined();
     // Failed_Start is synthesized by the elaborator, not declared in this
@@ -476,7 +476,7 @@ describe("runNetlist", () => {
 
     const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { failing: { value: "a" } } }, { log });
 
-    expect(result.failures).toEqual([]);
+    expect(result.residue).toEqual([]);
     expect(log.latest("Failed_Start", "thread-1")).toEqual({ input: { value: "a" }, reason: "kaboom" });
     expect(log.latest("Start", "thread-1")).toEqual({ value: "a" });
     // Failed_Start *is* declared in this program's `edges` (FailedStart,
@@ -520,7 +520,7 @@ describe("runNetlist", () => {
 
     const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: {} }, { log });
 
-    expect(result.failures).toEqual([]);
+    expect(result.residue).toEqual([]);
     expect(log.latest("Failed_A_B", "thread-1")).toEqual({
       A: { value: "a" },
       B: { value: "b" },
@@ -549,7 +549,7 @@ describe("runNetlist", () => {
 
     expect(log.latest("Pass", "thread-1")).toEqual({});
     expect(log.latest("Fail", "thread-1")).toBeUndefined();
-    expect(result.failures).toEqual([]);
+    expect(result.residue).toEqual([]);
   });
 
   it("routes an allOf output — logs every tagged branch", async () => {
@@ -586,7 +586,7 @@ describe("runNetlist", () => {
 
     expect(log.latest("InvoiceRequested", "thread-1")).toEqual({});
     expect(log.latest("InventoryReserved", "thread-1")).toEqual({});
-    expect(result.failures).toEqual([]);
+    expect(result.residue).toEqual([]);
 
     // Same invocation (one call to placeOrder), two emitted instances: the
     // envelope.id ties them back to that one invocation, but each carries
@@ -641,7 +641,7 @@ describe("runNetlist", () => {
     // each entry is now a real instance under the declared edge name.
     expect(log.latest("Many_Sibling", "thread-1")).toEqual({ "8": { age: 8 }, "12": { age: 12 } });
     expect(log.instances("Sibling", "thread-1").map((i) => i.payload)).toEqual([{ age: 8 }, { age: 12 }]);
-    expect(result.failures).toEqual([]);
+    expect(result.residue).toEqual([]);
   });
 
   it("runs the real person-birthday topology end-to-end", async () => {
@@ -675,7 +675,7 @@ describe("runNetlist", () => {
       expect(log.latest("Person", "thread-1")).toEqual({ age: 42, nickname: null });
       expect(log.latest("Pass", "thread-1")).toEqual({});
       expect(log.latest("Fail", "thread-1")).toBeUndefined();
-      expect(result.failures).toEqual([]);
+      expect(result.residue).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -732,7 +732,7 @@ describe("runNetlist", () => {
         tasks: { "todo-1": todo },
       });
       expect(log.latest("Todo", "thread-1")).toEqual({ ...todo, is_complete: true });
-      expect(result.failures).toEqual([]);
+      expect(result.residue).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -763,7 +763,7 @@ describe("runNetlist", () => {
 
       const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { CreateTodo: attempt } }, { log });
 
-      expect(result.failures).toEqual([]);
+      expect(result.residue).toEqual([]);
       expect(log.latest("Failed_NewTodo", "thread-1")).toEqual({
         input: attempt,
         reason: expect.stringMatching(/is_complete is pinned to false, got boolean/),
@@ -814,7 +814,7 @@ describe("runNetlist", () => {
         { log },
       );
 
-      expect(result.failures).toEqual([]);
+      expect(result.residue).toEqual([]);
       expect(log.latest("Failed_Todo_TodoList", "thread-1")).toEqual({
         TodoList: validTodoList,
         Todo: malformedTodo,
@@ -883,7 +883,7 @@ describe("runNetlist", () => {
         servings: recipe.servings,
         done: true,
       });
-      expect(result.failures).toEqual([]);
+      expect(result.residue).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -2638,6 +2638,9 @@ describe("the example topologies for iteration and lineage", () => {
     // leave a Resolution in the log if the base case were reached early.
     expect(result.firings).toBe(4);
     expect(result.stopped).toBe("quiescence");
+    // Nothing left waiting: a cycle that terminates on its base case consumes
+    // everything it produced (2026-09-27-quiescence-is-not-success.md).
+    expect(result.residue).toEqual([]);
     expect(log.instances("Ticket", "t").map((i) => (i.payload as { tier: number }).tier)).toEqual([1, 2, 3]);
     expect(log.latest("Resolution", "t")).toEqual({ id: "t-1", resolved_by_tier: 3 });
   });
@@ -2677,6 +2680,10 @@ describe("the example topologies for iteration and lineage", () => {
     );
 
     expect(result.stopped).toBe("quiescence");
+    // Nothing left waiting — the assertion that distinguishes this from the
+    // silent stall the same shape produces when an element is skipped
+    // (2026-09-27-quiescence-is-not-success.md, and `residue.test.ts`).
+    expect(result.residue).toEqual([]);
     // extractEntities once, then two investigations, one join and one
     // assessment per entity, then one gather over both: 1 + 4 + 4 + 1 = 10.
     expect(result.firings).toBe(10);
@@ -2732,7 +2739,7 @@ describe("the example topologies for iteration and lineage", () => {
     });
     const log = new InMemoryLog();
 
-    await runNetlist(
+    const result = await runNetlist(
       program,
       {
         correlationId: "t",
@@ -2740,6 +2747,11 @@ describe("the example topologies for iteration and lineage", () => {
       },
       { log, budget: 50 },
     );
+
+    // The barrier completed and consumed its whole group, so nothing is left
+    // waiting on `Assessment`. This is the assertion that would have caught the
+    // skipped-element stall had the example had one.
+    expect(result.residue).toEqual([]);
 
     // Exactly one, naming both entities. Two would mean the barrier fired per
     // element; one naming a single entity would mean it fired early.
@@ -2783,6 +2795,9 @@ describe("the example topologies for iteration and lineage", () => {
     );
 
     expect(result.stopped).toBe("quiescence");
+    // No ragged leftover: every round's two reports paired with each other,
+    // which is what a per-lineage join is for.
+    expect(result.residue).toEqual([]);
 
     // One note per revision — three revisions, three notes. Once per *run*
     // would give one; a cartesian pairing would give nine.

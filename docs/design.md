@@ -289,6 +289,22 @@ by construction, so `verify` reports effect nodes as a third category — *nonde
 enters here by declaration* — rather than counting them as passing checks
 ([spec](superpowers/specs/2026-09-27-effects-are-data.md)).
 
+**Quiescence is not success.** The loop ends when a pulse fires nothing, which
+is not the same as nothing being left to do — and the difference is a whole class
+of silent bug. A run therefore reports its **residue**: every node still holding
+eligible unconsumed input on a declared arc when it stopped. At `quiescence` that
+is a **stall**, and something is waiting that nothing will ever deliver; after
+`budget` it is ordinary, because a bounded run stops mid-flight. Terminal outputs
+and unrouted `oneOf` branches are not residue — nothing declares them as input,
+so no node is waiting on them.
+
+The runtime *reports* rather than *errors*, because bounding a run is the host's
+job and the host is what knows whether a stall matters; `weir run` is such a host
+and exits non-zero. It is deliberately **not** a `Failed<In>` edge: an envelope
+records that a node ran, at quiescence none did, and minting one to report the
+problem would put a false statement in the source of truth
+([spec](superpowers/specs/2026-09-27-quiescence-is-not-success.md)).
+
 **The log of edge instances is the source of truth.** Node state is a fold over prior
 edges keyed by correlation_id. Tables are materialized views over the log; node
 implementations are build output. Both are regenerable — the only durable artifacts are

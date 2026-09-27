@@ -87,7 +87,7 @@ import { gatherGroups, joinRows } from "./lineage.js";
 import type { GatherGroup } from "./lineage.js";
 import type { Program } from "./implementation.js";
 import type { AnyEdgeDef, Envelope, Failed, InputSpec, NodeDef, OutputSpec, PayloadOf } from "./types.js";
-import { Identity, failedEdgeName, failedAllOfEdgeName, failedGatherEdgeName, manyEdgeName } from "./types.js";
+import { Identity, failedEdgeName, failedAllOfEdgeName, failedGatherEdgeName, inputEdgeNames, manyEdgeName } from "./types.js";
 import { hashEdge } from "./hash.js";
 import type { Trace } from "./trace.js";
 
@@ -142,9 +142,43 @@ interface Candidate {
   group?: GatherGroup;
 }
 
+/**
+ * A node still waiting when the run stopped
+ * (docs/superpowers/specs/2026-09-27-quiescence-is-not-success.md).
+ *
+ * `stopped: "quiescence"` with residue is a **stall**: nothing fired, and
+ * something is waiting that nothing will ever deliver. `stopped: "budget"` with
+ * residue is ordinary — a bounded run has unconsumed input by construction —
+ * which is why the two are reported separately rather than collapsed into one
+ * error flag.
+ */
+export interface Residue {
+  /** The waiting node, keyed as `program.nodes` keys it — an inlined composite's inner node by *position*, so the name matches the wiring and the trace. */
+  node: string;
+  /** Which declared input edge the instances are waiting on. */
+  edge: string;
+  /**
+   * How many unconsumed instances are eligible for it. A count, not the
+   * instances: the log already holds those, and a `RunResult` that embedded
+   * payloads would be a second copy of the thing that is supposed to be the
+   * source of truth.
+   */
+  waiting: number;
+}
+
 export interface RunResult {
-  /** Currently always empty — the only InputSpec kind whose failures ever landed here (the removed `any` kind) no longer exists. Retained rather than removed, since deleting it would be a separate public-API change. */
-  failures: { node: string; failed: Failed<InputSpec> }[];
+  /**
+   * Nodes left holding eligible unconsumed input when the run stopped. Empty is
+   * the healthy answer for a run that reached quiescence.
+   *
+   * Replaces a `failures` field that was always empty — the only InputSpec kind
+   * whose failures landed there was removed long ago, and its comment said
+   * deleting it would be "a separate public-API change". This is that change,
+   * and the reason to take it now is that shipping a field named `failures`
+   * beside one that reports the failure a run actually had would be worse than
+   * the churn.
+   */
+  residue: Residue[];
   /** How many times any node's Fn was invoked this run. */
   firings: number;
   /** How many pulses ran. */
@@ -442,7 +476,6 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
     triggeredAt: new Date().toISOString(),
   });
 
-  const failures: RunResult["failures"] = [];
   const consumed = new Map<string, Set<number>>();
   const originsFired = new Set<string>();
   const origins = new Set(program.wiring.origins);
@@ -734,6 +767,52 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
    */
   const failedEdgeNames = Object.keys(program.edges).filter((name) => name.startsWith(failedEdgeName("")));
 
+  /**
+   * Which nodes are still waiting, right now
+   * (docs/superpowers/specs/2026-09-27-quiescence-is-not-success.md §2).
+   *
+   * The predicate is exactly `eligibleForEdge` returning something — the same
+   * question the candidate scan asks every pulse, asked once more at the end.
+   * What makes it usable is what it excludes *by construction* rather than by
+   * special case: a terminal output (`Cookies`) and an unrouted `oneOf` branch
+   * (a "not applicable" decision nothing consumes) are declared as input by
+   * nobody, so no node is ever waiting on them. What is left is a node that
+   * genuinely cannot proceed: a ragged `allOf` leftover whose partner never
+   * arrived, or a `gather` group that never reached its barrier's count.
+   *
+   * Written over **every** input kind rather than narrowed to the multi-input
+   * ones, even though only those can realistically populate it. A
+   * `single`-input node with an eligible unconsumed instance at quiescence
+   * should be impossible — the pulse loop would have offered it as a candidate
+   * and fired it — so if one ever shows up here, the pulse loop dropped
+   * something. Generality costs nothing and buys that invariant.
+   */
+  const residueNow = (): Residue[] => {
+    const found: Residue[] = [];
+    for (const nodeName of scanned) {
+      for (const edgeName of inputEdgeNames(program.nodes[nodeName].input)) {
+        const waiting = eligibleForEdge(
+          program,
+          log,
+          consumedBy(nodeName),
+          nodeName,
+          edgeName,
+          correlationId,
+        ).length;
+        if (waiting > 0) found.push({ node: nodeName, edge: edgeName, waiting });
+      }
+    }
+    return found;
+  };
+
+  /** One place the three exits agree on what a `RunResult` is, so a new exit cannot forget the scan. */
+  const finish = (stopped: RunResult["stopped"], pulses: number): RunResult => ({
+    residue: residueNow(),
+    firings,
+    pulses,
+    stopped,
+  });
+
   let firings = 0;
   let pulse = 0;
 
@@ -815,7 +894,7 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
       firedThisPulse += 1;
       firings += 1;
       if (budget !== undefined && firings >= budget) {
-        return { failures, firings, pulses: pulse, stopped: "budget" };
+        return finish("budget", pulse);
       }
     }
 
@@ -831,13 +910,13 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
     // and a run that can never fire again would spin instead of reaching
     // quiescence.
     if (firedThisPulse === 0) {
-      return { failures, firings, pulses: pulse - 1, stopped: "quiescence" };
+      return finish("quiescence", pulse - 1);
     }
 
     // The pulse backstop (see `Host.maxPulses`). Distinct from the firing
     // budget above, which cannot bound a pulse that fires nothing.
     if (pulse >= maxPulses) {
-      return { failures, firings, pulses: pulse, stopped: "budget" };
+      return finish("budget", pulse);
     }
   }
 }

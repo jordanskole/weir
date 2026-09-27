@@ -20,7 +20,7 @@ import { basename } from "node:path";
 import { parse } from "yaml";
 import { defineEdge, defineField } from "./define.js";
 import { assertDeclaration } from "./schema.js";
-import { failedEdgeName, failedAllOfEdgeName, failedGatherEdgeName } from "./types.js";
+import { failedEdgeName, failedAllOfEdgeName, failedGatherEdgeName, inputEdgeNames } from "./types.js";
 import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
 
 /**
@@ -683,16 +683,12 @@ function producedEdges(node: NodeDecl): { name: string }[] {
 }
 
 /**
- * The edge names a node declares needing, whatever multiplicity it needs them
- * at. A `gather` needs N of one edge, but they arrive one instance at a time
- * on one arc, so the *arc* question this answers has the same shape as a
- * `single` input's — which is why a gather adds no case to either wiring rule
- * below beyond Rule C, its own.
+ * The edge names a node declares needing — `inputEdgeNames` (types.ts), aliased
+ * locally because the wiring rules below read better saying *consumed*. A gather
+ * adds no case to either rule beyond Rule C, its own, because its candidates
+ * arrive one at a time on one arc like any single input's.
  */
-function consumedEdges(input: InputSpec): string[] {
-  if (input.kind === "single" || input.kind === "gather") return [input.edge.name];
-  return input.edges.map((edge) => edge.name);
-}
+const consumedEdges = inputEdgeNames;
 
 /**
  * Elaboration-time wiring checks — the "will not compile" gate for a

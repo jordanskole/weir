@@ -175,16 +175,56 @@ async function run(dir: string, flags: Map<string, string>): Promise<CliResult> 
   const correlationId = flags.get("run") ?? crypto.randomUUID();
   const result = await runNetlist(program, { correlationId, originPayloads }, { log, trace });
 
+  const detail = [
+    "",
+    `  run       ${correlationId}`,
+    `  firings   ${result.firings}`,
+    `  pulses    ${result.pulses}`,
+    `  log       ${logPath}`,
+    `  trace     ${tracePath}`,
+  ];
+
+  // Residue at quiescence is a **stall**: nothing fired, and something is
+  // waiting that nothing will ever deliver
+  // (docs/superpowers/specs/2026-09-27-quiescence-is-not-success.md). A CLI run
+  // is someone asking "did this work", so it is an error here even though the
+  // runtime only reports it — the runtime leaves the verdict to the host
+  // because bounding a run is the host's job, and this is that host deciding.
+  //
+  // Residue after `budget` is *not* an error: a bounded run has unconsumed
+  // input by construction. It is still printed, because it is the most useful
+  // thing to see when deciding whether the budget was too small.
+  if (result.residue.length > 0 && result.stopped === "quiescence") {
+    return {
+      code: 1,
+      out: [
+        `✗ stalled — reached quiescence with input still waiting`,
+        ...detail,
+        "",
+        ...result.residue.map((r) => `  waiting   ${r.node} needs ${r.edge} (${r.waiting} unconsumed)`),
+        "",
+        `  Nothing will deliver these: no node fired in the last pulse. A node`,
+        `  waiting on an edge whose producer routed elsewhere — a oneOf branch`,
+        `  nothing consumes, a fan-in whose other arm never arrived, a gather`,
+        `  whose spread produced more elements than reached it — is the usual`,
+        `  cause. The log above has the lineage.`,
+      ].join("\n"),
+    };
+  }
+
   return {
     code: 0,
     out: [
       `✓ ${result.stopped}`,
-      "",
-      `  run       ${correlationId}`,
-      `  firings   ${result.firings}`,
-      `  pulses    ${result.pulses}`,
-      `  log       ${logPath}`,
-      `  trace     ${tracePath}`,
+      ...detail,
+      ...(result.residue.length > 0
+        ? [
+            "",
+            ...result.residue.map((r) => `  waiting   ${r.node} needs ${r.edge} (${r.waiting} unconsumed)`),
+            "",
+            `  Expected after ${result.stopped}: a bounded run stops mid-flight.`,
+          ]
+        : []),
     ].join("\n"),
   };
 }
