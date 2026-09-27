@@ -38,6 +38,22 @@ describe("runCli", () => {
     expect(result.out).toContain("2 origin(s): mix, preheatOven");
   });
 
+  it("check: names the file a bad declaration came from", async () => {
+    // "which file?" is the first question anyone asks when check fails, and
+    // until this landed the output apologised for not answering it.
+    const root = await fixture({
+      "edges/Good.edge": EDGE("Good"),
+      "edges/nested/Bad.edge": `description: B\nfields:\n  v:\n    type: notatype\n    label: V\n    description: d\n    nullable: false\n`,
+    });
+
+    const result = await runCli(["check", root], "/nowhere");
+
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("edges/nested/Bad.edge");
+    // And the apology is gone, because the question is answered.
+    expect(result.out).not.toContain("not yet reported with the file");
+  });
+
   it("check: reports a wiring failure as a message, with a non-zero code and no stack trace", async () => {
     // The errors are the product — this is the assertion that matters.
     const root = await fixture({

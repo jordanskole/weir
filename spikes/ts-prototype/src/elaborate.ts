@@ -168,6 +168,15 @@ export function parseFieldFile(yamlText: string): FieldDef {
  */
 export type FieldResolver = (name: string) => FieldDef | AnyEdgeDef;
 
+/** Names the field a failure came from, the way `inFile` names the file. */
+function inField<T>(key: string, run: () => T): T {
+  try {
+    return run();
+  } catch (cause) {
+    throw new Error(`field "${key}": ${(cause as Error).message}`, { cause });
+  }
+}
+
 /** Matches a `.edge` file's `...Name` spread key (docs/superpowers/specs/2026-09-09-edge-spread.md), capturing the source edge's name. */
 const SPREAD_KEY = /^\.\.\.(.+)$/;
 
@@ -228,7 +237,13 @@ export function parseEdgeFile(yamlText: string, name: string, resolveField: Fiel
     } else if (value !== null && typeof value === "object" && "literal" in value) {
       resolvedFields[key] = value as LiteralFieldDef;
     } else {
-      resolvedFields[key] = value as FieldDef;
+      // Through `defineField`, not cast. A `.field` file has always been
+      // validated (parseFieldFile), but a field written *inline inside an
+      // edge* — which is how nearly every field in this repo is written —
+      // used to be cast straight to `FieldDef`, so every check
+      // `validateField` performs was unreachable for the common case:
+      // unknown types, `min` on a string, `minLength` on a bool.
+      resolvedFields[key] = inField(key, () => defineField(value as FieldDef));
     }
   }
 
@@ -845,6 +860,20 @@ export interface Elaborated {
  * each other. Each file's name is its filename — no separate check needed
  * to keep that in sync with anything, since there's nothing else to sync.
  */
+/**
+ * Re-throws with the file the failure came from. Wrapped at the call site
+ * rather than threaded through every parser, because the filename is known
+ * exactly where a file is read and nowhere deeper — and "which file?" is the
+ * first question anyone asks when a check fails.
+ */
+function inFile<T>(file: string, run: () => T): T {
+  try {
+    return run();
+  } catch (cause) {
+    throw new Error(`${file}: ${(cause as Error).message}`, { cause });
+  }
+}
+
 export async function elaborate(root: string): Promise<Elaborated> {
   const fields: Record<string, FieldDef> = {};
   for await (const file of glob("**/*.field", { cwd: root })) {
@@ -853,16 +882,16 @@ export async function elaborate(root: string): Promise<Elaborated> {
       throw new Error(`Duplicate field name "${name}" (also declared in "${file}").`);
     }
     const text = await readFile(`${root}/${file}`, "utf8");
-    fields[name] = parseFieldFile(text);
+    fields[name] = inFile(file, () => parseFieldFile(text));
   }
 
-  const rawEdgeTextByName = new Map<string, string>();
+  const rawEdgeTextByName = new Map<string, { text: string; file: string }>();
   for await (const file of glob("**/*.edge", { cwd: root })) {
     const name = basename(file, ".edge");
     if (rawEdgeTextByName.has(name)) {
       throw new Error(`Duplicate edge name "${name}" (already declared elsewhere).`);
     }
-    rawEdgeTextByName.set(name, await readFile(`${root}/${file}`, "utf8"));
+    rawEdgeTextByName.set(name, { text: await readFile(`${root}/${file}`, "utf8"), file });
   }
 
   const edges: Record<string, AnyEdgeDef> = {};
@@ -872,8 +901,8 @@ export async function elaborate(root: string): Promise<Elaborated> {
     if (name in fields) return fields[name]!;
     if (name in edges) return edges[name]!;
 
-    const text = rawEdgeTextByName.get(name);
-    if (text === undefined) {
+    const found = rawEdgeTextByName.get(name);
+    if (found === undefined) {
       throw new Error(`Cannot resolve "${name}" — no .field or .edge file declares it.`);
     }
     if (inProgress.has(name)) {
@@ -881,7 +910,7 @@ export async function elaborate(root: string): Promise<Elaborated> {
     }
 
     inProgress.add(name);
-    const edge = parseEdgeFile(text, name, resolve);
+    const edge = inFile(found.file, () => parseEdgeFile(found.text, name, resolve));
     inProgress.delete(name);
     edges[name] = edge;
     return edge;
@@ -899,13 +928,13 @@ export async function elaborate(root: string): Promise<Elaborated> {
     return edge;
   };
 
-  const nodeTextByName = new Map<string, string>();
+  const nodeTextByName = new Map<string, { text: string; file: string }>();
   for await (const file of glob("**/*.node", { cwd: root })) {
     const name = basename(file, ".node");
     if (nodeTextByName.has(name)) {
       throw new Error(`Duplicate node name "${name}" (also declared in "${file}").`);
     }
-    nodeTextByName.set(name, await readFile(`${root}/${file}`, "utf8"));
+    nodeTextByName.set(name, { text: await readFile(`${root}/${file}`, "utf8"), file });
   }
 
   // A raw pre-scan for `allOf:` combos, before the real parseNodeFile pass:
@@ -915,7 +944,7 @@ export async function elaborate(root: string): Promise<Elaborated> {
   // unlike synthesizeFailedEdges, synthesizing for every possible subset
   // isn't an option (that's a powerset, not a linear scan).
   const allOfCombosByKey = new Map<string, AnyEdgeDef[]>();
-  for (const text of nodeTextByName.values()) {
+  for (const { text } of nodeTextByName.values()) {
     const raw = parse(text) as { input?: unknown };
     if (raw.input === null || typeof raw.input !== "object" || Array.isArray(raw.input)) continue;
     if (!("allOf" in raw.input) || !Array.isArray(raw.input.allOf)) continue;
@@ -927,16 +956,16 @@ export async function elaborate(root: string): Promise<Elaborated> {
 
   const nodes: Record<string, NodeDecl> = {};
   const anyOfAliases = new Map<string, string[]>();
-  for (const [name, text] of nodeTextByName) {
+  for (const [name, { text, file }] of nodeTextByName) {
     const raw = parse(text) as { input?: unknown };
     const isAnyOf =
       raw.input !== null && typeof raw.input === "object" && !Array.isArray(raw.input) && "anyOf" in raw.input;
     if (isAnyOf) {
-      const shadows = parseAnyOfNodeFile(text, name, resolveEdge);
+      const shadows = inFile(file, () => parseAnyOfNodeFile(text, name, resolveEdge));
       Object.assign(nodes, shadows);
       anyOfAliases.set(name, Object.keys(shadows));
     } else {
-      nodes[name] = parseNodeFile(text, name, resolveEdge);
+      nodes[name] = inFile(file, () => parseNodeFile(text, name, resolveEdge));
     }
   }
 
@@ -976,10 +1005,13 @@ export async function elaborate(root: string): Promise<Elaborated> {
   for (const { file, text, composite } of topologyFiles) {
     if (composite) {
       const name = basename(file, ".topology");
-      composites.set(name, parseCompositeTopologyFile(text, name, resolveEdge, resolveNodeName));
+      composites.set(
+        name,
+        inFile(file, () => parseCompositeTopologyFile(text, name, resolveEdge, resolveNodeName)),
+      );
       continue;
     }
-    wiring = mergeWiring(wiring, parseTopologyFile(text, resolveNodeName));
+    wiring = mergeWiring(wiring, inFile(file, () => parseTopologyFile(text, resolveNodeName)));
   }
 
   if (composites.size > 0) {

@@ -1873,3 +1873,36 @@ wiring:
     expect(result.wiring.feeds["split/toLeft"]).toEqual(["split/noop_Left"]);
   });
 });
+
+describe("elaborate — inline edge fields are validated", () => {
+  /**
+   * A `.field` file has always gone through `defineField` (there is a test
+   * pinning that). A field written *inline inside an edge* — which is how
+   * nearly every field in this repo is written — was cast straight to
+   * `FieldDef`, so every check `validateField` performs was unreachable for
+   * the common case. These are those checks, reached.
+   */
+  it("rejects an unknown scalar type, naming the file and the field", async () => {
+    const root = await writeFixture({
+      "edges/nested/Bad.edge": `description: B\nfields:\n  v:\n    type: notatype\n    label: V\n    description: d\n    nullable: false\n`,
+    });
+
+    await expect(elaborate(root)).rejects.toThrow(/edges\/nested\/Bad\.edge.*field "v".*Unknown field type "notatype"/s);
+  });
+
+  it("rejects a string validation on a numeric field", async () => {
+    const root = await writeFixture({
+      "edges/Bad.edge": `description: B\nfields:\n  n:\n    type: uint8\n    label: N\n    description: d\n    nullable: false\n    validations:\n      minLength: 3\n`,
+    });
+
+    await expect(elaborate(root)).rejects.toThrow(/field "n".*minLength/s);
+  });
+
+  it("still accepts every field the real examples declare", async () => {
+    // The guard against a validation strict enough to reject the corpus it
+    // was written for.
+    for (const src of [RECIPE_SRC, TODO_LIST_SRC, PERSON_BIRTHDAY_SRC]) {
+      await expect(elaborate(src)).resolves.toBeDefined();
+    }
+  });
+});

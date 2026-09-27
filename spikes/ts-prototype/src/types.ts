@@ -10,18 +10,29 @@
 
 /** Scalar field types. `datetime` is an ISO-8601 string, not a numeric epoch — see
  * docs/design-history.md, "A real datetime scalar type" for why. */
-export type ScalarType =
-  | "utf8"
-  | "bool"
-  | "uint8"
-  | "uint16"
-  | "uint32"
-  | "int8"
-  | "int16"
-  | "int32"
-  | "f32"
-  | "f64"
-  | "datetime";
+export const SCALAR_TYPES = [
+  "utf8",
+  "bool",
+  "uint8",
+  "uint16",
+  "uint32",
+  "int8",
+  "int16",
+  "int32",
+  "f32",
+  "f64",
+  "datetime",
+] as const;
+
+/**
+ * Derived from `SCALAR_TYPES` rather than written twice. A hand-maintained
+ * union beside a hand-maintained array drifts; this cannot. The runtime list
+ * is needed because a `.edge` file's `type:` arrives as `unknown` and is
+ * cast — the one place a type comes from an author is the one place
+ * TypeScript cannot check it, which is how `type: notatype` elaborated
+ * cleanly and was counted by `weir check` as a valid edge.
+ */
+export type ScalarType = (typeof SCALAR_TYPES)[number];
 
 /** Statistical measure classification for a field. */
 export type Measure = "nominal" | "ordinal" | "quantitative" | "temporal";

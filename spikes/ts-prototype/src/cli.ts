@@ -66,10 +66,6 @@ function failure(error: unknown, dir: string): CliResult {
       `✗ ${dir}`,
       "",
       `  ${message}`,
-      "",
-      // Errors do not name the file they came from yet. Saying so is better
-      // than letting someone hunt for it and conclude the tool is careless.
-      `  (declarations are not yet reported with the file they came from)`,
     ].join("\n"),
   };
 }

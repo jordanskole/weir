@@ -8,6 +8,7 @@
  * step 2).
  */
 
+import { SCALAR_TYPES } from "./types.js";
 import type {
   AnyEdgeDef,
   EdgeDef,
@@ -120,6 +121,15 @@ function validateStringConstraints(field: FieldDef): void {
 }
 
 function validateField(field: FieldDef): void {
+  // Checked at runtime because a `.edge` file's `type:` is author-supplied
+  // and arrives as `unknown`. Without this, an unknown type is silently
+  // treated as numeric by the branch below, `assertPayload` compares against
+  // a type it has never heard of, and the hash fingerprints it happily.
+  if (!(SCALAR_TYPES as readonly string[]).includes(field.type)) {
+    throw new Error(
+      `Unknown field type "${String(field.type)}" — expected one of ${SCALAR_TYPES.join(", ")}.`,
+    );
+  }
   const isString = field.type === "utf8" || field.type === "datetime";
   const isNumeric = !isString && field.type !== "bool";
   const v = field.validations as (NumberValidationShape & StringValidationShape) | undefined;
