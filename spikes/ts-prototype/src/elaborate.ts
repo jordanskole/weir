@@ -19,6 +19,7 @@ import { glob, readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { parse } from "yaml";
 import { defineEdge, defineField } from "./define.js";
+import { assertDeclaration } from "./schema.js";
 import { failedEdgeName, failedAllOfEdgeName } from "./types.js";
 import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
 
@@ -154,9 +155,12 @@ function synthesizeNoopNode(
 /** Parse a `.field` file's YAML text into a validated FieldDef. */
 export function parseFieldFile(yamlText: string): FieldDef {
   const raw = parse(yamlText) as Record<string, unknown>;
+  // Ahead of the schema check: the schema would reject `name` as an unknown
+  // key, which is true but does not say why the key does not exist.
   if ("name" in raw) {
     throw new Error(`.field files don't declare "name" — the filename is the name.`);
   }
+  assertDeclaration("field", raw);
   return defineField(raw as unknown as FieldDef);
 }
 
@@ -183,9 +187,11 @@ const SPREAD_KEY = /^\.\.\.(.+)$/;
 /** Parse an `.edge` file's YAML text (and its filename-derived name) into a validated EdgeDef. */
 export function parseEdgeFile(yamlText: string, name: string, resolveField: FieldResolver): AnyEdgeDef {
   const raw = parse(yamlText) as Record<string, unknown>;
+  // See parseFieldFile: a better message than "unknown key".
   if ("name" in raw) {
     throw new Error(`.edge files don't declare "name" — the filename is the name.`);
   }
+  assertDeclaration("edge", raw);
   const { label, description, index, fields } = raw as {
     label?: unknown;
     description?: unknown;
@@ -245,6 +251,17 @@ export function parseEdgeFile(yamlText: string, name: string, resolveField: Fiel
       // unknown types, `min` on a string, `minLength` on a bool.
       resolvedFields[key] = inField(key, () => defineField(value as FieldDef));
     }
+  }
+
+  // Cross-field, so no JSON Schema can express it: `index` names *this
+  // edge's own* field, and until now a typo produced an edge whose key
+  // pointed at nothing — silently, since every consumer reads `index` and
+  // none checked it resolved.
+  const resolvedIndex = typeof index === "string" ? index : spreadIndex;
+  if (resolvedIndex !== undefined && !(resolvedIndex in resolvedFields)) {
+    throw new Error(
+      `index: "${resolvedIndex}" is not a field of this edge — declared fields are ${Object.keys(resolvedFields).join(", ") || "(none)"}.`,
+    );
   }
 
   return defineEdge({
@@ -316,6 +333,15 @@ function resolveEdgeNameList(names: unknown, path: string, resolveEdge: EdgeReso
 /** Parse a `.node` file's YAML text (and its filename-derived name) into a validated NodeDecl. */
 export function parseNodeFile(yamlText: string, name: string, resolveEdge: EdgeResolver): NodeDecl {
   const raw = parse(yamlText) as Record<string, unknown>;
+  // Ahead of the schema, for the same reason as `.field`/`.edge`: "unknown
+  // key" is true but does not say why the key cannot exist.
+  if ("name" in raw) {
+    throw new Error(`.node files don't declare "name" — the filename is the name.`);
+  }
+  if ("fn" in raw) {
+    throw new Error(`.node files don't declare "fn" — an implementation is resolved by contract hash, never inlined (docs/design.md §10).`);
+  }
+  assertDeclaration("node", raw);
   if ("name" in raw) {
     throw new Error(`.node files don't declare "name" — the filename is the name.`);
   }

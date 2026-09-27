@@ -884,27 +884,27 @@ describe("runNetlist", () => {
       // ({input: <embedded Todo/Person>, reason}, not a bare scalar).
       await writeFile(
         join(root, "edges", "Todo.edge"),
-        `description: d\nfields:\n  title:\n    type: utf8\n    label: v\n    description: d\n    nullable: false\n`,
+        `label: E\ndescription: d\nfields:\n  title:\n    type: utf8\n    label: v\n    description: d\n    nullable: false\n`,
         "utf8",
       );
       await writeFile(
         join(root, "edges", "Person.edge"),
-        `description: d\nfields:\n  name:\n    type: utf8\n    label: v\n    description: d\n    nullable: false\n`,
+        `label: E\ndescription: d\nfields:\n  name:\n    type: utf8\n    label: v\n    description: d\n    nullable: false\n`,
         "utf8",
       );
       await writeFile(
         join(root, "edges", "Start.edge"),
-        `description: d\nfields:\n  value:\n    type: utf8\n    label: v\n    description: d\n    nullable: false\n`,
+        `label: E\ndescription: d\nfields:\n  value:\n    type: utf8\n    label: v\n    description: d\n    nullable: false\n`,
         "utf8",
       );
       await writeFile(
         join(root, "nodes", "failing.node"),
-        `description: d\ninput: Todo\noutput: Todo\nexamples:\n  - given:\n      Todo:\n        title: "bad todo"\n    expect:\n      Todo:\n        title: "bad todo"\n`,
+        `label: E\ndescription: d\ninput: Todo\noutput: Todo\nexamples:\n  - given:\n      Todo:\n        title: "bad todo"\n    expect:\n      Todo:\n        title: "bad todo"\n`,
         "utf8",
       );
       await writeFile(
         join(root, "nodes", "HandleFailed.node"),
-        `description: d\ninput:\n  anyOf:\n    - Failed_Todo\n    - Failed_Person\noutput: Start\nexamples:\n  - given:\n      Failed_Todo:\n        input:\n          title: "bad todo"\n        reason: "kaboom"\n    expect:\n      Start:\n        value: "recovered"\n  - given:\n      Failed_Person:\n        input:\n          name: "bad person"\n        reason: "kaboom"\n    expect:\n      Start:\n        value: "recovered"\n`,
+        `label: E\ndescription: d\ninput:\n  anyOf:\n    - Failed_Todo\n    - Failed_Person\noutput: Start\nexamples:\n  - given:\n      Failed_Todo:\n        input:\n          title: "bad todo"\n        reason: "kaboom"\n    expect:\n      Start:\n        value: "recovered"\n  - given:\n      Failed_Person:\n        input:\n          name: "bad person"\n        reason: "kaboom"\n    expect:\n      Start:\n        value: "recovered"\n`,
         "utf8",
       );
       await writeFile(join(root, "topology", "main.topology"), `failing:\n  then:\n    HandleFailed: {}\n`, "utf8");

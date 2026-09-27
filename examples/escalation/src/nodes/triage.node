@@ -6,6 +6,7 @@ output:
     - Resolution
     - Ticket
 examples:
+  # Tier 1 cannot resolve a difficulty-3 ticket, so it escalates.
   - given:
       Ticket:
         id: "t-1"
@@ -13,12 +14,12 @@ examples:
         difficulty: 3
         tier: 1
     expect:
-      edge: Ticket
-      payload:
+      Ticket:
         id: "t-1"
         summary: "Cannot sign in after password reset"
         difficulty: 3
         tier: 2
+  # Tier 3 can, which is the branch nothing routes back — the base case.
   - given:
       Ticket:
         id: "t-1"
@@ -26,7 +27,6 @@ examples:
         difficulty: 3
         tier: 3
     expect:
-      edge: Resolution
-      payload:
+      Resolution:
         id: "t-1"
         resolved_by_tier: 3

@@ -17,6 +17,8 @@
  * `elaborate()`.
  */
 
+import { Ajv2020 } from "ajv/dist/2020.js";
+import type { ErrorObject, ValidateFunction } from "ajv";
 import { INTEGER_RANGES, UNSIGNED_TYPES } from "./define.js";
 import type { PropertyExpr, ScalarType } from "./types.js";
 
@@ -370,7 +372,16 @@ export function nodeSchema(): object {
         properties: {
           examples: {
             items: {
-              properties: { expect: taggedOne({ type: "array", items: objectPayload }) },
+              // A keyed collection, not an array — `many` has been keyed by
+              // the referenced edge's own `index` since
+              // docs/design-history.md's "`many` is a collection, keyed by
+              // index, not an array", and `fuzz.ts`'s `assertManyOutput`
+              // enforces that each entry sits under the key its own index
+              // field names. This schema still said `array`, and nothing
+              // noticed because nothing validated a declaration against it.
+              properties: {
+                expect: taggedOne({ type: "object", additionalProperties: objectPayload }),
+              },
             },
           },
         },
@@ -382,10 +393,18 @@ export function nodeSchema(): object {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     title: "Weir node",
     type: "object",
-    required: ["input", "output", "examples"],
+    required: ["input", "output"],
     properties: {
       label: { type: "string" },
       description: { type: "string" },
+      /**
+       * Names a host-supplied effect handler rather than a drafted
+       * implementation. Added 2026-09-27: the parser learned `effect` when
+       * effects were built and this schema did not, and nothing noticed —
+       * because nothing validated a declaration against it. Wiring the
+       * schema into elaboration is what surfaced the drift.
+       */
+      effect: { type: "string" },
       input: {
         oneOf: [
           edgeName,
@@ -474,7 +493,19 @@ export function nodeSchema(): object {
       },
     },
     additionalProperties: false,
-    allOf: [...inputShapeConditionals, ...outputShapeConditionals],
+    allOf: [
+      // Examples are required, per §6: a node with none is indistinguishable
+      // from a no-op, so they are the only thing giving a same-shape-in,
+      // same-shape-out node content beyond its type signature.
+      //
+      // Except for an effect, where there is nothing to check them against:
+      // its behaviour is a host handler that never passes the acceptance
+      // gate, so a required example would be documentation the gate cannot
+      // verify — which is the shape of claim this project keeps removing.
+      { if: { not: { required: ["effect"] } }, then: { required: ["examples"] } },
+      ...inputShapeConditionals,
+      ...outputShapeConditionals,
+    ],
     $defs: { propertyExpr: propertyExprSchema() },
   };
 }
@@ -510,4 +541,77 @@ export function topologySchema(): object {
     additionalProperties: { $ref: "#/$defs/topologyNode" },
     $defs: { topologyNode },
   };
+}
+
+/**
+ * Validating a hand-authored declaration against the schema that describes
+ * it, before the hand-written parser touches it.
+ *
+ * These schemas existed and were used only by editor tooling and a drift
+ * test. The parsers, meanwhile, destructure the keys they know and ignore
+ * the rest — so `descriptoin:` or `validatoins:` was not an error, it was a
+ * silently missing declaration, and `weir check` reported a tick. For a
+ * language whose pitch is "will not compile", being wrong looking exactly
+ * like being silent is the worst available failure mode, and it costs an
+ * agent more than a person: a misspelled `validations` yields a green check
+ * and a contract with no constraints.
+ *
+ * Every schema here already sets `additionalProperties: false`, so wiring
+ * them in is what makes an unknown key an error rather than a shrug.
+ *
+ * Compiled against the schema *functions* rather than the committed
+ * `schemas/*.json`, so elaboration depends on this module rather than on a
+ * generated artifact — and so a parser that grows a key the schema does not
+ * know fails loudly here instead of drifting quietly, which is how this gap
+ * opened in the first place.
+ */
+const validators = new Map<string, ValidateFunction>();
+
+function validatorFor(kind: DeclarationKind): ValidateFunction {
+  let found = validators.get(kind);
+  if (found === undefined) {
+    const schema = { field: fieldSchema, edge: edgeSchema, node: nodeSchema, topology: topologySchema }[kind]();
+    found = new Ajv2020({ strict: false }).compile(schema);
+    validators.set(kind, found);
+  }
+  return found;
+}
+
+export type DeclarationKind = "field" | "edge" | "node" | "topology";
+
+/**
+ * Renders ajv's errors as something a person can act on.
+ *
+ * A `oneOf` failure reports every branch it tried, so an edge field with a
+ * bad `type` produces six errors about `many`, `literal` and "must be
+ * boolean" — accurate, and useless. The deepest `instancePath` is the one
+ * that actually names the problem, and the structural keywords wrapping it
+ * (`oneOf`, `anyOf`) describe the schema rather than the mistake.
+ */
+function renderErrors(errors: readonly ErrorObject[]): string {
+  const meaningful = errors.filter((e) => e.keyword !== "oneOf" && e.keyword !== "anyOf");
+  const deepest = Math.max(...meaningful.map((e) => e.instancePath.length), 0);
+  const focused = meaningful.filter((e) => e.instancePath.length === deepest);
+
+  return [...new Set((focused.length > 0 ? focused : meaningful).map(describe))].join("; ");
+}
+
+function describe(e: ErrorObject): string {
+  const where = e.instancePath === "" ? "" : `${e.instancePath} `;
+  const params = e.params as { additionalProperty?: string; allowedValues?: unknown[] };
+  // The default `additionalProperties` message omits the offending key, and
+  // the default `enum` message omits what would have been allowed — the only
+  // parts anyone needs in either case.
+  if (params.additionalProperty !== undefined) return `${where}has unknown key "${params.additionalProperty}"`;
+  if (params.allowedValues !== undefined) {
+    return `${where}${e.message} (${params.allowedValues.join(", ")})`;
+  }
+  return `${where}${e.message}`;
+}
+
+/** Throws if `raw` does not satisfy the schema for `kind`, naming the path and what was wrong. */
+export function assertDeclaration(kind: DeclarationKind, raw: unknown): void {
+  const validate = validatorFor(kind);
+  if (validate(raw)) return;
+  throw new Error(`not a valid .${kind} declaration: ${renderErrors(validate.errors ?? [])}.`);
 }

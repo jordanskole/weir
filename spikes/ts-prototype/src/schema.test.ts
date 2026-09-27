@@ -591,27 +591,33 @@ describe("nodeSchema", () => {
     expect(valid).toBe(true);
   });
 
-  it("accepts a many output whose single tag holds an array", () => {
+  it("accepts a many output whose single tag holds a keyed collection", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({
       description: "d",
       input: "Person",
       output: { many: "Person" },
       examples: [
-        { given: { Person: { age: 10 } }, expect: { Person: [{ age: 8 }, { age: 12 }] } },
+        // Keyed by the referenced edge's own `index`, not an array — this
+        // schema said `array` until 2026-09-27, contradicting
+        // design-history.md's "`many` is a collection, keyed by index, not
+        // an array" and `fuzz.ts`'s `assertManyOutput`. Nothing noticed
+        // because nothing validated a declaration against this schema.
+        { given: { Person: { age: 10 } }, expect: { Person: { "8": { age: 8 }, "12": { age: 12 } } } },
       ],
     });
     expect(validate.errors).toBeNull();
     expect(valid).toBe(true);
   });
 
-  it("rejects a many output whose tag holds an object instead of an array", () => {
+  it("rejects a many output whose tag holds an array instead of a keyed collection", () => {
     const validate = validatorFor(nodeSchema());
     const valid = validate({
       description: "d",
       input: "Person",
       output: { many: "Person" },
-      examples: [{ given: { Person: { age: 10 } }, expect: { Person: { age: 8 } } }],
+      // An array, which a keyed collection is not.
+      examples: [{ given: { Person: { age: 10 } }, expect: { Person: [{ age: 8 }] } }],
     });
     expect(valid).toBe(false);
   });

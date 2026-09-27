@@ -126,12 +126,12 @@ describe("elaborateWithImplementations", () => {
     await mkdir(join(declRoot, "nodes"), { recursive: true });
     await writeFile(
       join(declRoot, "edges", "Person.edge"),
-      `description: A person\nfields:\n  age:\n    type: uint8\n    label: Age\n    description: d\n    nullable: false\n`,
+      `label: E\ndescription: A person\nfields:\n  age:\n    type: uint8\n    label: Age\n    description: d\n    nullable: false\n`,
       "utf8",
     );
     await writeFile(
       join(declRoot, "nodes", "birthday.node"),
-      `description: Increments a person's age by one year\ninput: Person\noutput: Person\nexamples:\n  - given:\n      Person:\n        age: 41\n    expect:\n      Person:\n        age: 42\n`,
+      `label: E\ndescription: Increments a person's age by one year\ninput: Person\noutput: Person\nexamples:\n  - given:\n      Person:\n        age: 41\n    expect:\n      Person:\n        age: 42\n`,
       "utf8",
     );
 

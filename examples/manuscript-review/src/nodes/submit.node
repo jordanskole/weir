@@ -2,3 +2,13 @@ label: Submit
 description: Admits a draft as the first revision
 input: Draft
 output: Revision
+examples:
+  - given:
+      Draft:
+        id: "m-1"
+        text: "The manuscript"
+    expect:
+      Revision:
+        id: "m-1-r1"
+        text: "The manuscript"
+        round: 1

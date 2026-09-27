@@ -24,7 +24,7 @@ async function fixture(files: Record<string, string>): Promise<string> {
   return dir;
 }
 
-const EDGE = (name: string) => `description: ${name}\nfields:\n  v:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`;
+const EDGE = (name: string) => `label: E\ndescription: ${name}\nfields:\n  v:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`;
 
 describe("runCli", () => {
   it("check: succeeds on a real example, counting authored declarations rather than synthesized ones", async () => {
@@ -43,7 +43,7 @@ describe("runCli", () => {
     // until this landed the output apologised for not answering it.
     const root = await fixture({
       "edges/Good.edge": EDGE("Good"),
-      "edges/nested/Bad.edge": `description: B\nfields:\n  v:\n    type: notatype\n    label: V\n    description: d\n    nullable: false\n`,
+      "edges/nested/Bad.edge": `label: E\ndescription: B\nfields:\n  v:\n    type: notatype\n    label: V\n    description: d\n    nullable: false\n`,
     });
 
     const result = await runCli(["check", root], "/nowhere");
@@ -59,8 +59,8 @@ describe("runCli", () => {
     const root = await fixture({
       "edges/A.edge": EDGE("A"),
       "edges/B.edge": EDGE("B"),
-      "nodes/makeA.node": `label: MA\ndescription: d\ninput: A\noutput: A\n`,
-      "nodes/needsB.node": `label: NB\ndescription: d\ninput: B\noutput: B\n`,
+      "nodes/makeA.node": `label: MA\ndescription: d\ninput: A\noutput: A\nexamples:\n  - given:\n      A: {}\n    expect:\n      A: {}\n`,
+      "nodes/needsB.node": `label: NB\ndescription: d\ninput: B\noutput: B\nexamples:\n  - given:\n      B: {}\n    expect:\n      B: {}\n`,
       "topology/main.topology": `makeA:\n  then:\n    needsB: {}\n`,
     });
 
@@ -76,8 +76,8 @@ describe("runCli", () => {
     const root = await fixture({
       "edges/A.edge": EDGE("A"),
       "edges/B.edge": EDGE("B"),
-      "nodes/makeA.node": `label: MA\ndescription: d\ninput: A\noutput: A\n`,
-      "nodes/join.node": `label: J\ndescription: d\ninput:\n  allOf:\n    - A\n    - B\noutput: B\n`,
+      "nodes/makeA.node": `label: MA\ndescription: d\ninput: A\noutput: A\nexamples:\n  - given:\n      A: {}\n    expect:\n      A: {}\n`,
+      "nodes/join.node": `label: J\ndescription: d\ninput:\n  allOf:\n    - A\n    - B\noutput: B\nexamples:\n  - given:\n      A: {}\n      B: {}\n    expect:\n      B: {}\n`,
       "topology/main.topology": `makeA:\n  then:\n    join: {}\n`,
     });
 
@@ -199,8 +199,8 @@ describe("runCli — verify", () => {
   /** Runs a one-node program end to end, then returns what verify says about it. */
   async function runThenVerify(fn: string): Promise<{ run: Awaited<ReturnType<typeof runCli>>; verify: Awaited<ReturnType<typeof runCli>> }> {
     const workdir = await fixture({
-      "edges/Reading.edge": `description: R\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
-      "nodes/observe.node": `label: O\ndescription: d\ninput: Reading\noutput: Reading\n`,
+      "edges/Reading.edge": `label: E\ndescription: R\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "nodes/observe.node": `label: O\ndescription: d\ninput: Reading\noutput: Reading\nexamples:\n  - given:\n      Reading: {}\n    expect:\n      Reading: {}\n`,
       "topology/main.topology": `observe: {}\n`,
     });
     const { hashNode } = await import("./hash.js");

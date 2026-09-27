@@ -5,3 +5,26 @@ input:
     - IdentityContext
     - AssetContext
 output: EntityEvidence
+examples:
+  - given:
+      IdentityContext:
+        entityId: "e-principal"
+        summary: "identity:svc-backup@corp"
+      AssetContext:
+        entityId: "e-principal"
+        summary: "asset:svc-backup@corp"
+    expect:
+      EntityEvidence:
+        entityId: "e-principal"
+        identitySummary: "identity:svc-backup@corp"
+        assetSummary: "asset:svc-backup@corp"
+properties:
+  - name: evidence names the entity both branches were about
+    description: >-
+      The fan-in this example exists to demonstrate is only meaningful if
+      both halves came from the same entity. Declared here so the acceptance
+      gate checks it, rather than leaving it to a runtime test.
+    expr:
+      eq:
+        - get: output.entityId
+        - get: input.IdentityContext.entityId

@@ -5,3 +5,30 @@ input:
     - StyleReport
     - FactReport
 output: ReviewNote
+examples:
+  - given:
+      StyleReport:
+        revision_id: "m-1-r1"
+        note: "style ok at round 1"
+      FactReport:
+        revision_id: "m-1-r1"
+        note: "facts ok at round 1"
+    expect:
+      ReviewNote:
+        revision_id: "m-1-r1"
+        combined: "style ok at round 1 | facts ok at round 1"
+properties:
+  # The invariant the whole example exists to demonstrate, stated in the
+  # contract rather than only asserted in a test: a note is about the
+  # revision its reports were about. If the lineage join ever paired reports
+  # from different rounds, this is what would catch it at the acceptance
+  # gate rather than in a run.
+  - name: note names the revision its reports were about
+    description: >-
+      A note is about one revision. If the lineage join ever paired reports
+      from different rounds this is what would catch it, at the acceptance
+      gate rather than in a run.
+    expr:
+      eq:
+        - get: output.revision_id
+        - get: input.StyleReport.revision_id

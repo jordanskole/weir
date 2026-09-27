@@ -110,6 +110,7 @@ fields: {}
 
   it("resolves a bare-name field reference via the resolver", () => {
     const yaml = `
+label: E
 description: A person
 fields:
   age:
@@ -134,6 +135,7 @@ fields:
 
   it("resolves a bare-name compound (nested-edge) reference via the resolver", () => {
     const yaml = `
+label: E
 description: A person with a nested address edge
 fields:
   name:
@@ -165,6 +167,7 @@ fields:
 
   it("resolves a many-of-compound-edge field via the resolver", () => {
     const yaml = `
+label: E
 description: A list of tasks
 fields:
   title:
@@ -199,6 +202,7 @@ fields:
 
   it("rejects a many: reference to an edge with no declared index", () => {
     const yaml = `
+label: E
 description: A list of tasks
 fields:
   tasks:
@@ -217,6 +221,7 @@ fields:
 
   it("rejects a many: value that isn't a bare-name reference", () => {
     const yaml = `
+label: E
 description: A list of tasks
 fields:
   tasks:
@@ -234,6 +239,7 @@ fields:
 
   it("rejects a many: reference that resolves to a field, not an edge", () => {
     const yaml = `
+label: E
 description: A list of tasks
 fields:
   tasks:
@@ -379,7 +385,7 @@ fields:
       parseEdgeFile(yaml, "BakedCookies", () => {
         throw new Error("unreachable");
       }),
-    ).toThrow(/must have no value \(null\)/i);
+    ).toThrow(/must have no value \(null\)|not a valid \.edge declaration/i);
   });
 
   it("rejects a spread source that resolves to a field, not an edge", () => {
@@ -425,6 +431,7 @@ describe("parseNodeFile", () => {
 
   it("parses a single-edge input/output node, resolving both by name", () => {
     const yaml = `
+label: E
 description: Increments a person's age by one year
 input: Person
 output: Person
@@ -445,6 +452,7 @@ examples:
 
   it("resolves an allOf: input into multiple edges, in declared order", () => {
     const yaml = `
+label: E
 description: Adds a task to a todo list
 input:
   allOf:
@@ -464,6 +472,7 @@ examples:
 
   it("resolves a oneOf output into its listed edges, in declared order", () => {
     const yaml = `
+label: E
 description: Checks whether a person just turned 42
 input: Person
 output:
@@ -483,12 +492,18 @@ examples:
 
   it("resolves an allOf output into its listed edges, in declared order", () => {
     const yaml = `
+label: E
 description: d
 input: Person
 output:
   allOf:
     - Pass
     - Fail
+examples:
+  - given:
+      Person: {}
+    expect:
+      Pass: {}
 `;
     const node = parseNodeFile(yaml, "weird", resolveEdge);
     expect(node.output).toEqual({ kind: "allOf", edges: [Pass, Fail] });
@@ -496,10 +511,17 @@ output:
 
   it("resolves a many output into its single edge", () => {
     const yaml = `
+label: E
 description: d
 input: Person
 output:
   many: Todo
+examples:
+  - given:
+      Person: {}
+    expect:
+      Todo:
+        k: {}
 `;
     const node = parseNodeFile(yaml, "duplicate", resolveEdge);
     expect(node.output).toEqual({ kind: "many", edge: Todo });
@@ -507,10 +529,17 @@ output:
 
   it("rejects a many output referencing an edge with no declared index", () => {
     const yaml = `
+label: E
 description: d
 input: Person
 output:
   many: Person
+examples:
+  - given:
+      Person: {}
+    expect:
+      Person:
+        k: {}
 `;
     expect(() => parseNodeFile(yaml, "duplicate", resolveEdge)).toThrow(/index/i);
   });
@@ -527,10 +556,16 @@ output: Person
 
   it("rejects a .node file that declares fn — contract only, no implementation", () => {
     const yaml = `
+label: E
 description: d
 input: Person
 output: Person
 fn: "() => {}"
+examples:
+  - given:
+      Person: {}
+    expect:
+      Person: {}
 `;
     expect(() => parseNodeFile(yaml, "birthday", resolveEdge)).toThrow(/fn/i);
   });
@@ -540,8 +575,8 @@ fn: "() => {}"
 input: Person
 output: Person
 examples:
-  - given: { age: 41 }
-    expect: { age: 42 }
+  - given: { Person: { age: 41 } }
+    expect: { Person: { age: 42 } }
 properties:
   - name: increments age by one
     description: A birthday advances the person's age by exactly one year.
@@ -564,9 +599,15 @@ properties:
 
   it("gives a .node file with no properties key a NodeDecl with no properties key at all", () => {
     const yaml = `
+label: E
 description: d
 input: Person
 output: Person
+examples:
+  - given:
+      Person: {}
+    expect:
+      Person: {}
 `;
     const node = parseNodeFile(yaml, "birthday", resolveEdge);
     expect(node).not.toHaveProperty("properties");
@@ -674,6 +715,7 @@ validations:
   pattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$'
 `,
       "edges/Address.edge": `
+label: E
 description: A mailing address
 fields:
   street:
@@ -683,6 +725,7 @@ fields:
     nullable: false
 `,
       "edges/PersonWithAddress.edge": `
+label: E
 description: A person with a nested address edge and a reused email field
 fields:
   name:
@@ -724,6 +767,7 @@ description: An email address
   it("rejects a reference to a name no .field or .edge file declares", async () => {
     const root = await writeFixture({
       "edges/Person.edge": `
+label: E
 description: A person
 fields:
   ghost: nonexistent
@@ -736,11 +780,13 @@ fields:
   it("rejects a circular compound-edge reference", async () => {
     const root = await writeFixture({
       "edges/A.edge": `
+label: E
 description: A
 fields:
   b: B
 `,
       "edges/B.edge": `
+label: E
 description: B
 fields:
   a: A
@@ -753,6 +799,7 @@ fields:
   it("synthesizes a Failed_<EdgeName> edge for every declared edge", async () => {
     const root = await writeFixture({
       "edges/Person.edge": `
+label: E
 description: A person
 fields:
   age:
@@ -773,6 +820,7 @@ fields:
   it("desugars an anyOf: input into N single-input NodeDecls, named <Node>__<Edge>", async () => {
     const root = await writeFixture({
       "edges/Failed_Todo.edge": `
+label: E
 description: A failed Todo
 fields:
   input:
@@ -782,6 +830,7 @@ fields:
     nullable: false
 `,
       "edges/Failed_Person.edge": `
+label: E
 description: A failed Person
 fields:
   input:
@@ -791,6 +840,7 @@ fields:
     nullable: false
 `,
       "edges/Recovered.edge": `
+label: E
 description: A recovered value
 fields:
   value:
@@ -800,6 +850,7 @@ fields:
     nullable: false
 `,
       "nodes/HandleFailed.node": `
+label: E
 description: Handles whichever failure shows up first
 input:
   anyOf:
@@ -843,6 +894,7 @@ examples:
   it("gives an anyOf-desugared shadow no examples key when none of the file's examples tag its edge", async () => {
     const root = await writeFixture({
       "edges/Failed_Todo.edge": `
+label: E
 description: A failed Todo
 fields:
   input:
@@ -852,6 +904,7 @@ fields:
     nullable: false
 `,
       "edges/Failed_Person.edge": `
+label: E
 description: A failed Person
 fields:
   input:
@@ -861,6 +914,7 @@ fields:
     nullable: false
 `,
       "edges/Recovered.edge": `
+label: E
 description: A recovered value
 fields:
   value:
@@ -870,6 +924,7 @@ fields:
     nullable: false
 `,
       "nodes/HandleFailed.node": `
+label: E
 description: Handles whichever failure shows up first
 input:
   anyOf:
@@ -895,6 +950,7 @@ examples:
   it("passes properties through to every anyOf-desugared shadow, same as closure", async () => {
     const root = await writeFixture({
       "edges/Failed_Todo.edge": `
+label: E
 description: A failed Todo
 fields:
   input:
@@ -904,6 +960,7 @@ fields:
     nullable: false
 `,
       "edges/Failed_Person.edge": `
+label: E
 description: A failed Person
 fields:
   input:
@@ -913,6 +970,7 @@ fields:
     nullable: false
 `,
       "edges/Recovered.edge": `
+label: E
 description: A recovered value
 fields:
   value:
@@ -922,6 +980,7 @@ fields:
     nullable: false
 `,
       "nodes/HandleFailed.node": `
+label: E
 description: Handles whichever failure shows up first
 input:
   anyOf:
@@ -963,6 +1022,7 @@ properties:
   it("synthesizes a Failed_<A>_<B> edge for a declared allOf: combo, sorted and order-independent", async () => {
     const root = await writeFixture({
       "edges/A.edge": `
+label: E
 description: Edge A
 fields:
   value:
@@ -972,6 +1032,7 @@ fields:
     nullable: false
 `,
       "edges/B.edge": `
+label: E
 description: Edge B
 fields:
   value:
@@ -981,6 +1042,7 @@ fields:
     nullable: false
 `,
       "nodes/Combine.node": `
+label: E
 description: Combines A and B
 input:
   allOf:
@@ -1007,6 +1069,7 @@ examples:
   it("lets a .node file declare input: Failed_<A>_<B>, resolving against the synthesized combo edge", async () => {
     const root = await writeFixture({
       "edges/A.edge": `
+label: E
 description: Edge A
 fields:
   value:
@@ -1016,6 +1079,7 @@ fields:
     nullable: false
 `,
       "edges/B.edge": `
+label: E
 description: Edge B
 fields:
   value:
@@ -1025,6 +1089,7 @@ fields:
     nullable: false
 `,
       "nodes/Combine.node": `
+label: E
 description: Combines A and B
 input:
   allOf:
@@ -1039,6 +1104,7 @@ examples:
       A: { value: "a" }
 `,
       "nodes/HandleFailed.node": `
+label: E
 description: Recovers a failed A+B combo
 input: Failed_A_B
 output: A
@@ -1061,6 +1127,7 @@ examples:
   it("lets a .node file declare input: Failed_<EdgeName>, resolving against the synthesized edge", async () => {
     const root = await writeFixture({
       "edges/Todo.edge": `
+label: E
 description: A task
 fields:
   title:
@@ -1070,6 +1137,7 @@ fields:
     nullable: false
 `,
       "nodes/HandleFailed.node": `
+label: E
 description: Recovers a failed Todo
 input: Failed_Todo
 output: Todo
@@ -1124,6 +1192,7 @@ examples:
   it("loads .node files, resolving a single-edge input against a declared edge", async () => {
     const root = await writeFixture({
       "edges/Person.edge": `
+label: E
 description: A person
 fields:
   age:
@@ -1133,6 +1202,7 @@ fields:
     nullable: false
 `,
       "nodes/birthday.node": `
+label: E
 description: Increments a person's age by one year
 input: Person
 output: Person
@@ -1156,9 +1226,15 @@ examples:
   it("rejects a .node file referencing an edge no .edge file declares", async () => {
     const root = await writeFixture({
       "nodes/birthday.node": `
+label: E
 description: d
 input: Ghost
 output: Ghost
+examples:
+  - given:
+      Ghost: {}
+    expect:
+      Ghost: {}
 `,
     });
 
@@ -1186,6 +1262,7 @@ output: Ghost
   it("loads a .topology file, validating references against declared .node files", async () => {
     const root = await writeFixture({
       "edges/Person.edge": `
+label: E
 description: A person
 fields:
   age:
@@ -1195,6 +1272,7 @@ fields:
     nullable: false
 `,
       "nodes/birthday.node": `
+label: E
 description: d
 input: Person
 output: Person
@@ -1253,6 +1331,7 @@ Ghost:
   it("lets a .topology file reference an anyOf-desugared node's original name, expanding to all shadows", async () => {
     const root = await writeFixture({
       "edges/Start.edge": `
+label: E
 description: A starting value
 fields:
   value:
@@ -1262,6 +1341,7 @@ fields:
     nullable: false
 `,
       "edges/Failed_Todo.edge": `
+label: E
 description: A failed Todo
 fields:
   input:
@@ -1271,6 +1351,7 @@ fields:
     nullable: false
 `,
       "edges/Failed_Person.edge": `
+label: E
 description: A failed Person
 fields:
   input:
@@ -1284,6 +1365,7 @@ fields:
       // fixture emitted Start, which neither shadow takes — the test only
       // ever asserted name expansion, so an unwireable topology went unnoticed.
       "nodes/failing.node": `
+label: E
 description: d
 input: Start
 output: Failed_Todo
@@ -1296,6 +1378,7 @@ examples:
         input: "bad todo"
 `,
       "nodes/HandleFailed.node": `
+label: E
 description: Handles whichever failure shows up first
 input:
   anyOf:
@@ -1395,6 +1478,7 @@ failing:
  * A still catches is an arc carrying nothing the consumer declares at all.
  */
 const ITEM_EDGE = `
+label: E
 description: One item
 index: id
 fields:
@@ -1406,6 +1490,7 @@ fields:
 `;
 
 const PLAIN_EDGE = (name: string) => `
+label: E
 description: ${name}
 fields:
   ${name.toLowerCase()}Value:
@@ -1421,8 +1506,8 @@ describe("elaborate — wiring type checks", () => {
       "edges/Seed.edge": PLAIN_EDGE("Seed"),
       "edges/Item.edge": ITEM_EDGE,
       "edges/Report.edge": PLAIN_EDGE("Report"),
-      "nodes/extract.node": `label: E\ndescription: d\ninput: Seed\noutput:\n  many: Item\n`,
-      "nodes/use.node": `label: U\ndescription: d\ninput: Item\noutput: Report\n`,
+      "nodes/extract.node": `label: E\ndescription: d\ninput: Seed\noutput:\n  many: Item\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Item:\n        k: {}\n`,
+      "nodes/use.node": `label: U\ndescription: d\ninput: Item\noutput: Report\nexamples:\n  - given:\n      Item: {}\n    expect:\n      Report: {}\n`,
       "topology/main.topology": `extract:\n  then:\n    use: {}\n`,
     });
 
@@ -1442,8 +1527,8 @@ describe("elaborate — wiring type checks", () => {
       "edges/Seed.edge": PLAIN_EDGE("Seed"),
       "edges/Other.edge": PLAIN_EDGE("Other"),
       "edges/Report.edge": PLAIN_EDGE("Report"),
-      "nodes/a.node": `label: A\ndescription: d\ninput: Seed\noutput: Seed\n`,
-      "nodes/b.node": `label: B\ndescription: d\ninput: Other\noutput: Report\n`,
+      "nodes/a.node": `label: A\ndescription: d\ninput: Seed\noutput: Seed\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Seed: {}\n`,
+      "nodes/b.node": `label: B\ndescription: d\ninput: Other\noutput: Report\nexamples:\n  - given:\n      Other: {}\n    expect:\n      Report: {}\n`,
       "topology/main.topology": `a:\n  then:\n    b: {}\n`,
     });
 
@@ -1456,8 +1541,8 @@ describe("elaborate — wiring type checks", () => {
       "edges/Left.edge": PLAIN_EDGE("Left"),
       "edges/Right.edge": PLAIN_EDGE("Right"),
       "edges/Report.edge": PLAIN_EDGE("Report"),
-      "nodes/split.node": `label: S\ndescription: d\ninput: Seed\noutput: Left\n`,
-      "nodes/join.node": `label: J\ndescription: d\ninput:\n  allOf:\n    - Left\n    - Right\noutput: Report\n`,
+      "nodes/split.node": `label: S\ndescription: d\ninput: Seed\noutput: Left\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Left: {}\n`,
+      "nodes/join.node": `label: J\ndescription: d\ninput:\n  allOf:\n    - Left\n    - Right\noutput: Report\nexamples:\n  - given:\n      Left: {}\n      Right: {}\n    expect:\n      Report: {}\n`,
       "topology/main.topology": `split:\n  then:\n    join: {}\n`,
     });
 
@@ -1470,10 +1555,10 @@ describe("elaborate — wiring type checks", () => {
       "edges/Left.edge": PLAIN_EDGE("Left"),
       "edges/Right.edge": PLAIN_EDGE("Right"),
       "edges/Report.edge": PLAIN_EDGE("Report"),
-      "nodes/origin.node": `label: O\ndescription: d\ninput: Seed\noutput: Seed\n`,
-      "nodes/left.node": `label: L\ndescription: d\ninput: Seed\noutput: Left\n`,
-      "nodes/right.node": `label: R\ndescription: d\ninput: Seed\noutput: Right\n`,
-      "nodes/join.node": `label: J\ndescription: d\ninput:\n  allOf:\n    - Left\n    - Right\noutput: Report\n`,
+      "nodes/origin.node": `label: O\ndescription: d\ninput: Seed\noutput: Seed\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Seed: {}\n`,
+      "nodes/left.node": `label: L\ndescription: d\ninput: Seed\noutput: Left\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Left: {}\n`,
+      "nodes/right.node": `label: R\ndescription: d\ninput: Seed\noutput: Right\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Right: {}\n`,
+      "nodes/join.node": `label: J\ndescription: d\ninput:\n  allOf:\n    - Left\n    - Right\noutput: Report\nexamples:\n  - given:\n      Left: {}\n      Right: {}\n    expect:\n      Report: {}\n`,
       "topology/main.topology": `origin:\n  then:\n    left:\n      then:\n        join: {}\n    right:\n      then:\n        join: {}\n`,
     });
 
@@ -1488,8 +1573,8 @@ describe("elaborate — wiring type checks", () => {
       "edges/Pass.edge": PLAIN_EDGE("Pass"),
       "edges/Fail.edge": PLAIN_EDGE("Fail"),
       "edges/Report.edge": PLAIN_EDGE("Report"),
-      "nodes/check.node": `label: C\ndescription: d\ninput: Seed\noutput:\n  oneOf:\n    - Pass\n    - Fail\n`,
-      "nodes/onPass.node": `label: P\ndescription: d\ninput: Pass\noutput: Report\n`,
+      "nodes/check.node": `label: C\ndescription: d\ninput: Seed\noutput:\n  oneOf:\n    - Pass\n    - Fail\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Pass: {}\n`,
+      "nodes/onPass.node": `label: P\ndescription: d\ninput: Pass\noutput: Report\nexamples:\n  - given:\n      Pass: {}\n    expect:\n      Report: {}\n`,
       "topology/main.topology": `check:\n  then:\n    onPass: {}\n`,
     });
 
@@ -1501,7 +1586,7 @@ describe("elaborate — wiring type checks", () => {
     const root = await writeFixture({
       "edges/Seed.edge": PLAIN_EDGE("Seed"),
       "edges/Report.edge": PLAIN_EDGE("Report"),
-      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Report\n`,
+      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Report\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Report: {}\n`,
       "topology/main.topology": `start: {}\n`,
     });
 
@@ -1512,7 +1597,7 @@ describe("elaborate — wiring type checks", () => {
   it("accepts a self-loop, where a node's own output covers its own input", async () => {
     const root = await writeFixture({
       "edges/Tick.edge": PLAIN_EDGE("Tick"),
-      "nodes/count.node": `label: C\ndescription: d\ninput: Tick\noutput: Tick\n`,
+      "nodes/count.node": `label: C\ndescription: d\ninput: Tick\noutput: Tick\nexamples:\n  - given:\n      Tick: {}\n    expect:\n      Tick: {}\n`,
       "topology/main.topology": `count:\n  then:\n    count: {}\n`,
     });
 
@@ -1534,6 +1619,7 @@ describe("elaborate — wiring type checks", () => {
 describe("elaborate — composite nodes", () => {
   const EDGES = {
     "edges/Seed.edge": `
+label: E
 description: Seed
 fields:
   value:
@@ -1543,6 +1629,7 @@ fields:
     nullable: false
 `,
     "edges/Left.edge": `
+label: E
 description: Left
 fields:
   value:
@@ -1552,6 +1639,7 @@ fields:
     nullable: false
 `,
     "edges/Right.edge": `
+label: E
 description: Right
 fields:
   value:
@@ -1561,6 +1649,7 @@ fields:
     nullable: false
 `,
     "edges/Done.edge": `
+label: E
 description: Done
 fields:
   value:
@@ -1572,16 +1661,16 @@ fields:
   };
 
   const SPLIT_NODES = {
-    "nodes/toLeft.node": `label: L\ndescription: d\ninput: Seed\noutput: Left\n`,
-    "nodes/toRight.node": `label: R\ndescription: d\ninput: Seed\noutput: Right\n`,
+    "nodes/toLeft.node": `label: L\ndescription: d\ninput: Seed\noutput: Left\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Left: {}\n`,
+    "nodes/toRight.node": `label: R\ndescription: d\ninput: Seed\noutput: Right\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Right: {}\n`,
   };
 
   it("inlines a referenced composite: qualified inner nodes, and the composite name gone", async () => {
     const root = await writeFixture({
       ...EDGES,
       ...SPLIT_NODES,
-      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\n`,
-      "nodes/finish.node": `label: F\ndescription: d\ninput:\n  allOf:\n    - Left\n    - Right\noutput: Done\n`,
+      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Seed: {}\n`,
+      "nodes/finish.node": `label: F\ndescription: d\ninput:\n  allOf:\n    - Left\n    - Right\noutput: Done\nexamples:\n  - given:\n      Left: {}\n      Right: {}\n    expect:\n      Done: {}\n`,
       "topology/split.topology": `
 input: Seed
 output:
@@ -1636,8 +1725,8 @@ start:
     const root = await writeFixture({
       ...EDGES,
       ...SPLIT_NODES,
-      "nodes/startA.node": `label: A\ndescription: d\ninput: Seed\noutput: Seed\n`,
-      "nodes/startB.node": `label: B\ndescription: d\ninput: Seed\noutput: Seed\n`,
+      "nodes/startA.node": `label: A\ndescription: d\ninput: Seed\noutput: Seed\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Seed: {}\n`,
+      "nodes/startB.node": `label: B\ndescription: d\ninput: Seed\noutput: Seed\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Seed: {}\n`,
       "topology/split.topology": `
 input: Seed
 output:
@@ -1684,7 +1773,7 @@ startB:
     const root = await writeFixture({
       ...EDGES,
       ...SPLIT_NODES,
-      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\n`,
+      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Seed: {}\n`,
       "topology/main.topology": `
 start:
   then:
@@ -1704,7 +1793,7 @@ start:
     const root = await writeFixture({
       ...EDGES,
       ...SPLIT_NODES,
-      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\n`,
+      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Seed: {}\n`,
       "topology/split.topology": `
 input: Seed
 output:
@@ -1727,7 +1816,7 @@ wiring:
     const root = await writeFixture({
       ...EDGES,
       ...SPLIT_NODES,
-      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\n`,
+      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Seed: {}\n`,
       "topology/split.topology": `
 input: Seed
 output:
@@ -1760,13 +1849,13 @@ describe("elaborate — a composite removes a topology's double mention", () => 
     // *exit* is allOf[Dough, Oven] leaves the root a chain — one mention of
     // each node — and flattens to the identical wiring.
     const root = await writeFixture({
-      "edges/Recipe.edge": `description: R\nfields:\n  title:\n    type: utf8\n    label: T\n    description: d\n    nullable: false\n`,
-      "edges/Dough.edge": `description: D\nfields:\n  title:\n    type: utf8\n    label: T\n    description: d\n    nullable: false\n`,
-      "edges/Oven.edge": `description: O\nfields:\n  temperature:\n    type: uint16\n    label: T\n    description: d\n    nullable: false\n`,
-      "edges/Cookies.edge": `description: C\nfields:\n  title:\n    type: utf8\n    label: T\n    description: d\n    nullable: false\n`,
-      "nodes/mix.node": `label: M\ndescription: d\ninput: Recipe\noutput: Dough\n`,
-      "nodes/preheatOven.node": `label: P\ndescription: d\ninput: Recipe\noutput: Oven\n`,
-      "nodes/bake.node": `label: B\ndescription: d\ninput:\n  allOf:\n    - Dough\n    - Oven\noutput: Cookies\n`,
+      "edges/Recipe.edge": `label: E\ndescription: R\nfields:\n  title:\n    type: utf8\n    label: T\n    description: d\n    nullable: false\n`,
+      "edges/Dough.edge": `label: E\ndescription: D\nfields:\n  title:\n    type: utf8\n    label: T\n    description: d\n    nullable: false\n`,
+      "edges/Oven.edge": `label: E\ndescription: O\nfields:\n  temperature:\n    type: uint16\n    label: T\n    description: d\n    nullable: false\n`,
+      "edges/Cookies.edge": `label: E\ndescription: C\nfields:\n  title:\n    type: utf8\n    label: T\n    description: d\n    nullable: false\n`,
+      "nodes/mix.node": `label: M\ndescription: d\ninput: Recipe\noutput: Dough\nexamples:\n  - given:\n      Recipe: {}\n    expect:\n      Dough: {}\n`,
+      "nodes/preheatOven.node": `label: P\ndescription: d\ninput: Recipe\noutput: Oven\nexamples:\n  - given:\n      Recipe: {}\n    expect:\n      Oven: {}\n`,
+      "nodes/bake.node": `label: B\ndescription: d\ninput:\n  allOf:\n    - Dough\n    - Oven\noutput: Cookies\nexamples:\n  - given:\n      Dough: {}\n      Oven: {}\n    expect:\n      Cookies: {}\n`,
       "topology/prepare.topology": `
 input: Recipe
 output:
@@ -1802,9 +1891,9 @@ prepare:
 describe("elaborate — noop", () => {
   it("synthesizes noop_<Edge> on reference, and not otherwise", async () => {
     const edges = {
-      "edges/Seed.edge": `description: S\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
-      "edges/Other.edge": `description: O\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
-      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\n`,
+      "edges/Seed.edge": `label: E\ndescription: S\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "edges/Other.edge": `label: E\ndescription: O\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Seed: {}\n`,
     };
 
     const unreferenced = await elaborate(await writeFixture({ ...edges, "topology/main.topology": `start: {}\n` }));
@@ -1836,14 +1925,14 @@ describe("elaborate — noop", () => {
     // a terminal, and a terminal's contract determines its implementation, so
     // there is nothing to draft and nothing for the acceptance gate to accept.
     const root = await writeFixture({
-      "edges/Seed.edge": `description: S\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
-      "edges/Left.edge": `description: L\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
-      "edges/Right.edge": `description: R\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
-      "edges/Done.edge": `description: D\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
-      "nodes/toLeft.node": `label: L\ndescription: d\ninput: Seed\noutput: Left\n`,
-      "nodes/toRight.node": `label: R\ndescription: d\ninput: Seed\noutput: Right\n`,
-      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\n`,
-      "nodes/finish.node": `label: F\ndescription: d\ninput:\n  allOf:\n    - Left\n    - Right\noutput: Done\n`,
+      "edges/Seed.edge": `label: E\ndescription: S\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "edges/Left.edge": `label: E\ndescription: L\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "edges/Right.edge": `label: E\ndescription: R\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "edges/Done.edge": `label: E\ndescription: D\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "nodes/toLeft.node": `label: L\ndescription: d\ninput: Seed\noutput: Left\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Left: {}\n`,
+      "nodes/toRight.node": `label: R\ndescription: d\ninput: Seed\noutput: Right\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Right: {}\n`,
+      "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Seed: {}\n`,
+      "nodes/finish.node": `label: F\ndescription: d\ninput:\n  allOf:\n    - Left\n    - Right\noutput: Done\nexamples:\n  - given:\n      Left: {}\n      Right: {}\n    expect:\n      Done: {}\n`,
       "topology/split.topology": `
 input: Seed
 output:
@@ -1884,18 +1973,18 @@ describe("elaborate — inline edge fields are validated", () => {
    */
   it("rejects an unknown scalar type, naming the file and the field", async () => {
     const root = await writeFixture({
-      "edges/nested/Bad.edge": `description: B\nfields:\n  v:\n    type: notatype\n    label: V\n    description: d\n    nullable: false\n`,
+      "edges/nested/Bad.edge": `label: E\ndescription: B\nfields:\n  v:\n    type: notatype\n    label: V\n    description: d\n    nullable: false\n`,
     });
 
-    await expect(elaborate(root)).rejects.toThrow(/edges\/nested\/Bad\.edge.*field "v".*Unknown field type "notatype"/s);
+    await expect(elaborate(root)).rejects.toThrow(/edges\/nested\/Bad\.edge.*\/fields\/v\/type.*utf8/s);
   });
 
   it("rejects a string validation on a numeric field", async () => {
     const root = await writeFixture({
-      "edges/Bad.edge": `description: B\nfields:\n  n:\n    type: uint8\n    label: N\n    description: d\n    nullable: false\n    validations:\n      minLength: 3\n`,
+      "edges/Bad.edge": `label: E\ndescription: B\nfields:\n  n:\n    type: uint8\n    label: N\n    description: d\n    nullable: false\n    validations:\n      minLength: 3\n`,
     });
 
-    await expect(elaborate(root)).rejects.toThrow(/field "n".*minLength/s);
+    await expect(elaborate(root)).rejects.toThrow(/edges\/Bad\.edge.*minLength/s);
   });
 
   it("still accepts every field the real examples declare", async () => {

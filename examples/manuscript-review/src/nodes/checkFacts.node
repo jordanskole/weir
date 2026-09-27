@@ -2,3 +2,13 @@ label: Check Facts
 description: Finds the claims in one revision — the first of two hops on the fact arm
 input: Revision
 output: FactFinding
+examples:
+  - given:
+      Revision:
+        id: "m-1-r1"
+        text: "The manuscript"
+        round: 1
+    expect:
+      FactFinding:
+        revision_id: "m-1-r1"
+        claim: "claim at round 1"

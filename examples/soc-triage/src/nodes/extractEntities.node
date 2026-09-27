@@ -3,3 +3,21 @@ description: Pull the entities worth investigating out of an alert
 input: Alert
 output:
   many: Entity
+examples:
+  # A many output is a collection keyed by the edge's own index field, so
+  # each entry's key is its `id`.
+  - given:
+      Alert:
+        id: "alert-1"
+        principal: "svc-backup@corp"
+        asset: "web-07.corp"
+    expect:
+      Entity:
+        e-principal:
+          id: "e-principal"
+          kind: "principal"
+          value: "svc-backup@corp"
+        e-asset:
+          id: "e-asset"
+          kind: "asset"
+          value: "web-07.corp"

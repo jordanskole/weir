@@ -2,3 +2,13 @@ label: Assess
 description: Reach a verdict for one entity from its joined evidence
 input: EntityEvidence
 output: Assessment
+examples:
+  - given:
+      EntityEvidence:
+        entityId: "e-principal"
+        identitySummary: "identity:svc-backup@corp"
+        assetSummary: "asset:svc-backup@corp"
+    expect:
+      Assessment:
+        entityId: "e-principal"
+        verdict: "identity:svc-backup@corp / asset:svc-backup@corp"

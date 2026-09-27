@@ -5,3 +5,25 @@ output:
   oneOf:
     - Accepted
     - Revision
+examples:
+  # Two rounds remain, so the manuscript comes back as a fresh revision.
+  - given:
+      Revision:
+        id: "m-1-r1"
+        text: "The manuscript"
+        round: 1
+    expect:
+      Revision:
+        id: "m-1-r2"
+        text: "The manuscript (revised)"
+        round: 2
+  # The base case the cycle terminates on — nothing routes Accepted back.
+  - given:
+      Revision:
+        id: "m-1-r3"
+        text: "The manuscript (revised) (revised)"
+        round: 3
+    expect:
+      Accepted:
+        id: "m-1-r3"
+        rounds: 3

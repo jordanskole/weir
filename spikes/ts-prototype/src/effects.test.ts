@@ -18,9 +18,9 @@ afterEach(async () => {
 });
 
 const EDGES = {
-  "edges/Ask.edge": `description: A request for the time\nfields:\n  label:\n    type: utf8\n    label: L\n    description: d\n    nullable: false\n`,
-  "edges/Stamp.edge": `description: A recorded instant\nfields:\n  label:\n    type: utf8\n    label: L\n    description: d\n    nullable: false\n  at:\n    type: utf8\n    label: A\n    description: d\n    nullable: false\n`,
-  "edges/Note.edge": `description: Something written about a stamp\nfields:\n  text:\n    type: utf8\n    label: T\n    description: d\n    nullable: false\n`,
+  "edges/Ask.edge": `label: E\ndescription: A request for the time\nfields:\n  label:\n    type: utf8\n    label: L\n    description: d\n    nullable: false\n`,
+  "edges/Stamp.edge": `label: E\ndescription: A recorded instant\nfields:\n  label:\n    type: utf8\n    label: L\n    description: d\n    nullable: false\n  at:\n    type: utf8\n    label: A\n    description: d\n    nullable: false\n`,
+  "edges/Note.edge": `label: E\ndescription: Something written about a stamp\nfields:\n  text:\n    type: utf8\n    label: T\n    description: d\n    nullable: false\n`,
 };
 
 /**
@@ -31,9 +31,9 @@ const EDGES = {
  */
 const PROGRAM = {
   ...EDGES,
-  "nodes/ask.node": `label: Ask\ndescription: d\ninput: Ask\noutput: Ask\n`,
-  "nodes/clock.node": `label: Clock\ndescription: Reads the wall clock\neffect: clock\ninput: Ask\noutput: Stamp\n`,
-  "nodes/note.node": `label: Note\ndescription: d\ninput: Stamp\noutput: Note\n`,
+  "nodes/ask.node": `label: Ask\ndescription: d\ninput: Ask\noutput: Ask\nexamples:\n  - given:\n      Ask: {}\n    expect:\n      Ask: {}\n`,
+  "nodes/clock.node": `label: Clock\ndescription: Reads the wall clock\neffect: clock\ninput: Ask\noutput: Stamp\nexamples:\n  - given:\n      Ask: {}\n    expect:\n      Stamp: {}\n`,
+  "nodes/note.node": `label: Note\ndescription: d\ninput: Stamp\noutput: Note\nexamples:\n  - given:\n      Stamp: {}\n    expect:\n      Note: {}\n`,
   "topology/main.topology": `ask:\n  then:\n    clock:\n      then:\n        note: {}\n`,
 };
 
@@ -186,7 +186,7 @@ describe("effects", () => {
   it("reports zero checked for a run of only effect nodes, rather than a clean pass", async () => {
     const root = await fixture({
       ...EDGES,
-      "nodes/clock.node": `label: Clock\ndescription: d\neffect: clock\ninput: Ask\noutput: Stamp\n`,
+      "nodes/clock.node": `label: Clock\ndescription: d\neffect: clock\ninput: Ask\noutput: Stamp\nexamples:\n  - given:\n      Ask: {}\n    expect:\n      Stamp: {}\n`,
       "topology/main.topology": `clock: {}\n`,
     });
     const program = await elaborateWithImplementations(root, join(root, "impl"));

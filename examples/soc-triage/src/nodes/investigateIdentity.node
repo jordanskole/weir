@@ -2,3 +2,13 @@ label: Investigate Identity
 description: Gather identity evidence about one entity
 input: Entity
 output: IdentityContext
+examples:
+  - given:
+      Entity:
+        id: "e-principal"
+        kind: "principal"
+        value: "svc-backup@corp"
+    expect:
+      IdentityContext:
+        entityId: "e-principal"
+        summary: "identity:svc-backup@corp"

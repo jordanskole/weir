@@ -2,3 +2,13 @@ label: Investigate Asset
 description: Gather asset evidence about one entity
 input: Entity
 output: AssetContext
+examples:
+  - given:
+      Entity:
+        id: "e-asset"
+        kind: "asset"
+        value: "web-07.corp"
+    expect:
+      AssetContext:
+        entityId: "e-asset"
+        summary: "asset:web-07.corp"
