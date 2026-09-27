@@ -606,6 +606,7 @@ async function buildEnvelope(nodeDef: NodeDecl, context: InvocationContext): Pro
     step: context.step ?? 0,
     identity: narrowIdentity(nodeDef.scope, context.identity ?? SYSTEM_IDENTITY),
     node: context.nodeName ?? nodeDef.name,
+    ...(nodeDef.implementationHash !== undefined && { implementationHash: nodeDef.implementationHash }),
     contractHash: (await hashNode(nodeDef)).hash,
   };
 }

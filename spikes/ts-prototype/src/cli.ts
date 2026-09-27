@@ -281,11 +281,12 @@ async function verify(dir: string, flags: Map<string, string>): Promise<CliResul
       ...(effects.length > 0 ? ["", `  ${effects.length} declared nondeterministic:`, ...effects] : []),
       ...(skipped.length > 0 ? ["", `  ${skipped.length} not checked:`, ...skipped] : []),
       "",
-      // The pin is contract-shaped, so a mismatch has two possible causes and
-      // the output must not accuse the node of the wrong one.
-      `  Either the node read something its contract does not declare, or the`,
-      `  implementation changed since the run — the version pin pins the`,
-      `  contract, not the implementation (docs/open-questions.md).`,
+      // The pin is implementation-shaped now: a changed implementation is
+      // refused by replay and arrives above as a skip, so what reaches here
+      // is attributable to the node.
+      `  These nodes read something their contracts do not declare. Both the`,
+      `  contract and the implementation are unchanged since the run — replay`,
+      `  refuses either kind of drift — so the difference is the node itself.`,
     ].join("\n"),
   };
 }

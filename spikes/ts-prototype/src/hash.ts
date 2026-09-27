@@ -135,6 +135,30 @@ function toHex(buffer: ArrayBuffer): string {
     .join("");
 }
 
+/**
+ * Hashes an implementation's source text — the identity the contract hash
+ * does not carry.
+ *
+ * `fingerprintNode` covers a node's *declaration*, so two different
+ * implementations of one contract hash identically and are stored at the
+ * same path (`{node}/{short(contractHash)}.ts`). Re-accepting overwrites,
+ * and a replay then resolves whatever is on disk now rather than what ran
+ * — which `readme.md` nonetheless describes as replaying "against exactly
+ * that one" (docs/open-questions.md, "The version pin pins the contract,
+ * not the implementation").
+ *
+ * Source text rather than the parsed function, because that is what was
+ * accepted and what can be compared later without running anything. It is
+ * deliberately sensitive to formatting: a reformatted implementation is a
+ * different artifact from the one the gate accepted, and saying so is
+ * cheaper than being wrong about it.
+ */
+export async function hashSource(source: string): Promise<SchemaHash> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
+  const hash = toHex(digest);
+  return { hash, short: hash.slice(0, 8) };
+}
+
 export async function hashEdge(edge: AnyEdgeDef): Promise<SchemaHash> {
   const json = JSON.stringify(fingerprint(edge));
   const bytes = new TextEncoder().encode(json);

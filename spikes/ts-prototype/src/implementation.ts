@@ -13,11 +13,11 @@
  * other half of this same seam.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { elaborate } from "./elaborate.js";
 import type { Wiring } from "./elaborate.js";
-import { hashNode } from "./hash.js";
+import { hashNode, hashSource } from "./hash.js";
 import type { AnyEdgeDef, FieldDef, InputSpec, NodeDecl, NodeDef, OutputSpec } from "./types.js";
 
 /**
@@ -76,11 +76,17 @@ export async function resolveImplementationAt<In extends InputSpec, O extends Ou
     throw new Error(`"${path}" could not be loaded: ${(cause as Error).message}`, { cause });
   }
 
+  // Read separately from the import rather than derived from it: the module
+  // is a parsed function and this is the artifact that was accepted. The
+  // contract hash says which contract ran; this says which implementation of
+  // it, which is what makes a replay mismatch attributable.
+  const implementationHash = (await hashSource(readFileSync(path, "utf8"))).hash;
+
   if (typeof mod.default !== "function") {
     throw new Error(`"${path}" must default-export the node's Fn.`);
   }
 
-  return { ...node, fn: mod.default as NodeDef<In, O>["fn"] };
+  return { ...node, fn: mod.default as NodeDef<In, O>["fn"], implementationHash };
 }
 
 /**

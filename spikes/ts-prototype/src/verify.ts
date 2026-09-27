@@ -16,6 +16,12 @@
  * handed the same input and returns the same output. Only nondeterminism a
  * node reached for directly — a clock, an unseeded sample — differs.
  *
+ * **A mismatch is attributable, now that the pin is implementation-shaped.**
+ * `replayInvocation` refuses an entry whose recorded `implementationHash`
+ * differs from the file on disk, so that case arrives as a *skip* with a
+ * reason rather than as a mismatch. What is left, when a replay completes
+ * and disagrees, is the node itself.
+ *
  * **What it cannot see**, stated here so a clean result is not mistaken for
  * a proof: nondeterminism that happens to agree twice. A node reading a
  * clock at second granularity passes when the replay lands in the same

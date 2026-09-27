@@ -213,7 +213,7 @@ describe("runCli — verify", () => {
     expect(verify.out).toContain("evidence, not proof");
   });
 
-  it("fails a node that reads a clock, and does not accuse it of the wrong cause", async () => {
+  it("fails a node that reads a clock, and attributes it to the node", async () => {
     const { verify } = await runThenVerify(
       `export default function observe(r) { return { value: r.value + process.hrtime.bigint().toString() }; }`,
     );
@@ -222,7 +222,10 @@ describe("runCli — verify", () => {
     expect(verify.out).toContain("did not replay identically");
     expect(verify.out).toContain("recorded");
     expect(verify.out).toContain("replayed");
-    // A mismatch has two possible causes while the pin is contract-shaped.
-    expect(verify.out).toContain("the version pin pins the");
+    // The pin is implementation-shaped now, so replay refuses a changed
+    // implementation and it arrives as a skip. A mismatch that reaches here
+    // is attributable to the node.
+    expect(verify.out).toContain("read something their contracts do not declare");
+    expect(verify.out).toContain("unchanged since the run");
   });
 });

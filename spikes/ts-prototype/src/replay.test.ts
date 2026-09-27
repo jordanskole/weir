@@ -420,3 +420,35 @@ describe("replayInvocation", () => {
     expect(replayed).toEqual({ value: `${idA},${idB}` });
   });
 });
+
+describe("replayInvocation — the implementation pin", () => {
+  it("refuses an implementation that changed while the contract did not", async () => {
+    // Two different implementations of one contract hash identically and
+    // live at the same path, so re-accepting overwrites. Without this check
+    // the replay runs a different function and reports it as the same one —
+    // which is what made `verify`'s mismatches ambiguous.
+    dir = await mkdtemp(join(tmpdir(), "weir-replay-impl-"));
+    const { short, hash } = await hashNode(birthday);
+    await writeImpl(dir, "birthday", short, `export default function birthday(p) { return { age: p.age + 1 }; }\n`);
+    const entry = await recordInvocation(birthday, dir, hash, { age: 41 }, "c-impl");
+
+    // Same contract, different function, same path.
+    await writeImpl(dir, "birthday", short, `export default function birthday(p) { return { age: p.age + 2 }; }\n`);
+
+    await expect(replayInvocation(entry, birthday, dir)).rejects.toThrow(
+      /the contract is unchanged, but the accepted implementation is not the one that ran/,
+    );
+  });
+
+  it("replays an entry recorded before implementation identity existed", async () => {
+    // An older trace has no implementationHash. That is not evidence of
+    // drift, so it must replay rather than fail.
+    dir = await mkdtemp(join(tmpdir(), "weir-replay-legacy-"));
+    const { short, hash } = await hashNode(birthday);
+    await writeImpl(dir, "birthday", short, `export default function birthday(p) { return { age: p.age + 1 }; }\n`);
+    const recorded = await recordInvocation(birthday, dir, hash, { age: 41 }, "c-legacy");
+    const legacy = { ...recorded, envelope: { ...recorded.envelope, implementationHash: undefined } };
+
+    await expect(replayInvocation(legacy, birthday, dir)).resolves.toEqual({ age: 42 });
+  });
+});

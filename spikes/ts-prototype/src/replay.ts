@@ -76,6 +76,31 @@ export async function replayInvocation(
   }
 
   const nodeDef = await resolveImplementationAt(node, implRoot, entry.envelope.contractHash);
+
+  // The contract check above proves the *declaration* has not moved. This
+  // proves the *implementation* has not either — two different
+  // implementations of one contract hash identically and live at the same
+  // path, so re-accepting overwrites and a replay would otherwise run a
+  // different function while reporting success (docs/open-questions.md,
+  // "The version pin pins the contract, not the implementation").
+  //
+  // Recorded only since implementation identity existed, so an entry
+  // without one replays as before rather than failing: an older trace is
+  // not evidence of drift.
+  if (
+    entry.envelope.implementationHash !== undefined &&
+    nodeDef.implementationHash !== undefined &&
+    entry.envelope.implementationHash !== nodeDef.implementationHash
+  ) {
+    throw new Error(
+      `Cannot replay "${entry.envelope.node}": the contract is unchanged, but the accepted ` +
+        `implementation is not the one that ran — it now hashes to ` +
+        `"${nodeDef.implementationHash.slice(0, 8)}", and this invocation ran under ` +
+        `"${entry.envelope.implementationHash.slice(0, 8)}". Replaying would run a different ` +
+        `function and report it as the same one.`,
+    );
+  }
+
   const { result } = await invokeWithInput(nodeDef, entry.input, {
     correlationId: entry.envelope.correlationId,
     identity: entry.envelope.identity,

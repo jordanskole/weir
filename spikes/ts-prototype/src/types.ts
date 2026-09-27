@@ -268,6 +268,13 @@ export interface Envelope {
    * `InstanceEnvelope` instead (see the Log, membrane.ts).
    */
   contractHash: string;
+  /**
+   * Which implementation of that contract actually ran (`hashSource` of its
+   * source text). Absent for an effect node, which has no accepted artifact
+   * — its behaviour is a host handler, and pinning that is a separate
+   * question.
+   */
+  implementationHash?: string;
 }
 
 /**
@@ -471,6 +478,18 @@ export interface NodeDef<In extends InputSpec = InputSpec, O extends OutputSpec 
    * one place a program is supposed to be nondeterministic.
    */
   effect?: string;
+  /**
+   * The hash of the implementation source this NodeDef resolved to, set by
+   * `resolveImplementationAt`. Absent on a bare `NodeDecl`, and absent for
+   * an effect node, whose behaviour is a host handler rather than an
+   * accepted artifact.
+   *
+   * The contract hash identifies *which contract* ran; this identifies
+   * *which implementation of it*. Without it the version pin is
+   * contract-shaped, and a replay cannot tell "this node is
+   * nondeterministic" from "the implementation changed underneath".
+   */
+  implementationHash?: string;
   examples?: Example<In, O>[];
   /**
    * Invariants checked against generated inputs (docs/design.md §6).
