@@ -4,14 +4,16 @@
   "type": "object",
   "required": [
     "input",
-    "output",
-    "examples"
+    "output"
   ],
   "properties": {
     "label": {
       "type": "string"
     },
     "description": {
+      "type": "string"
+    },
+    "effect": {
       "type": "string"
     },
     "input": {
@@ -188,6 +190,20 @@
   },
   "additionalProperties": false,
   "allOf": [
+    {
+      "if": {
+        "not": {
+          "required": [
+            "effect"
+          ]
+        }
+      },
+      "then": {
+        "required": [
+          "examples"
+        ]
+      }
+    },
     {
       "if": {
         "properties": {
@@ -380,8 +396,8 @@
                   "type": "object",
                   "minProperties": 1,
                   "additionalProperties": {
-                    "type": "array",
-                    "items": {
+                    "type": "object",
+                    "additionalProperties": {
                       "type": "object"
                     }
                   },
