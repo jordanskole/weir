@@ -188,3 +188,60 @@ describe("elaborateWithImplementations", () => {
     expect(program.wiring.feeds).toEqual({ birthday: ["expect_Person_age_42"] });
   });
 });
+
+describe("resolveImplementationAt — the missing-file guard", () => {
+  /**
+   * The guard is an explicit `existsSync`, not an inference from `import()`
+   * throwing, and this test pins which of the two fired.
+   *
+   * `import()` caches by URL, so a file that was loaded and has since been
+   * deleted still resolves — the second import never touches the filesystem.
+   * That made `replay.test.ts`'s "no file on disk" case pass on Node 26 and
+   * fail on Node 24 (CI's pinned version), since the two differ in when a
+   * stripped-TypeScript module is re-read. A version-dependent test is not a
+   * test.
+   *
+   * Asserting the message alone would not distinguish the two paths, because
+   * the old code produced the same message from its import-catch. The
+   * discriminator is `cause`: the guard throws without one, because it never
+   * attempted the import. That holds on every Node version, whether or not
+   * the module happens to still be cached.
+   */
+  it("throws before importing, so a deleted-but-cached module cannot resolve", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "weir-impl-guard-"));
+    try {
+      const node: NodeDecl = {
+        name: "passthrough",
+        label: "P",
+        description: "d",
+        input: { kind: "single", edge: Person },
+        output: { kind: "single", edge: Person },
+      };
+      const { short, hash } = await hashNode(node);
+      await mkdir(join(dir, "passthrough"), { recursive: true });
+      const path = join(dir, "passthrough", `${short}.ts`);
+      await writeFile(path, `export default function passthrough(p) { return p; }\n`, "utf8");
+
+      // Load it, so the module is in the ESM cache.
+      const loaded = await resolveImplementationAt(node, dir, hash);
+      expect(typeof loaded.fn).toBe("function");
+
+      await rm(path);
+
+      let thrown: Error | undefined;
+      try {
+        await resolveImplementationAt(node, dir, hash);
+      } catch (error) {
+        thrown = error as Error;
+      }
+
+      expect(thrown).toBeDefined();
+      expect(thrown!.message).toContain(`No accepted implementation for "passthrough"`);
+      // No cause: the guard fired, rather than an import failing. This is
+      // the assertion that survives a Node upgrade.
+      expect((thrown as Error & { cause?: unknown }).cause).toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -13,6 +13,7 @@
  * other half of this same seam.
  */
 
+import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { elaborate } from "./elaborate.js";
 import type { Wiring } from "./elaborate.js";
@@ -34,16 +35,28 @@ export async function resolveImplementationAt<In extends InputSpec, O extends Ou
   const short = contractHash.slice(0, 8);
   const path = `${implRoot}/${node.name}/${short}.ts`;
 
-  let mod: Record<string, unknown>;
-  try {
-    mod = await import(pathToFileURL(path).href);
-  } catch (cause) {
+  // Checked explicitly rather than inferred from `import()` throwing, for
+  // two reasons. An `import()` is cached by URL, so a file that was loaded
+  // and has since been deleted still resolves — which made a test pass on
+  // one Node version and fail on another, since the two differ in when a
+  // stripped-TypeScript module is re-read. And an import can throw for
+  // reasons that are not "no implementation was accepted" — a syntax error
+  // in the file, most obviously — which this error message would then
+  // misreport. The message already claims "expected <path>"; this is the
+  // check that makes the claim true.
+  if (!existsSync(path)) {
     throw new Error(
       `No accepted implementation for "${node.name}" at contract hash "${short}" ` +
         `(expected "${path}"). Either the contract changed since acceptance, or ` +
         `no implementation was ever accepted for it.`,
-      { cause },
     );
+  }
+
+  let mod: Record<string, unknown>;
+  try {
+    mod = await import(pathToFileURL(path).href);
+  } catch (cause) {
+    throw new Error(`"${path}" could not be loaded: ${(cause as Error).message}`, { cause });
   }
 
   if (typeof mod.default !== "function") {
