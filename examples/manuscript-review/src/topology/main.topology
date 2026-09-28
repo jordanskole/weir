@@ -1,6 +1,7 @@
 # An `allOf` end: this example is only finished when the manuscript was
 # accepted *and* every round produced its note. Two terminals, because the
 # two halves come from different nodes.
+input: Draft
 output:
   allOf:
     - Accepted

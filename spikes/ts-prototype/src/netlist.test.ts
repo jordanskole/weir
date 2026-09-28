@@ -12,7 +12,8 @@ import type { AnyEdgeDef } from "./types.js";
  * `output`/`terminals` say what finishing looks like; the wiring is indented
  * under `wiring:` exactly as a composite's is.
  */
-const rootTopology = (output: string, terminals: string[], wiring: string): string =>
+const rootTopology = (input: string, output: string, terminals: string[], wiring: string): string =>
+  `input: ${input}\n` +
   `${output.includes("\n") ? `output:\n${output}` : `output: ${output}\n`}terminals:\n` +
   terminals.map((t) => `  - ${t}\n`).join("") +
   "wiring:\n" +

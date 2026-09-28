@@ -259,7 +259,11 @@ handed in directly by whatever triggered the graph (the HTTP handler, the cron t
 queue message), asserted the same way. A graph with several origin-shaped inputs doesn't
 trigger them independently at different times — there is exactly one call to the graph's
 outer membrane per external event, and every origin-shaped edge it declares needing
-resolves from that single payload at once.
+resolves from that single payload at once. That is what an entry topology's `input`
+declares and what `resolveTrigger` performs — above `runNetlist`, because the outer
+membrane is the host boundary and the runtime sits below it. Two elaboration checks keep
+it honest in both directions: an origin the trigger cannot supply could never fire, and an
+edge the trigger declares that no origin consumes is a promise the program does not keep.
 
 **Multi-input nodes** declare `input: { allOf: [A, B] }` rather than a bare edge name.
 This is a readiness condition, not a wire: the runtime resolves it by checking whether
@@ -289,9 +293,12 @@ by construction, so `verify` reports effect nodes as a third category — *nonde
 enters here by declaration* — rather than counting them as passing checks
 ([spec](superpowers/specs/2026-09-27-effects-are-data.md)).
 
-**Every topology declares its end.** A `.topology` declares `output` — what
-reaching the end looks like — and the `terminals` whose outputs count as it; a
-*composite* adds `input` and is otherwise identical. Both halves are checked: at
+**Every topology declares its beginning and its end.** A `.topology` declares
+`input` — what one external event supplies — `output`, and the `terminals` whose
+outputs count as that output. There is no second kind of file: a topology another
+topology *references* is inlined where it is named, and one nothing references is
+an **entry point** whose wiring is the program. Which it is, is derived rather than
+declared ([spec](superpowers/specs/2026-09-28-a-topology-declares-its-beginning.md)). Both halves are checked: at
 elaboration, the declared terminals must be able to produce the declared output;
 at the end of a run, the log must hold an instance of that output **produced by
 one of those terminals**.

@@ -637,7 +637,18 @@ export function isCompositeTopology(yamlText: string): boolean {
   return "input" in raw;
 }
 
-/** Parses a contract-declaring `.topology` into a CompositeDecl. Its filename is its name. */
+/**
+ * Parses any `.topology` into a `CompositeDecl`. Its filename is its name.
+ *
+ * There is one parser because there is one shape
+ * (docs/superpowers/specs/2026-09-28-a-topology-declares-its-beginning.md §1).
+ * A topology used to be a *root* or a *composite* depending on whether it
+ * declared `input:`; now every topology declares one, so that test would
+ * distinguish nothing. What distinguishes them is whether another topology
+ * **references** them — which was always the real difference, and is derivable
+ * rather than declared. A root was never a different kind of thing; it was a
+ * composite nobody had referenced yet.
+ */
 export function parseCompositeTopologyFile(
   yamlText: string,
   name: string,
@@ -657,57 +668,13 @@ export function parseCompositeTopologyFile(
       `Composite topology "${name}": unrecognized top-level key "${unrecognized}" — a composite declares only ${TOPOLOGY_RESERVED_KEYS.join(", ")}.`,
     );
   }
-  if (output === undefined) {
-    throw new Error(`Composite topology "${name}": declares "input" but no "output".`);
-  }
-  if (!Array.isArray(terminals) || terminals.length === 0) {
+  if (input === undefined) {
     throw new Error(
-      `Composite topology "${name}": needs a non-empty "terminals" list — the inner nodes whose outputs are this composite's output.`,
-    );
-  }
-  if (wiring === undefined) {
-    throw new Error(`Composite topology "${name}": declares a contract but no "wiring".`);
-  }
-  return {
-    name,
-    input: resolveInputSpec(input, resolveEdge),
-    output: resolveOutputSpec(output, resolveEdge),
-    terminals: terminals.map(String),
-    wiring: parseWiringObject(wiring as Record<string, unknown>, resolveNodeName),
-  };
-}
-
-/**
- * Parses a root `.topology` — `output`, `terminals`, and the `wiring` under its
- * own key, the same shape a composite has minus `input`.
- *
- * `output`/`terminals` are **required**. A root that declares no end is the
- * only boundary in weir that declares nothing, and the whole point of this
- * change is deleting that exception — so the error names the file rather than
- * defaulting to something and hoping.
- */
-export function parseRootTopologyFile(
-  yamlText: string,
-  name: string,
-  resolveEdge: EdgeResolver,
-  resolveNodeName: NodeNameResolver,
-): { end: RootEnd; wiring: Wiring } {
-  const raw = (parse(yamlText) as Record<string, unknown> | null) ?? {};
-  const { output, terminals, wiring, ...rest } = raw as {
-    output?: unknown;
-    terminals?: unknown;
-    wiring?: unknown;
-  };
-  const unrecognized = Object.keys(rest)[0];
-  if (unrecognized !== undefined) {
-    throw new Error(
-      `Topology "${name}": unrecognized top-level key "${unrecognized}" — a topology declares only ${TOPOLOGY_RESERVED_KEYS.join(", ")}. Wiring goes under "wiring:".`,
+      `Topology "${name}": declares no "input" — a topology must say what its trigger supplies, so one external event can populate every origin it declares needing (design.md §5).`,
     );
   }
   if (output === undefined) {
-    throw new Error(
-      `Topology "${name}": declares no "output" — a topology must say what reaching its end looks like, so a run that consumes everything and produces nothing is an error rather than a checkmark.`,
-    );
+    throw new Error(`Topology "${name}": declares "input" but no "output".`);
   }
   if (!Array.isArray(terminals) || terminals.length === 0) {
     throw new Error(
@@ -718,7 +685,10 @@ export function parseRootTopologyFile(
     throw new Error(`Topology "${name}": declares a contract but no "wiring".`);
   }
   return {
-    end: { name, output: resolveOutputSpec(output, resolveEdge), terminals: terminals.map(String) },
+    name,
+    input: resolveInputSpec(input, resolveEdge),
+    output: resolveOutputSpec(output, resolveEdge),
+    terminals: terminals.map(String),
     wiring: parseWiringObject(wiring as Record<string, unknown>, resolveNodeName),
   };
 }
@@ -1153,17 +1123,58 @@ function expandTerminals(
   });
 }
 
+/**
+ * The trigger must cover the origins, and the origins must cover the trigger
+ * (docs/superpowers/specs/2026-09-28-a-topology-declares-its-beginning.md §4).
+ *
+ * Both directions, because each catches a different mistake. An origin whose
+ * input edge the trigger does not supply can never fire — the same silent
+ * never-fires Rules A and B already reject for arcs and coverage. And an edge
+ * the entry declares that no origin consumes is a promise the program does not
+ * keep, which is exactly what a renamed origin leaves behind.
+ */
+function assertTriggerCoverage(
+  nodes: Record<string, NodeDecl>,
+  wiring: Wiring,
+  entries: CompositeDecl[],
+): void {
+  if (entries.length === 0) return;
+  const supplied = new Set(entries.flatMap((entry) => inputEdgeNames(entry.input)));
+  const wanted = new Map<string, string[]>();
+  for (const origin of wiring.origins) {
+    const decl = nodes[origin];
+    if (decl === undefined) continue; // reported by the wiring scan, not here
+    for (const edge of inputEdgeNames(decl.input)) {
+      wanted.set(edge, [...(wanted.get(edge) ?? []), origin]);
+    }
+  }
+
+  for (const [edge, origins] of wanted) {
+    if (supplied.has(edge)) continue;
+    throw new Error(
+      `Topology: origin ${origins.map((o) => `"${o}"`).join(", ")} needs "${edge}", but no topology declares it as input — the trigger cannot supply it, so ${origins.length === 1 ? "it" : "they"} could never fire.`,
+    );
+  }
+  for (const edge of supplied) {
+    if (wanted.has(edge)) continue;
+    throw new Error(
+      `Topology: declares input "${edge}", but no origin consumes it — a declared trigger nothing reads is a promise the program does not keep.`,
+    );
+  }
+}
+
 export interface Elaborated {
   fields: Record<string, FieldDef>;
   edges: Record<string, AnyEdgeDef>;
   nodes: Record<string, NodeDecl>;
   wiring: Wiring;
   /**
-   * What each root topology declares finishing looks like. Empty for a program
-   * with no root `.topology` at all — a declaration-only tree has no run to
-   * finish, so there is nothing to require of it.
+   * The topologies nothing else references — the program's entry points, each
+   * carrying the full contract (`input`, `output`, `terminals`). Empty for a
+   * program with no `.topology` at all: a declaration-only tree has no run to
+   * begin or finish, so there is nothing to require of it.
    */
-  ends: RootEnd[];
+  entries: CompositeDecl[];
 }
 
 /**
@@ -1296,12 +1307,14 @@ export async function elaborate(root: string): Promise<Elaborated> {
   // cheap first pass over the .topology files (their filenames and whether
   // they declare `input:`), before anything is parsed for real.
   const compositeNames = new Set<string>();
-  const topologyFiles: { file: string; text: string; composite: boolean }[] = [];
+  const topologyFiles: { file: string; text: string }[] = [];
   for await (const file of glob("**/*.topology", { cwd: root })) {
     const text = await readFile(`${root}/${file}`, "utf8");
-    const composite = isCompositeTopology(text);
-    if (composite) compositeNames.add(basename(file, ".topology"));
-    topologyFiles.push({ file, text, composite });
+    // Every `.topology` is a named, contracted topology now, so every name is
+    // referenceable — which is what makes "entry" derivable from reference
+    // rather than declared (spec §1).
+    compositeNames.add(basename(file, ".topology"));
+    topologyFiles.push({ file, text });
   }
 
   const resolveNodeName: NodeNameResolver = (name) => {
@@ -1318,24 +1331,35 @@ export async function elaborate(root: string): Promise<Elaborated> {
     return [name];
   };
 
-  // A `.topology` declaring `input:` is a composite — a named, contracted
-  // topology referenced where a node would be. Everything else is a root and
-  // merges as it always has.
-  const composites = new Map<string, CompositeDecl>();
-  const ends: RootEnd[] = [];
-  let wiring: Wiring = { origins: [], feeds: {} };
-  for (const { file, text, composite } of topologyFiles) {
+  // Parse every topology the same way, then ask which are referenced. A
+  // topology another topology names is inlined where it is named; one nothing
+  // names is an **entry point**, and its wiring is the program (spec §1).
+  const declared = new Map<string, CompositeDecl>();
+  for (const { file, text } of topologyFiles) {
     const name = basename(file, ".topology");
-    if (composite) {
-      composites.set(
-        name,
-        inFile(file, () => parseCompositeTopologyFile(text, name, resolveEdge, resolveNodeName)),
-      );
+    declared.set(name, inFile(file, () => parseCompositeTopologyFile(text, name, resolveEdge, resolveNodeName)));
+  }
+
+  const referenced = new Set<string>();
+  for (const decl of declared.values()) {
+    for (const mentioned of [...decl.wiring.origins, ...Object.values(decl.wiring.feeds).flat()]) {
+      // A topology naming *itself* is a cycle, not a reference that makes it a
+      // non-entry — `inlineComposites` rejects that separately, and counting it
+      // here would silently leave a program with no entry at all.
+      if (declared.has(mentioned) && mentioned !== decl.name) referenced.add(mentioned);
+    }
+  }
+
+  const composites = new Map<string, CompositeDecl>();
+  const entries: CompositeDecl[] = [];
+  let wiring: Wiring = { origins: [], feeds: {} };
+  for (const [name, decl] of declared) {
+    if (referenced.has(name)) {
+      composites.set(name, decl);
       continue;
     }
-    const root = inFile(file, () => parseRootTopologyFile(text, name, resolveEdge, resolveNodeName));
-    ends.push(root.end);
-    wiring = mergeWiring(wiring, root.wiring);
+    entries.push(decl);
+    wiring = mergeWiring(wiring, decl.wiring);
   }
 
   assertTopologyContracts(
@@ -1352,13 +1376,14 @@ export async function elaborate(root: string): Promise<Elaborated> {
   // keeps the declaration in the author's vocabulary: they name the unit they
   // wired, not the unit's insides. Deliberately after inlining, because only
   // then is it known how many instances the composite was expanded into.
-  const expanded = ends.map((end) => ({
-    ...end,
-    terminals: expandTerminals(end.terminals, composites, nodes, anyOfAliases),
+  const expanded = entries.map((entry) => ({
+    ...entry,
+    terminals: expandTerminals(entry.terminals, composites, nodes, anyOfAliases),
   }));
   assertTopologyContracts(nodes, expanded.map((e) => ({ kind: "Topology", ...e })));
+  assertTriggerCoverage(nodes, wiring, expanded);
 
   assertWiringTypes(nodes, wiring, anyOfAliases);
 
-  return { fields, edges, nodes, wiring, ends: expanded };
+  return { fields, edges, nodes, wiring, entries: expanded };
 }

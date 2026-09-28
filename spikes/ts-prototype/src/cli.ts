@@ -26,7 +26,7 @@ import { serializeNetlist } from "./netlist.js";
 import { exportContract } from "./contract.js";
 import { acceptImplementation } from "./accept.js";
 import { elaborateWithImplementations } from "./implementation.js";
-import { runNetlist } from "./runtime.js";
+import { resolveTrigger, runNetlist } from "./runtime.js";
 import { FileLog } from "./file-log.js";
 import { FileTrace } from "./file-trace.js";
 import { replayInvocation } from "./replay.js";
@@ -53,7 +53,9 @@ usage
                                 run one candidate implementation through the acceptance gate
 
   dir defaults to the current directory.
-  --payload is a JSON object of origin node name -> that node's payload.
+  --payload is the trigger: one external event, shaped by the entry topology's
+  declared input. A bare payload for a single input; a bag keyed by edge name
+  for an allOf one. Every origin declaring that edge is populated from it.
   --log defaults to ./weir.jsonl and is appended to, never truncated.
 
   --trace defaults to ./weir-trace.jsonl, written by run and read by the
@@ -160,14 +162,30 @@ async function run(dir: string, flags: Map<string, string>): Promise<CliResult> 
     return { code: 1, out: `✗ could not read --payload ${payloadPath}\n\n  ${(error as Error).message}` };
   }
 
+  // The trigger is one external event, resolved to per-origin payloads through
+  // the entry topology's declared `input` — `design.md` §5's "one call to the
+  // graph's outer membrane per external event", with the CLI as that membrane
+  // (2026-09-28-a-topology-declares-its-beginning.md §3). A program with no
+  // entry contract still takes the per-node map directly.
+  let resolvedPayloads: Record<string, unknown>;
+  if ((program.entries ?? []).length > 0) {
+    try {
+      resolvedPayloads = resolveTrigger(program, originPayloads);
+    } catch (error) {
+      return { code: 1, out: `✗ ${(error as Error).message}` };
+    }
+  } else {
+    resolvedPayloads = originPayloads;
+  }
+
   // Worth naming rather than letting the run quietly do nothing: an origin
   // with no payload is never offered as a candidate, so the symptom would be
   // a graph reaching quiescence having fired nothing, with no error at all.
-  const missing = program.wiring.origins.filter((o) => !(o in originPayloads));
+  const missing = program.wiring.origins.filter((o) => !(o in resolvedPayloads));
   if (missing.length > 0) {
     return {
       code: 1,
-      out: `✗ no payload for origin(s) ${missing.map((m) => `"${m}"`).join(", ")}.\n\n  --payload must name every origin: ${program.wiring.origins.join(", ")}`,
+      out: `✗ the trigger supplies nothing for origin(s) ${missing.map((m) => `"${m}"`).join(", ")}.\n\n  --payload is shaped by the entry topology's declared input; these origins are ${program.wiring.origins.join(", ")}`,
     };
   }
 
@@ -176,7 +194,7 @@ async function run(dir: string, flags: Map<string, string>): Promise<CliResult> 
   const log = FileLog.open(logPath);
   const trace = FileTrace.open(tracePath);
   const correlationId = flags.get("run") ?? crypto.randomUUID();
-  const result = await runNetlist(program, { correlationId, originPayloads }, { log, trace });
+  const result = await runNetlist(program, { correlationId, originPayloads: resolvedPayloads }, { log, trace });
 
   const detail = [
     "",

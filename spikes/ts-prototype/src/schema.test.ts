@@ -751,7 +751,7 @@ describe("topologySchema", () => {
    * wiring-shape assertion still reads as one, and so a contract typo cannot
    * make a wiring case pass or fail for the wrong reason.
    */
-  const withWiring = (wiring: unknown) => ({ output: "Out", terminals: ["A"], wiring });
+  const withWiring = (wiring: unknown) => ({ input: "In", output: "Out", terminals: ["A"], wiring });
 
   it("accepts a single sequential chain", () => {
     const validate = validatorFor(topologySchema());
@@ -797,17 +797,17 @@ describe("topologySchema", () => {
   });
 
   /** The contract half, which is what this schema gained. */
-  it("rejects a topology declaring no output or terminals — the bare-wiring form is gone", () => {
+  it("rejects a topology missing any of its four declared keys", () => {
     const validate = validatorFor(topologySchema());
     // Exactly what every root `.topology` in this repo looked like until now.
     expect(validate({ A: { then: { B: {} } } })).toBe(false);
-    expect(validate({ wiring: { A: {} }, terminals: ["A"] })).toBe(false);
-    expect(validate({ wiring: { A: {} }, output: "Out" })).toBe(false);
+    expect(validate({ input: "In", wiring: { A: {} }, terminals: ["A"] })).toBe(false);
+    expect(validate({ input: "In", wiring: { A: {} }, output: "Out" })).toBe(false);
   });
 
   it("rejects an empty terminals list", () => {
     const validate = validatorFor(topologySchema());
-    expect(validate({ output: "Out", terminals: [], wiring: { A: {} } })).toBe(false);
+    expect(validate({ input: "In", output: "Out", terminals: [], wiring: { A: {} } })).toBe(false);
   });
 
   it("accepts every output mode, since all three are used by the examples", () => {
@@ -817,14 +817,18 @@ describe("topologySchema", () => {
       { oneOf: ["Pass", "Fail"] },
       { allOf: ["TodoList", "Todo"] },
     ]) {
-      expect(validate({ output, terminals: ["A"], wiring: { A: {} } })).toBe(true);
+      expect(validate({ input: "In", output, terminals: ["A"], wiring: { A: {} } })).toBe(true);
     }
   });
 
-  it("accepts a composite's extra `input`, and nothing else", () => {
+  it("requires input on every topology, and admits nothing beyond the four keys", () => {
     const validate = validatorFor(topologySchema());
     expect(validate({ input: "Entity", output: "Out", terminals: ["A"], wiring: { A: {} } })).toBe(true);
-    expect(validate({ output: "Out", terminals: ["A"], wiring: { A: {} }, bogus: 1 })).toBe(false);
+    // `input` is no longer a composite's distinguishing extra — every topology
+    // declares one, and whether it is an entry point is decided by whether
+    // anything references it (2026-09-28-a-topology-declares-its-beginning.md).
+    expect(validate({ output: "Out", terminals: ["A"], wiring: { A: {} } })).toBe(false);
+    expect(validate({ input: "In", output: "Out", terminals: ["A"], wiring: { A: {} }, bogus: 1 })).toBe(false);
   });
 });
 

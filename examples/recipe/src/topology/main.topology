@@ -1,4 +1,5 @@
 # The run has finished when `cool` has produced the cookies.
+input: Recipe
 output: Cookies
 terminals:
   - cool

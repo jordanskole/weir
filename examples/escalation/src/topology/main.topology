@@ -1,6 +1,7 @@
 # `triage` both loops and terminates: it emits `Ticket` to escalate and
 # `Resolution` to stop. A cyclic topology has no structural leaf, which is
 # why terminals are declared rather than inferred.
+input: NewTicket
 output: Resolution
 terminals:
   - triage

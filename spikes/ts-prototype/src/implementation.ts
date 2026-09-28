@@ -16,7 +16,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { elaborate } from "./elaborate.js";
-import type { RootEnd, Wiring } from "./elaborate.js";
+import type { CompositeDecl as TopologyEntry, Wiring } from "./elaborate.js";
 import { hashNode, hashSource } from "./hash.js";
 import type { AnyEdgeDef, FieldDef, InputSpec, NodeDecl, NodeDef, OutputSpec } from "./types.js";
 
@@ -116,7 +116,7 @@ export interface Program {
    * declare an end it has no opinion about; absent means the run's end is not
    * checked, exactly as before this existed.
    */
-  ends?: RootEnd[];
+  entries?: TopologyEntry[];
 }
 
 /**
@@ -127,7 +127,7 @@ export interface Program {
  * above).
  */
 export async function elaborateWithImplementations(declRoot: string, implRoot: string): Promise<Program> {
-  const { fields, edges, nodes, wiring, ends } = await elaborate(declRoot);
+  const { fields, edges, nodes, wiring, entries } = await elaborate(declRoot);
 
   const resolved = await Promise.all(
     Object.entries(nodes).map(
@@ -135,5 +135,5 @@ export async function elaborateWithImplementations(declRoot: string, implRoot: s
     ),
   );
 
-  return { fields, edges, nodes: Object.fromEntries(resolved), wiring, ends };
+  return { fields, edges, nodes: Object.fromEntries(resolved), wiring, entries };
 }

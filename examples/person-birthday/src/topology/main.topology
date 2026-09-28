@@ -1,5 +1,6 @@
 # A `oneOf` end — the run finished if *either* branch appeared. A declared
 # terminal that never fires is not an error; exactly one of these fires.
+input: Person
 output:
   oneOf:
     - Pass

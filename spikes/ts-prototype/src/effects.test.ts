@@ -17,7 +17,8 @@ import { verifyRun } from "./verify.js";
  * `output`/`terminals` say what finishing looks like; the wiring is indented
  * under `wiring:` exactly as a composite's is.
  */
-const rootTopology = (output: string, terminals: string[], wiring: string): string =>
+const rootTopology = (input: string, output: string, terminals: string[], wiring: string): string =>
+  `input: ${input}\n` +
   `${output.includes("\n") ? `output:\n${output}` : `output: ${output}\n`}terminals:\n` +
   terminals.map((t) => `  - ${t}\n`).join("") +
   "wiring:\n" +
@@ -50,7 +51,7 @@ const PROGRAM = {
   "nodes/ask.node": `label: Ask\ndescription: d\ninput: Ask\noutput: Ask\nexamples:\n  - given:\n      Ask: {}\n    expect:\n      Ask: {}\n`,
   "nodes/clock.node": `label: Clock\ndescription: Reads the wall clock\neffect: clock\ninput: Ask\noutput: Stamp\nexamples:\n  - given:\n      Ask: {}\n    expect:\n      Stamp: {}\n`,
   "nodes/note.node": `label: Note\ndescription: d\ninput: Stamp\noutput: Note\nexamples:\n  - given:\n      Stamp: {}\n    expect:\n      Note: {}\n`,
-  "topology/main.topology": rootTopology("Note", ["note"], `ask:\n  then:\n    clock:\n      then:\n        note: {}\n`),
+  "topology/main.topology": rootTopology("Ask", "Note", ["note"], `ask:\n  then:\n    clock:\n      then:\n        note: {}\n`),
 };
 
 async function fixture(files: Record<string, string>): Promise<string> {
@@ -203,7 +204,7 @@ describe("effects", () => {
     const root = await fixture({
       ...EDGES,
       "nodes/clock.node": `label: Clock\ndescription: d\neffect: clock\ninput: Ask\noutput: Stamp\nexamples:\n  - given:\n      Ask: {}\n    expect:\n      Stamp: {}\n`,
-      "topology/main.topology": rootTopology("Stamp", ["clock"], `clock: {}\n`),
+      "topology/main.topology": rootTopology("Ask", "Stamp", ["clock"], `clock: {}\n`),
     });
     const program = await elaborateWithImplementations(root, join(root, "impl"));
     const log = new InMemoryLog();

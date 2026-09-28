@@ -563,9 +563,11 @@ export function topologySchema(): object {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     title: "Weir topology",
     type: "object",
-    required: ["output", "terminals", "wiring"],
+    // Every topology declares the same four keys; whether it is an entry point
+    // or a composite is decided by whether another topology references it, not
+    // by its shape (2026-09-28-a-topology-declares-its-beginning.md §1).
+    required: ["input", "output", "terminals", "wiring"],
     properties: {
-      /** Present only on a composite — a topology invoked where a node would be. */
       input: { oneOf: [edgeName, { type: "object", properties: { allOf: edgeNameList }, required: ["allOf"], additionalProperties: false }] },
       output: {
         oneOf: [

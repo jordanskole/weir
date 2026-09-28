@@ -21,7 +21,8 @@ import type { InstanceEnvelope } from "./membrane.js";
  * `output`/`terminals` say what finishing looks like; the wiring is indented
  * under `wiring:` exactly as a composite's is.
  */
-const rootTopology = (output: string, terminals: string[], wiring: string): string =>
+const rootTopology = (input: string, output: string, terminals: string[], wiring: string): string =>
+  `input: ${input}\n` +
   `${output.includes("\n") ? `output:\n${output}` : `output: ${output}\n`}terminals:\n` +
   terminals.map((t) => `  - ${t}\n`).join("") +
   "wiring:\n" +
@@ -941,7 +942,7 @@ describe("runNetlist", () => {
         `label: E\ndescription: d\ninput:\n  anyOf:\n    - Failed_Todo\n    - Failed_Person\noutput: Start\nexamples:\n  - given:\n      Failed_Todo:\n        input:\n          title: "bad todo"\n        reason: "kaboom"\n    expect:\n      Start:\n        value: "recovered"\n  - given:\n      Failed_Person:\n        input:\n          name: "bad person"\n        reason: "kaboom"\n    expect:\n      Start:\n        value: "recovered"\n`,
         "utf8",
       );
-      await writeFile(join(root, "topology", "main.topology"), rootTopology("Start", ["HandleFailed"], `failing:\n  then:\n    HandleFailed: {}\n`), "utf8");
+      await writeFile(join(root, "topology", "main.topology"), rootTopology("Todo", "Start", ["HandleFailed"], `failing:\n  then:\n    HandleFailed: {}\n`), "utf8");
 
       const raw = await elaborate(root);
       // failing fails on Todo -> logs Failed_Todo, which HandleFailed__Failed_Todo

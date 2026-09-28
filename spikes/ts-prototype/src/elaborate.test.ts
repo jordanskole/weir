@@ -12,7 +12,8 @@ import type { AnyEdgeDef } from "./types.js";
  * `output`/`terminals` say what finishing looks like; the wiring is indented
  * under `wiring:` exactly as a composite's is.
  */
-const rootTopology = (output: string, terminals: string[], wiring: string): string =>
+const rootTopology = (input: string, output: string, terminals: string[], wiring: string): string =>
+  `input: ${input}\n` +
   `${output.includes("\n") ? `output:\n${output}` : `output: ${output}\n`}terminals:\n` +
   terminals.map((t) => `  - ${t}\n`).join("") +
   "wiring:\n" +
@@ -1413,6 +1414,7 @@ examples:
         age: 42
 `,
       "topology/main.topology": `
+input: Person
 output: Person
 terminals:
   - birthday
@@ -1532,6 +1534,7 @@ examples:
         value: "a"
 `,
       "topology/main.topology": `
+input: Start
 output: Start
 terminals:
   - HandleFailed
@@ -1644,7 +1647,7 @@ describe("elaborate — wiring type checks", () => {
       "edges/Report.edge": PLAIN_EDGE("Report"),
       "nodes/extract.node": `label: E\ndescription: d\ninput: Seed\noutput:\n  many: Item\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Item:\n        k: {}\n`,
       "nodes/use.node": `label: U\ndescription: d\ninput: Item\noutput: Report\nexamples:\n  - given:\n      Item: {}\n    expect:\n      Report: {}\n`,
-      "topology/main.topology": rootTopology("Report", ["use"], `extract:\n  then:\n    use: {}\n`),
+      "topology/main.topology": rootTopology("Seed", "Report", ["use"], `extract:\n  then:\n    use: {}\n`),
     });
 
     // This rejected until spread landed, and the rejection was correct at the
@@ -1665,7 +1668,7 @@ describe("elaborate — wiring type checks", () => {
       "edges/Report.edge": PLAIN_EDGE("Report"),
       "nodes/a.node": `label: A\ndescription: d\ninput: Seed\noutput: Seed\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Seed: {}\n`,
       "nodes/b.node": `label: B\ndescription: d\ninput: Other\noutput: Report\nexamples:\n  - given:\n      Other: {}\n    expect:\n      Report: {}\n`,
-      "topology/main.topology": rootTopology("Report", ["b"], `a:\n  then:\n    b: {}\n`),
+      "topology/main.topology": rootTopology("Seed", "Report", ["b"], `a:\n  then:\n    b: {}\n`),
     });
 
     await expect(elaborate(root)).rejects.toThrow(/carries nothing/i);
@@ -1679,7 +1682,7 @@ describe("elaborate — wiring type checks", () => {
       "edges/Report.edge": PLAIN_EDGE("Report"),
       "nodes/split.node": `label: S\ndescription: d\ninput: Seed\noutput: Left\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Left: {}\n`,
       "nodes/join.node": `label: J\ndescription: d\ninput:\n  allOf:\n    - Left\n    - Right\noutput: Report\nexamples:\n  - given:\n      Left: {}\n      Right: {}\n    expect:\n      Report: {}\n`,
-      "topology/main.topology": rootTopology("Report", ["join"], `split:\n  then:\n    join: {}\n`),
+      "topology/main.topology": rootTopology("Seed", "Report", ["join"], `split:\n  then:\n    join: {}\n`),
     });
 
     await expect(elaborate(root)).rejects.toThrow(/join.*Right/s);
@@ -1695,7 +1698,7 @@ describe("elaborate — wiring type checks", () => {
       "nodes/left.node": `label: L\ndescription: d\ninput: Seed\noutput: Left\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Left: {}\n`,
       "nodes/right.node": `label: R\ndescription: d\ninput: Seed\noutput: Right\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Right: {}\n`,
       "nodes/join.node": `label: J\ndescription: d\ninput:\n  allOf:\n    - Left\n    - Right\noutput: Report\nexamples:\n  - given:\n      Left: {}\n      Right: {}\n    expect:\n      Report: {}\n`,
-      "topology/main.topology": rootTopology("Report", ["join"], `origin:\n  then:\n    left:\n      then:\n        join: {}\n    right:\n      then:\n        join: {}\n`),
+      "topology/main.topology": rootTopology("Seed", "Report", ["join"], `origin:\n  then:\n    left:\n      then:\n        join: {}\n    right:\n      then:\n        join: {}\n`),
     });
 
     const result = await elaborate(root);
@@ -1711,7 +1714,7 @@ describe("elaborate — wiring type checks", () => {
       "edges/Report.edge": PLAIN_EDGE("Report"),
       "nodes/check.node": `label: C\ndescription: d\ninput: Seed\noutput:\n  oneOf:\n    - Pass\n    - Fail\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Pass: {}\n`,
       "nodes/onPass.node": `label: P\ndescription: d\ninput: Pass\noutput: Report\nexamples:\n  - given:\n      Pass: {}\n    expect:\n      Report: {}\n`,
-      "topology/main.topology": rootTopology("Report", ["onPass"], `check:\n  then:\n    onPass: {}\n`),
+      "topology/main.topology": rootTopology("Seed", "Report", ["onPass"], `check:\n  then:\n    onPass: {}\n`),
     });
 
     const result = await elaborate(root);
@@ -1723,7 +1726,7 @@ describe("elaborate — wiring type checks", () => {
       "edges/Seed.edge": PLAIN_EDGE("Seed"),
       "edges/Report.edge": PLAIN_EDGE("Report"),
       "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Report\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Report: {}\n`,
-      "topology/main.topology": rootTopology("Report", ["start"], `start: {}\n`),
+      "topology/main.topology": rootTopology("Seed", "Report", ["start"], `start: {}\n`),
     });
 
     const result = await elaborate(root);
@@ -1734,7 +1737,7 @@ describe("elaborate — wiring type checks", () => {
     const root = await writeFixture({
       "edges/Tick.edge": PLAIN_EDGE("Tick"),
       "nodes/count.node": `label: C\ndescription: d\ninput: Tick\noutput: Tick\nexamples:\n  - given:\n      Tick: {}\n    expect:\n      Tick: {}\n`,
-      "topology/main.topology": rootTopology("Tick", ["count"], `count:\n  then:\n    count: {}\n`),
+      "topology/main.topology": rootTopology("Tick", "Tick", ["count"], `count:\n  then:\n    count: {}\n`),
     });
 
     const result = await elaborate(root);
@@ -1821,6 +1824,7 @@ wiring:
   toRight: {}
 `,
       "topology/main.topology": `
+input: Seed
 output: Done
 terminals:
   - finish
@@ -1881,6 +1885,7 @@ wiring:
   toRight: {}
 `,
       "topology/main.topology": `
+input: Seed
 output: Left
 terminals:
   - split
@@ -1919,6 +1924,7 @@ wiring:
       ...SPLIT_NODES,
       "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Seed: {}\n`,
       "topology/main.topology": `
+input: Seed
 output:
   allOf:
     - Left
@@ -1958,7 +1964,7 @@ wiring:
   toLeft: {}
   toRight: {}
 `,
-      "topology/main.topology": rootTopology("Left", ["split"], `start:\n  then:\n    split: {}\n`),
+      "topology/main.topology": rootTopology("Seed", "Left", ["split"], `start:\n  then:\n    split: {}\n`),
     });
 
     await expect(elaborate(root)).rejects.toThrow(/split.*Right/s);
@@ -1984,7 +1990,7 @@ wiring:
       split: {}
   toRight: {}
 `,
-      "topology/main.topology": rootTopology("Left", ["split"], `start:\n  then:\n    split: {}\n`),
+      "topology/main.topology": rootTopology("Seed", "Left", ["split"], `start:\n  then:\n    split: {}\n`),
     });
 
     // Recursive composition is deferred with the runtime membrane (spec §3).
@@ -2023,6 +2029,7 @@ wiring:
 `,
       // A chain. No node named twice, anywhere.
       "topology/main.topology": `
+input: Recipe
 output: Cookies
 terminals:
   - bake
@@ -2052,14 +2059,14 @@ describe("elaborate — noop", () => {
       "nodes/start.node": `label: S\ndescription: d\ninput: Seed\noutput: Seed\nexamples:\n  - given:\n      Seed: {}\n    expect:\n      Seed: {}\n`,
     };
 
-    const unreferenced = await elaborate(await writeFixture({ ...edges, "topology/main.topology": rootTopology("Seed", ["start"], `start: {}\n`) }));
+    const unreferenced = await elaborate(await writeFixture({ ...edges, "topology/main.topology": rootTopology("Seed", "Seed", ["start"], `start: {}\n`) }));
     // Nothing referenced a noop, so none exist. An edge table is cheap and a
     // node table is not: synthesizing one per edge would put two unused nodes
     // in every program for every edge, Failed_* included.
     expect(Object.keys(unreferenced.nodes).sort()).toEqual(["start"]);
 
     const referenced = await elaborate(
-      await writeFixture({ ...edges, "topology/main.topology": rootTopology("Seed", ["noop_Seed"], `start:\n  then:\n    noop_Seed: {}\n`) }),
+      await writeFixture({ ...edges, "topology/main.topology": rootTopology("Seed", "Seed", ["noop_Seed"], `start:\n  then:\n    noop_Seed: {}\n`) }),
     );
     expect(referenced.nodes.noop_Seed).toBeDefined();
     expect(referenced.nodes.noop_Seed!.input).toEqual({ kind: "single", edge: referenced.edges.Seed });
@@ -2070,7 +2077,7 @@ describe("elaborate — noop", () => {
     // A failure branch can be terminated too, since Failed_* edges exist by
     // the time resolution runs.
     const failed = await elaborate(
-      await writeFixture({ ...edges, "topology/main.topology": rootTopology("Failed_Seed", ["noop_Failed_Seed"], `start:\n  then:\n    noop_Failed_Seed: {}\n`) }),
+      await writeFixture({ ...edges, "topology/main.topology": rootTopology("Seed", "Failed_Seed", ["noop_Failed_Seed"], `start:\n  then:\n    noop_Failed_Seed: {}\n`) }),
     );
     expect(failed.nodes.noop_Failed_Seed).toBeDefined();
   });
@@ -2106,7 +2113,7 @@ wiring:
     then:
       noop_Right: {}
 `,
-      "topology/main.topology": rootTopology("Done", ["finish"], `start:\n  then:\n    split:\n      then:\n        finish: {}\n`),
+      "topology/main.topology": rootTopology("Seed", "Done", ["finish"], `start:\n  then:\n    split:\n      then:\n        finish: {}\n`),
     });
 
     const result = await elaborate(root);
@@ -2187,7 +2194,7 @@ describe("elaborate — gather", () => {
       "edges/Sum.edge": SUM,
       "nodes/spread.node": SPREAD,
       "nodes/rollUp.node": GATHER,
-      "topology/main.topology": rootTopology("Sum", ["rollUp"], `spread:\n  then:\n    rollUp: {}\n`),
+      "topology/main.topology": rootTopology("Seed", "Sum", ["rollUp"], `spread:\n  then:\n    rollUp: {}\n`),
     });
 
     const program = await elaborate(root);
@@ -2209,7 +2216,7 @@ describe("elaborate — gather", () => {
       "edges/Sum.edge": SUM,
       "nodes/spread.node": SPREAD,
       "nodes/rollUp.node": GATHER,
-      "topology/main.topology": rootTopology("Sum", ["rollUp"], `spread:\n  then:\n    rollUp: {}\n`),
+      "topology/main.topology": rootTopology("Seed", "Sum", ["rollUp"], `spread:\n  then:\n    rollUp: {}\n`),
     });
 
     await expect(elaborate(root)).rejects.toThrow(/input\.gather.*Item.*no index/s);
@@ -2232,7 +2239,7 @@ describe("elaborate — gather", () => {
       // and Rule B is satisfied, but no collection token ever does.
       "nodes/makeOne.node": ONE,
       "nodes/rollUp.node": GATHER,
-      "topology/main.topology": rootTopology("Sum", ["rollUp"], `makeOne:\n  then:\n    rollUp: {}\n`),
+      "topology/main.topology": rootTopology("Seed", "Sum", ["rollUp"], `makeOne:\n  then:\n    rollUp: {}\n`),
     });
 
     await expect(elaborate(root)).rejects.toThrow(/rollUp.*gathers "Item".*no spread above it/s);
@@ -2248,7 +2255,7 @@ describe("elaborate — gather", () => {
       // transitive rather than checking the immediate parents.
       "nodes/touch.node": TOUCH,
       "nodes/rollUp.node": GATHER,
-      "topology/main.topology": rootTopology("Sum", ["rollUp"], `spread:\n  then:\n    touch:\n      then:\n        rollUp: {}\n`),
+      "topology/main.topology": rootTopology("Seed", "Sum", ["rollUp"], `spread:\n  then:\n    touch:\n      then:\n        rollUp: {}\n`),
     });
 
     await expect(elaborate(root)).resolves.toBeDefined();

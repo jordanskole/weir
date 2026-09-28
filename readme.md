@@ -99,6 +99,7 @@ The wiring is its own file:
 
 ```yaml
 # declarations/main.topology
+input: Recipe
 output: Cookies
 terminals:
   - cool
@@ -114,16 +115,16 @@ wiring:
       bake: {}
 ```
 
-`output` and `terminals` say what reaching the end looks like: the run is finished when `cool` has produced the cookies. Declaring it is what lets a run that consumes everything and produces nothing be an error rather than a checkmark — and naming the *node* rather than only the edge is what makes that precise, since a topology can easily have two nodes producing the same edge, only one of which is the end.
+`input` says what one external event supplies, and `output` and `terminals` say what reaching the end looks like: the run is finished when `cool` has produced the cookies. Both origins declare `input: Recipe`, so **one** recipe populates both — there is exactly one call to the graph's outer membrane per external event, and every origin-shaped edge it declares needing resolves from that single payload at once. Declaring it is what lets a run that consumes everything and produces nothing be an error rather than a checkmark — and naming the *node* rather than only the edge is what makes that precise, since a topology can easily have two nodes producing the same edge, only one of which is the end.
 
 Two top-level keys are two origins: one external event — one call to the graph's outer membrane — populates every origin-shaped edge it declares needing at once. The dough gets mixed while the oven heats, and `bake` names as its own child under *both*. That is the whole program. The implementation of `bake` lives in a different tree, resolved by name and contract hash, and is regenerable build output rather than something you maintain.
 
 **A topology is a node.** A subgraph is indistinguishable from a single node at its boundary, so a `.topology` can be dropped into a larger graph wherever a node is expected and nothing upstream can tell the difference. Graphs nest without limit and bottom out at a **primitive** — a node whose body is host code rather than more graph. There is no separate module system, because the composition rule already is one.
 
-The file above declares its end but not its beginning, so it is still a root rather than something droppable into a larger graph. One that is droppable adds `input:` — and is otherwise the same shape. This one is from [`examples/soc-triage`](examples/soc-triage), where it is the per-entity investigation:
+**And there is no second kind of file.** A topology another topology names is inlined where it is named; one nothing names is an entry point, and its wiring is the program. Nothing declares which it is, because nothing needs to — a root was never a different kind of thing, it was a topology nobody had referenced. This one is from [`examples/soc-triage`](examples/soc-triage), where it is referenced as the per-entity investigation:
 
 ```yaml
-# declarations/investigate.topology — a composite
+# declarations/investigate.topology — referenced, so inlined rather than an entry
 input: Entity
 output:
   allOf:

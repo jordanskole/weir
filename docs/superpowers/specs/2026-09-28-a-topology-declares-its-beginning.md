@@ -1,6 +1,6 @@
 # A topology declares its beginning
 
-Status: draft.
+Status: implemented.
 
 ## Motivation
 
@@ -156,6 +156,29 @@ break-proof showed — including breaks that do **not** redden.
 7. `weir run --payload` takes the trigger shape and exits 0 on `examples/recipe`,
    with a payload written **once**.
 8. Every example still elaborates and runs after migration.
+
+## What the build confirmed, and one thing it sharpened
+
+**The collapse holds with no ambiguity.** `soc-triage` has one topology
+referenced by another and one referenced by nothing, and deriving the entry from
+that is a five-line loop. One case needed naming that §1 did not: a topology
+mentioning **itself** is a cycle, not a reference that demotes it from entry —
+counting it would silently leave a program with no entry at all. `inlineComposites`
+rejects self-reference separately, so the guard here is one clause.
+
+**`parseRootTopologyFile` is gone rather than kept beside its sibling.** The two
+parsers differed only by `input`, so requiring `input` everywhere left one
+function. `isCompositeTopology` survives as a predicate nothing branches on any
+more, and the reduction is the point: a root was a composite nobody had
+referenced.
+
+**The migration reached further than §6 estimated**, because requiring `input`
+touched every fixture that yesterday's `output`/`terminals` change had touched —
+this time with a value that had to be *derived per fixture* (each entry's origin
+node's declared input edge) rather than added uniformly. Mechanical, but not a
+constant: a script derived most of them from the fixture's own node declarations
+and six needed doing by hand, where the origin came from a shared constant rather
+than an inline literal.
 
 ## Explicitly out of scope
 

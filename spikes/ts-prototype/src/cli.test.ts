@@ -11,7 +11,8 @@ import { runCli } from "./cli.js";
  * `output`/`terminals` say what finishing looks like; the wiring is indented
  * under `wiring:` exactly as a composite's is.
  */
-const rootTopology = (output: string, terminals: string[], wiring: string): string =>
+const rootTopology = (input: string, output: string, terminals: string[], wiring: string): string =>
+  `input: ${input}\n` +
   `${output.includes("\n") ? `output:\n${output}` : `output: ${output}\n`}terminals:\n` +
   terminals.map((t) => `  - ${t}\n`).join("") +
   "wiring:\n" +
@@ -77,7 +78,7 @@ describe("runCli", () => {
       "edges/B.edge": EDGE("B"),
       "nodes/makeA.node": `label: MA\ndescription: d\ninput: A\noutput: A\nexamples:\n  - given:\n      A: {}\n    expect:\n      A: {}\n`,
       "nodes/needsB.node": `label: NB\ndescription: d\ninput: B\noutput: B\nexamples:\n  - given:\n      B: {}\n    expect:\n      B: {}\n`,
-      "topology/main.topology": rootTopology("B", ["needsB"], `makeA:\n  then:\n    needsB: {}\n`),
+      "topology/main.topology": rootTopology("A", "B", ["needsB"], `makeA:\n  then:\n    needsB: {}\n`),
     });
 
     const result = await runCli(["check", root], "/nowhere");
@@ -94,7 +95,7 @@ describe("runCli", () => {
       "edges/B.edge": EDGE("B"),
       "nodes/makeA.node": `label: MA\ndescription: d\ninput: A\noutput: A\nexamples:\n  - given:\n      A: {}\n    expect:\n      A: {}\n`,
       "nodes/join.node": `label: J\ndescription: d\ninput:\n  allOf:\n    - A\n    - B\noutput: B\nexamples:\n  - given:\n      A: {}\n      B: {}\n    expect:\n      B: {}\n`,
-      "topology/main.topology": rootTopology("B", ["join"], `makeA:\n  then:\n    join: {}\n`),
+      "topology/main.topology": rootTopology("A", "B", ["join"], `makeA:\n  then:\n    join: {}\n`),
     });
 
     const result = await runCli(["check", root], "/nowhere");
@@ -164,7 +165,10 @@ describe("runCli — run", () => {
     }
     const recipe = { title: "Chocolate Chip Cookies", servings: 24, temperature: 375, ingredients: {} };
     const payload = join(workdir, "payload.json");
-    await writeFile(payload, JSON.stringify({ mix: recipe, preheatOven: recipe }), "utf8");
+    // One external event, one payload. Both origins declare `input: Recipe` and
+    // are populated from it — this used to name each origin separately and write
+    // the same recipe twice (2026-09-28-a-topology-declares-its-beginning.md).
+    await writeFile(payload, JSON.stringify(recipe), "utf8");
     const logPath = join(workdir, "weir.jsonl");
 
     const result = await runCli(
@@ -193,7 +197,7 @@ describe("runCli — run", () => {
     // has been chasing all week.
     const workdir = await fixture({});
     const payload = join(workdir, "payload.json");
-    await writeFile(payload, JSON.stringify({ mix: {} }), "utf8");
+    await writeFile(payload, JSON.stringify({}), "utf8");
 
     const result = await runCli(
       ["run", RECIPE_SRC, "--impl", join(workdir, "impl"), "--payload", payload],
@@ -217,7 +221,7 @@ describe("runCli — verify", () => {
     const workdir = await fixture({
       "edges/Reading.edge": `label: E\ndescription: R\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
       "nodes/observe.node": `label: O\ndescription: d\ninput: Reading\noutput: Reading\nexamples:\n  - given:\n      Reading: {}\n    expect:\n      Reading: {}\n`,
-      "topology/main.topology": rootTopology("Reading", ["observe"], `observe: {}\n`),
+      "topology/main.topology": rootTopology("Reading", "Reading", ["observe"], `observe: {}\n`),
     });
     const { hashNode } = await import("./hash.js");
     const { elaborate } = await import("./elaborate.js");
@@ -226,7 +230,7 @@ describe("runCli — verify", () => {
     await mkdir(join(implRoot, "observe"), { recursive: true });
     await writeFile(join(implRoot, "observe", `${hash}.ts`), `${fn}\n`, "utf8");
     const payload = join(workdir, "payload.json");
-    await writeFile(payload, JSON.stringify({ observe: { value: "x" } }), "utf8");
+    await writeFile(payload, JSON.stringify({ value: "x" }), "utf8");
 
     const common = [workdir, "--impl", implRoot, "--run", "r1", "--trace", join(workdir, "t.jsonl")];
     const run = await runCli(["run", ...common, "--log", join(workdir, "l.jsonl"), "--payload", payload], workdir);
@@ -291,7 +295,7 @@ describe("runCli — run reports a stall", () => {
       "nodes/summarize.node":
         `label: Sum\ndescription: d\ninput:\n  gather: Looked\noutput: Summary\n` +
         `examples:\n  - given:\n      Looked:\n        a:\n          itemId: "a"\n    expect:\n      Summary:\n        n: 1\n`,
-      "topology/main.topology": rootTopology("Summary", ["summarize"], `explode:\n  then:\n    lookOrSkip:\n      then:\n        summarize: {}\n`),
+      "topology/main.topology": rootTopology("Seed", "Summary", ["summarize"], `explode:\n  then:\n    lookOrSkip:\n      then:\n        summarize: {}\n`),
     });
 
     const { hashNode } = await import("./hash.js");
@@ -313,7 +317,7 @@ describe("runCli — run reports a stall", () => {
       await writeFile(join(implRoot, name, `${hash}.ts`), `${fn}\n`, "utf8");
     }
     const payload = join(workdir, "payload.json");
-    await writeFile(payload, JSON.stringify({ explode: { v: "x" } }), "utf8");
+    await writeFile(payload, JSON.stringify({ v: "x" }), "utf8");
     return { workdir, implRoot, payload };
   }
 
@@ -374,12 +378,10 @@ describe("runCli — run reports a stall", () => {
       await writeFile(join(implRoot, name, `${hash}.ts`), `${fn}\n`, "utf8");
     }
     const payload = join(workdir, "payload.json");
+    // One Recipe, feeding both origins through the entry topology's declared input.
     await writeFile(
       payload,
-      JSON.stringify({
-        mix: { title: "Chocolate Chip Cookies", servings: 24, temperature: 375, ingredients: {} },
-        preheatOven: { title: "Chocolate Chip Cookies", servings: 24, temperature: 375, ingredients: {} },
-      }),
+      JSON.stringify({ title: "Chocolate Chip Cookies", servings: 24, temperature: 375, ingredients: {} }),
       "utf8",
     );
 

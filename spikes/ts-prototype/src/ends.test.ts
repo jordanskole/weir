@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { elaborate } from "./elaborate.js";
 import { InMemoryLog } from "./membrane.js";
-import { runNetlist } from "./runtime.js";
+import { resolveTrigger, runNetlist } from "./runtime.js";
 import { defineEdge, defineField, defineNode, allOf, oneOf, single } from "./define.js";
 import type { Program } from "./implementation.js";
 
@@ -80,7 +80,7 @@ describe("a root topology declares its end — at elaboration", () => {
       "edges/B.edge": EDGE("B"),
       "edges/C.edge": EDGE("C"),
       "nodes/go.node": NODE("A", "B"),
-      "topology/main.topology": `output: C\nterminals:\n  - go\nwiring:\n  go: {}\n`,
+      "topology/main.topology": `input: A\noutput: C\nterminals:\n  - go\nwiring:\n  go: {}\n`,
     });
 
     await expect(elaborate(root)).rejects.toThrow(/declares output "C".*terminals \(go\) produce/s);
@@ -92,7 +92,7 @@ describe("a root topology declares its end — at elaboration", () => {
       "edges/A.edge": EDGE("A"),
       "edges/B.edge": EDGE("B"),
       "nodes/go.node": NODE("A", "B"),
-      "topology/main.topology": `output: B\nterminals:\n  - nosuchnode\nwiring:\n  go: {}\n`,
+      "topology/main.topology": `input: A\noutput: B\nterminals:\n  - nosuchnode\nwiring:\n  go: {}\n`,
     });
 
     await expect(elaborate(root)).rejects.toThrow(/terminal "nosuchnode" is not a declared node/);
@@ -117,11 +117,11 @@ describe("a root topology declares its end — at elaboration", () => {
       "nodes/toLeft.node": NODE("A", "L"),
       "nodes/toRight.node": NODE("A", "R"),
       "topology/pair.topology": `input: A\noutput:\n  allOf:\n    - L\n    - R\nterminals:\n  - toLeft\n  - toRight\nwiring:\n  toLeft: {}\n  toRight: {}\n`,
-      "topology/main.topology": `output:\n  allOf:\n    - L\n    - R\nterminals:\n  - pair\nwiring:\n  start:\n    then:\n      pair: {}\n`,
+      "topology/main.topology": `input: A\noutput:\n  allOf:\n    - L\n    - R\nterminals:\n  - pair\nwiring:\n  start:\n    then:\n      pair: {}\n`,
     });
 
     const elaborated = await elaborate(root);
-    expect(elaborated.ends[0]!.terminals.sort()).toEqual(["pair/toLeft", "pair/toRight"]);
+    expect(elaborated.entries[0]!.terminals.sort()).toEqual(["pair/toLeft", "pair/toRight"]);
   });
 
   /**
@@ -135,11 +135,11 @@ describe("a root topology declares its end — at elaboration", () => {
       "edges/Out.edge": EDGE("Out"),
       "nodes/makeA.node": NODE("Out", "A"),
       "nodes/handle.node": `label: H\ndescription: d\ninput:\n  anyOf:\n    - A\n    - B\noutput: Out\nexamples:\n  - given:\n      A:\n        v: "x"\n    expect:\n      Out:\n        v: "x"\n`,
-      "topology/main.topology": `output: Out\nterminals:\n  - handle\nwiring:\n  makeA:\n    then:\n      handle: {}\n`,
+      "topology/main.topology": `input: Out\noutput: Out\nterminals:\n  - handle\nwiring:\n  makeA:\n    then:\n      handle: {}\n`,
     });
 
     const elaborated = await elaborate(root);
-    expect(elaborated.ends[0]!.terminals.sort()).toEqual(["handle__A", "handle__B"]);
+    expect(elaborated.entries[0]!.terminals.sort()).toEqual(["handle__A", "handle__B"]);
   });
 
   /** Spec Testing #9 — the guard against a rule strict enough to reject its own corpus. */
@@ -147,8 +147,8 @@ describe("a root topology declares its end — at elaboration", () => {
     for (const name of ["recipe", "escalation", "manuscript-review", "soc-triage", "todo-list", "person-birthday"]) {
       const src = fileURLToPath(new URL(`../../../examples/${name}/src`, import.meta.url));
       const elaborated = await elaborate(src);
-      expect(elaborated.ends).toHaveLength(1);
-      expect(elaborated.ends[0]!.terminals.length).toBeGreaterThan(0);
+      expect(elaborated.entries).toHaveLength(1);
+      expect(elaborated.entries[0]!.terminals.length).toBeGreaterThan(0);
     }
   });
 });
@@ -195,7 +195,7 @@ describe("a root topology declares its end — at the end of a run", () => {
       edges: { A, B },
       nodes: { startList },
       wiring: { origins: ["startList"], feeds: {} },
-      ends: [{ name: "main", output: { kind: "single", edge: B }, terminals: ["finish"] }],
+      entries: [{ name: "main", output: { kind: "single", edge: B }, terminals: ["finish"] }],
     };
 
     const { log, result } = await run(program, { startList: { v: "x" } });
@@ -215,7 +215,7 @@ describe("a root topology declares its end — at the end of a run", () => {
       edges: { A, B },
       nodes: { go },
       wiring: { origins: ["go"], feeds: {} },
-      ends: [{ name: "main", output: { kind: "single", edge: B }, terminals: ["go"] }],
+      entries: [{ name: "main", output: { kind: "single", edge: B }, terminals: ["go"] }],
     };
 
     const { result } = await run(program, { go: { v: "x" } });
@@ -246,7 +246,7 @@ describe("a root topology declares its end — at the end of a run", () => {
       edges: { A, Pass, Fail },
       nodes: { decide },
       wiring: { origins: ["decide"], feeds: {} },
-      ends: [{ name: "main", output: { kind: "oneOf", edges: [Pass, Fail] }, terminals: ["decide"] }],
+      entries: [{ name: "main", output: { kind: "oneOf", edges: [Pass, Fail] }, terminals: ["decide"] }],
     };
 
     const { log, result } = await run(program, { decide: { v: "x" } });
@@ -264,7 +264,7 @@ describe("a root topology declares its end — at the end of a run", () => {
       edges: { A, B, Pass, Fail },
       nodes: { stall },
       wiring: { origins: ["stall"], feeds: {} },
-      ends: [{ name: "main", output: { kind: "oneOf", edges: [Pass, Fail] }, terminals: ["stall"] }],
+      entries: [{ name: "main", output: { kind: "oneOf", edges: [Pass, Fail] }, terminals: ["stall"] }],
     };
 
     const { result } = await run(program, { stall: { v: "x" } });
@@ -287,7 +287,7 @@ describe("a root topology declares its end — at the end of a run", () => {
       edges: { A, B, C },
       nodes: { half },
       wiring: { origins: ["half"], feeds: {} },
-      ends: [{ name: "main", output: { kind: "allOf", edges: [B, C] }, terminals: ["half"] }],
+      entries: [{ name: "main", output: { kind: "allOf", edges: [B, C] }, terminals: ["half"] }],
     };
 
     const { result } = await run(program, { half: { v: "x" } });
@@ -317,7 +317,7 @@ describe("a root topology declares its end — at the end of a run", () => {
       edges: { A, B, C, Joined },
       nodes: { go, join },
       wiring: { origins: ["go"], feeds: { go: ["join"] } },
-      ends: [{ name: "main", output: { kind: "single", edge: B }, terminals: ["go"] }],
+      entries: [{ name: "main", output: { kind: "single", edge: B }, terminals: ["go"] }],
     };
 
     const { result } = await run(program, { go: { v: "x" } });
@@ -339,5 +339,137 @@ describe("a root topology declares its end — at the end of a run", () => {
     const { result } = await run(program, { go: { v: "x" } });
 
     expect(result.unmet).toEqual([]);
+  });
+});
+
+/**
+ * A topology declares its beginning
+ * (docs/superpowers/specs/2026-09-28-a-topology-declares-its-beginning.md).
+ *
+ * The last caveat on "a topology is a node", and the end of the root/composite
+ * distinction: every topology declares the same four keys, and whether one is an
+ * entry point is decided by whether anything **references** it.
+ */
+describe("a topology declares its beginning", () => {
+  const EDGE2 = (name: string) =>
+    `label: ${name}\ndescription: d\nfields:\n  v:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`;
+  const NODE2 = (input: string, output: string) =>
+    `label: N\ndescription: d\ninput: ${input}\noutput: ${output}\nexamples:\n  - given:\n      ${input}:\n        v: "x"\n    expect:\n      ${output}:\n        v: "x"\n`;
+
+  /** Spec Testing #1. Required on every topology now, not only composites. */
+  it("rejects a topology that declares no input", async () => {
+    const root = await fixture({
+      "edges/A.edge": EDGE2("A"),
+      "edges/B.edge": EDGE2("B"),
+      "nodes/go.node": NODE2("A", "B"),
+      "topology/main.topology": `output: B\nterminals:\n  - go\nwiring:\n  go: {}\n`,
+    });
+
+    await expect(elaborate(root)).rejects.toThrow(/declares no "input"/);
+  });
+
+  /**
+   * Spec Testing #4 and #5 — the coverage rule, both directions, because each
+   * catches a different mistake.
+   *
+   * Break-proof: deleting `assertTriggerCoverage`'s first loop let the
+   * unsupplied-origin case elaborate, and deleting the second let the
+   * unconsumed-trigger case elaborate. Neither is caught by any other rule:
+   * something does produce the edges, so Rules A and B are satisfied.
+   */
+  it("rejects an origin the trigger cannot supply", async () => {
+    const root = await fixture({
+      "edges/A.edge": EDGE2("A"),
+      "edges/B.edge": EDGE2("B"),
+      "edges/C.edge": EDGE2("C"),
+      "nodes/go.node": NODE2("C", "B"),
+      "topology/main.topology": `input: A\noutput: B\nterminals:\n  - go\nwiring:\n  go: {}\n`,
+    });
+
+    await expect(elaborate(root)).rejects.toThrow(/origin "go" needs "C".*could never fire/s);
+  });
+
+  it("rejects a declared trigger edge no origin consumes", async () => {
+    const root = await fixture({
+      "edges/A.edge": EDGE2("A"),
+      "edges/B.edge": EDGE2("B"),
+      "nodes/go.node": NODE2("A", "B"),
+      // `A` is consumed by `go`, so the first direction is satisfied and only
+      // the second can fire — otherwise this would pass for the wrong reason.
+      "topology/main.topology": `input:\n  allOf:\n    - A\n    - B\noutput: B\nterminals:\n  - go\nwiring:\n  go: {}\n`,
+    });
+
+    await expect(elaborate(root)).rejects.toThrow(/declares input "B", but no origin consumes it/);
+  });
+
+  /**
+   * Spec Testing #6 — the collapse itself. `soc-triage` has one topology
+   * referenced by another and one referenced by nothing, and the distinction is
+   * derived rather than declared.
+   *
+   * Break-proof: treating every topology as an entry (skipping the `referenced`
+   * set) made `investigate` an entry too, so this reddens on the length — and
+   * the program would have run the composite's wiring twice.
+   */
+  it("derives the entry point from what nothing references", async () => {
+    const src = fileURLToPath(new URL("../../../examples/soc-triage/src", import.meta.url));
+    const { entries, nodes } = await elaborate(src);
+
+    expect(entries.map((e) => e.name)).toEqual(["main"]);
+    // And `investigate` was inlined rather than left standing as a node.
+    expect(Object.keys(nodes)).not.toContain("investigate");
+    expect(Object.keys(nodes)).toContain("investigate/investigateIdentity");
+  });
+
+  /**
+   * Spec Testing #2 — the motivating case. `recipe`'s two origins both declare
+   * `input: Recipe`, so one payload feeds both.
+   *
+   * Break-proof: resolving by node name instead of by declared edge left
+   * `preheatOven` unpopulated, so the resolved map had one key instead of two.
+   */
+  it("feeds every origin declaring the trigger's edge from one payload", async () => {
+    const src = fileURLToPath(new URL("../../../examples/recipe/src", import.meta.url));
+    const program = await elaborate(src);
+    const recipe = { title: "Chocolate Chip Cookies", servings: 24, temperature: 375, ingredients: {} };
+
+    const resolved = resolveTrigger(program as never, recipe);
+
+    expect(Object.keys(resolved).sort()).toEqual(["mix", "preheatOven"]);
+    expect(resolved.mix).toBe(recipe);
+    expect(resolved.preheatOven).toBe(recipe);
+  });
+
+  /** Spec Testing #3 — an allOf trigger hands each origin the edge it declares. */
+  it("splits an allOf trigger by edge name", async () => {
+    const root = await fixture({
+      "edges/A.edge": EDGE2("A"),
+      "edges/B.edge": EDGE2("B"),
+      "edges/Out.edge": EDGE2("Out"),
+      "nodes/fromA.node": NODE2("A", "Out"),
+      "nodes/fromB.node": NODE2("B", "Out"),
+      "topology/main.topology":
+        `input:\n  allOf:\n    - A\n    - B\noutput: Out\nterminals:\n  - fromA\n  - fromB\nwiring:\n  fromA: {}\n  fromB: {}\n`,
+    });
+    const program = await elaborate(root);
+
+    const resolved = resolveTrigger(program as never, { A: { v: "a" }, B: { v: "b" } });
+
+    expect(resolved).toEqual({ fromA: { v: "a" }, fromB: { v: "b" } });
+  });
+
+  it("names the missing edge when an allOf trigger is incomplete", async () => {
+    const root = await fixture({
+      "edges/A.edge": EDGE2("A"),
+      "edges/B.edge": EDGE2("B"),
+      "edges/Out.edge": EDGE2("Out"),
+      "nodes/fromA.node": NODE2("A", "Out"),
+      "nodes/fromB.node": NODE2("B", "Out"),
+      "topology/main.topology":
+        `input:\n  allOf:\n    - A\n    - B\noutput: Out\nterminals:\n  - fromA\n  - fromB\nwiring:\n  fromA: {}\n  fromB: {}\n`,
+    });
+    const program = await elaborate(root);
+
+    expect(() => resolveTrigger(program as never, { A: { v: "a" } })).toThrow(/missing "B"/);
   });
 });

@@ -3,6 +3,7 @@
   "title": "Weir topology",
   "type": "object",
   "required": [
+    "input",
     "output",
     "terminals",
     "wiring"

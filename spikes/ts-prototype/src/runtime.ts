@@ -468,6 +468,66 @@ export function eligibleInstances(
   return eligibleForEdge(program, log, consumed, nodeName, nodeDef.input.edge.name, correlationId);
 }
 
+/**
+ * Resolves one external event into the per-origin payloads `runNetlist` takes
+ * (docs/superpowers/specs/2026-09-28-a-topology-declares-its-beginning.md §3).
+ *
+ * `design.md` §5: *"there is exactly one call to the graph's outer membrane per
+ * external event, and every origin-shaped edge it declares needing resolves
+ * from that single payload at once."* The outer membrane is the **host**
+ * boundary; `runNetlist` sits below it and receives already-resolved inputs. So
+ * this lives beside the runtime rather than inside it, is a pure function of a
+ * declaration and a value, and leaves `Run.originPayloads` untouched — which is
+ * also why every hand-built `Program` in the test suite keeps working unchanged.
+ *
+ * For a `single` entry input the payload *is* the edge's payload, and every
+ * origin declaring that edge gets it — which is the case `examples/recipe` has
+ * been writing twice, once per origin, for as long as it has existed. For an
+ * `allOf` entry the payload is a bag keyed by edge name, the same bag shape an
+ * `allOf`-input node receives, so no new encoding is introduced.
+ */
+export function resolveTrigger(
+  program: Pick<Program, "nodes" | "wiring" | "entries">,
+  payload: unknown,
+): Record<string, unknown> {
+  const entries = program.entries ?? [];
+  if (entries.length === 0) {
+    throw new Error(
+      `This program declares no topology entry, so there is nothing to resolve a trigger against. Supply originPayloads directly.`,
+    );
+  }
+
+  /** Which edge each origin wants, and what the trigger holds for it. */
+  const byEdge = new Map<string, unknown>();
+  for (const entry of entries) {
+    if (entry.input.kind === "single" || entry.input.kind === "gather") {
+      byEdge.set(entry.input.edge.name, payload);
+      continue;
+    }
+    const bag = (payload ?? {}) as Record<string, unknown>;
+    for (const edge of entry.input.edges) {
+      if (!(edge.name in bag)) {
+        throw new Error(
+          `Trigger is missing "${edge.name}" — topology "${entry.name}" declares input allOf ${entry.input.edges.map((e) => `"${e.name}"`).join(", ")}, so the payload is a bag keyed by edge name.`,
+        );
+      }
+      byEdge.set(edge.name, bag[edge.name]);
+    }
+  }
+
+  const resolved: Record<string, unknown> = {};
+  for (const origin of program.wiring.origins) {
+    const decl = program.nodes[origin];
+    if (decl === undefined) continue;
+    // An origin declares one edge at single multiplicity; `inputEdgeNames`
+    // covers the other kinds for free rather than assuming.
+    for (const edgeName of inputEdgeNames(decl.input)) {
+      if (byEdge.has(edgeName)) resolved[origin] = byEdge.get(edgeName);
+    }
+  }
+  return resolved;
+}
+
 export async function runNetlist(program: Program, run: Run, host: Host): Promise<RunResult> {
   const { correlationId, originPayloads, identity } = run;
   const { log, trace, budget, maxPulses = DEFAULT_MAX_PULSES, effects = {} } = host;
@@ -848,7 +908,7 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
    */
   const unmetNow = (): UnmetEnd[] => {
     const out: UnmetEnd[] = [];
-    for (const end of program.ends ?? []) {
+    for (const end of program.entries ?? []) {
       const terminals = new Set(end.terminals);
       const producedByTerminal = (edgeName: string): boolean =>
         log
