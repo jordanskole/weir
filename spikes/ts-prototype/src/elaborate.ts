@@ -605,6 +605,15 @@ export interface CompositeDecl {
   /** The inner nodes whose outputs are this composite's output. */
   terminals: string[];
   wiring: Wiring;
+  /**
+   * What this topology claims its composition does, in the same
+   * `given`/`expect` form a node declares
+   * (docs/superpowers/specs/2026-09-28-a-topology-can-be-tested.md).
+   * Translated out of its authoring tagging by `untagExamples`, which needed no
+   * extension: it takes an `InputSpec` and an `OutputSpec`, and a topology has
+   * both.
+   */
+  examples?: NodeDecl["examples"];
 }
 
 /**
@@ -629,7 +638,7 @@ export interface RootEnd {
 }
 
 /** Top-level keys a `.topology` reserves for its contract. */
-export const TOPOLOGY_RESERVED_KEYS = ["input", "output", "terminals", "wiring"] as const;
+export const TOPOLOGY_RESERVED_KEYS = ["input", "output", "terminals", "wiring", "examples"] as const;
 
 /** Whether a parsed `.topology` document declares a contract rather than being bare wiring. */
 export function isCompositeTopology(yamlText: string): boolean {
@@ -656,11 +665,18 @@ export function parseCompositeTopologyFile(
   resolveNodeName: NodeNameResolver,
 ): CompositeDecl {
   const raw = (parse(yamlText) as Record<string, unknown> | null) ?? {};
-  const { input, output, terminals, wiring, ...rest } = raw as {
+  // `.topology` was the one declaration kind never validated against its own
+  // schema — `assertDeclaration` was wired for field, edge and node when "make
+  // `weir check` actually check" closed that gap, and topologies were missed.
+  // The hand-written parsing below catches an unrecognized *key*; only the
+  // schema catches a malformed *value*.
+  assertDeclaration("topology", raw);
+  const { input, output, terminals, wiring, examples, ...rest } = raw as {
     input?: unknown;
     output?: unknown;
     terminals?: unknown;
     wiring?: unknown;
+    examples?: unknown;
   };
   const unrecognized = Object.keys(rest)[0];
   if (unrecognized !== undefined) {
@@ -684,12 +700,15 @@ export function parseCompositeTopologyFile(
   if (wiring === undefined) {
     throw new Error(`Topology "${name}": declares a contract but no "wiring".`);
   }
+  const inputSpec = resolveInputSpec(input, resolveEdge);
+  const outputSpec = resolveOutputSpec(output, resolveEdge);
   return {
     name,
-    input: resolveInputSpec(input, resolveEdge),
-    output: resolveOutputSpec(output, resolveEdge),
+    input: inputSpec,
+    output: outputSpec,
     terminals: terminals.map(String),
     wiring: parseWiringObject(wiring as Record<string, unknown>, resolveNodeName),
+    ...(examples !== undefined && { examples: untagExamples(examples, inputSpec, outputSpec) }),
   };
 }
 
@@ -1175,6 +1194,12 @@ export interface Elaborated {
    * begin or finish, so there is nothing to require of it.
    */
   entries: CompositeDecl[];
+  /**
+   * Every declared topology by name, entries included — what `weir test` needs
+   * to run a *composite* standalone, which the entry list alone cannot supply
+   * because a composite is referenced and therefore not an entry.
+   */
+  topologies: CompositeDecl[];
 }
 
 /**
@@ -1385,5 +1410,5 @@ export async function elaborate(root: string): Promise<Elaborated> {
 
   assertWiringTypes(nodes, wiring, anyOfAliases);
 
-  return { fields, edges, nodes, wiring, entries: expanded };
+  return { fields, edges, nodes, wiring, entries: expanded, topologies: [...declared.values()] };
 }

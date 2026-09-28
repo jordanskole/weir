@@ -392,7 +392,13 @@ human wouldn't think to write by hand. Acceptance (§10) requires both — an im
 that passes generated cases inconsistently against an *unchanged* contract is exposing
 underdetermined examples, not implementation flakiness, and the fix is to the contract.
 
-**Risk ordering, highest first: ontology, topology, examples, implementation.** Ontology
+**Risk ordering, highest first: ontology, topology, examples, implementation.** A
+topology now carries `examples` of its own, and `weir test` runs them — a node's
+example is *invoked* through the membrane, a topology's is *run* through the pulse
+loop, and the answer is read from its declared terminals
+([spec](superpowers/specs/2026-09-28-a-topology-can-be-tested.md)). That is
+testing rather than acceptance: a composite has no drafted implementation to
+persist, because its body is its wiring. Ontology
 has no mechanical check — nothing can tell you the edge set carves the domain correctly
 except review. Topology gets partial mechanical support at elaboration time, and it
 is worth being exact about how much. **Reachability is built** — a topology refuses an arc

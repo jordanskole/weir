@@ -25,7 +25,8 @@ import { elaborate } from "./elaborate.js";
 import { serializeNetlist } from "./netlist.js";
 import { exportContract } from "./contract.js";
 import { acceptImplementation } from "./accept.js";
-import { elaborateWithImplementations } from "./implementation.js";
+import { runExamples } from "./test-run.js";
+import { elaborateWithImplementations, resolveImplementation } from "./implementation.js";
 import { resolveTrigger, runNetlist } from "./runtime.js";
 import { FileLog } from "./file-log.js";
 import { FileTrace } from "./file-trace.js";
@@ -51,6 +52,8 @@ usage
                                 replay and compare — a mismatch means undeclared nondeterminism
   weir accept <node> [dir] --source <file> --impl <dir>
                                 run one candidate implementation through the acceptance gate
+  weir test [dir] --impl <dir>  run every declared example — a node's through the
+                                membrane, a topology's through a run
 
   dir defaults to the current directory.
   --payload is the trigger: one external event, shaped by the entry topology's
@@ -279,6 +282,78 @@ async function run(dir: string, flags: Map<string, string>): Promise<CliResult> 
 }
 
 /**
+ * Runs every declared example in the program
+ * (docs/superpowers/specs/2026-09-28-a-topology-can-be-tested.md).
+ *
+ * Testing, not acceptance: nothing is written, and a topology has nothing to
+ * write — its body is its wiring. What this checks is whether a composition does
+ * what its contract claims, which until now was checked by reading.
+ */
+async function test(dir: string, flags: Map<string, string>): Promise<CliResult> {
+  const implRoot = flags.get("impl");
+  if (implRoot === undefined) return { code: 1, out: `✗ test needs --impl.\n\n${USAGE}` };
+
+  let elaborated;
+  try {
+    elaborated = await elaborate(dir);
+  } catch (error) {
+    return failure(error, dir);
+  }
+
+  // Resolve implementations **per node**, tolerating the ones that are missing.
+  // `elaborateWithImplementations` throws on the first unresolvable node, which
+  // is right for `run` — a program that cannot execute should not start — and
+  // wrong here: testing what exists while an agent implements the rest one node
+  // at a time is the case this command is for. An unresolved node keeps its
+  // declaration and gets no `fn`, which `runExamples` reports as a skip.
+  const resolved = await Promise.all(
+    Object.entries(elaborated.nodes).map(async ([name, decl]) => {
+      try {
+        return [name, await resolveImplementation(decl, resolve(implRoot))] as const;
+      } catch {
+        return [name, decl] as const;
+      }
+    }),
+  );
+  const program = { ...elaborated, nodes: Object.fromEntries(resolved) };
+  const topologies = elaborated.topologies;
+
+  const report = await runExamples(program, topologies);
+  if (report.results.length === 0) {
+    return { code: 1, out: `✗ no declared examples found in ${dir} — nothing was checked.` };
+  }
+
+  const lines: string[] = [];
+  for (const r of report.results.filter((r) => r.outcome !== "passed")) {
+    const label = `${r.kind} ${r.name} example ${r.index}`;
+    if (r.outcome === "skipped") {
+      lines.push(`  skipped   ${label} — ${r.reason}`);
+      continue;
+    }
+    lines.push(`  failed    ${label}${r.reason === undefined ? "" : ` — ${r.reason}`}`);
+    if (r.expected !== undefined) lines.push(`            expected ${JSON.stringify(r.expected)}`);
+    if (r.actual !== undefined) lines.push(`            actual   ${JSON.stringify(r.actual)}`);
+  }
+
+  const summary = `${report.passed} passed, ${report.failed} failed, ${report.skipped} skipped`;
+  // **A skip is not a pass**, and a tick over a partly-skipped run would claim
+  // more than was checked — the same rule `verify` follows when it refuses to
+  // report a clean pass over zero checks. So a ✓ means every declared example
+  // ran and agreed; anything else says which it was.
+  //
+  // This is strict during development on purpose: an agent implementing one
+  // node at a time reads the skip list, which is the useful output either way,
+  // and gets a green tick exactly when the program is actually finished.
+  const clean = report.failed === 0 && report.skipped === 0 && report.passed > 0;
+  const headline = clean
+    ? `✓ ${summary}`
+    : report.failed > 0
+      ? `✗ ${summary}`
+      : `✗ ${summary} — nothing failed, but a skip is not a pass`;
+  return { code: clean ? 0 : 1, out: [headline, ...(lines.length > 0 ? ["", ...lines] : [])].join("\n") };
+}
+
+/**
  * Runs one candidate implementation through the acceptance gate — its declared
  * examples, generated structural cases, and property assertions — and persists
  * it only if it passes (docs/design.md §10).
@@ -491,6 +566,8 @@ export async function runCli(argv: string[], cwd: string): Promise<CliResult> {
       return replay(rest[0] ?? cwd, flags);
     case "verify":
       return verify(rest[0] ?? cwd, flags);
+    case "test":
+      return test(rest[0] ?? cwd, flags);
     case "accept": {
       if (rest[0] === undefined) return { code: 1, out: `✗ accept needs a node name.\n\n${USAGE}` };
       return accept(rest[0], rest[1] ?? cwd, flags);

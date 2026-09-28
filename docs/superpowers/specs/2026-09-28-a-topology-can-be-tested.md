@@ -1,6 +1,6 @@
 # A topology can be tested
 
-Status: draft.
+Status: implemented.
 
 ## Motivation
 
@@ -151,6 +151,39 @@ break-proof showed — including breaks that do **not** redden.
 7. A node whose implementation is missing is reported as **skipped**, not passed
    — the `verify` rule, for the same reason: a check that quietly examines
    nothing is this repo's most frequent bug.
+
+## What the build found
+
+**`.topology` was the one declaration kind never validated against its own
+schema.** `assertDeclaration` had been wired for `.field`, `.edge` and `.node`
+when "make `weir check` actually check" closed that gap, and topologies were
+missed — so `topologySchema()` had been editor tooling only, for as long as it
+has existed. The hand-written parser catches an unrecognized *key*; only the
+schema catches a malformed *value*, and `terminals: go` (a bare string where a
+list belongs) elaborated cleanly until this. Now wired, which moved three tests'
+error messages from the parser's to the schema's — each updated to assert **which
+check fires**, rather than to whichever message happened to come out.
+
+**Skips had to become louder than planned.** §1 said `weir test` reports what
+ran; the build found that a tick over a partly-skipped run claims more than was
+checked. `✓` now means *every* declared example ran and agreed, and a run with
+skips exits non-zero saying "a skip is not a pass" — `verify`'s rule, applied
+here. This is deliberately strict during development: an agent implementing one
+node at a time reads the skip list either way, and gets a green tick exactly when
+the program is finished.
+
+**Missing implementations are tolerated per node, which §1 did not anticipate.**
+`elaborateWithImplementations` throws on the first unresolvable node — right for
+`run`, wrong for a command whose job includes reporting what is *not* built yet.
+`weir test` resolves per node and keeps the declaration when resolution fails.
+That made a `TestableProgram` type necessary: `Program.nodes` promises every node
+has an `fn`, and saying otherwise in the type is what keeps the skip path from
+being a cast. A topology whose wiring names an unimplemented node is skipped too,
+naming which — rather than run into a confusing failure.
+
+**The prediction in §5 held.** `investigate`'s example is the first one written,
+it passed on the first run, and nothing about the composition was wrong. As
+predicted, the interesting outcome would have been a surprise; there wasn't one.
 
 ## Explicitly out of scope
 

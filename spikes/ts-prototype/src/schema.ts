@@ -579,6 +579,20 @@ export function topologySchema(): object {
       },
       terminals: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
       wiring,
+      // What this topology claims its composition does, in the same
+      // `given`/`expect` form a node declares
+      // (2026-09-28-a-topology-can-be-tested.md). Tagged by edge name on both
+      // sides: `given` carries one tag, `expect` one per declared output edge.
+      examples: {
+        type: "array",
+        minItems: 1,
+        items: {
+          type: "object",
+          required: ["given", "expect"],
+          properties: { given: tagged({ type: "object" }), expect: tagged({ type: "object" }) },
+          additionalProperties: false,
+        },
+      },
     },
     additionalProperties: false,
     $defs: { topologyNode },

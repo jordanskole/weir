@@ -9,3 +9,20 @@ terminals:
 wiring:
   investigateIdentity: {}
   investigateAsset: {}
+examples:
+  # What the *composition* claims, which no check has ever run: one entity in,
+  # both investigations out, each about that entity
+  # (docs/superpowers/specs/2026-09-28-a-topology-can-be-tested.md). The inner
+  # nodes each have their own examples; this is the claim neither of them makes.
+  - given:
+      Entity:
+        id: "e-principal"
+        kind: "principal"
+        value: "svc-backup@corp"
+    expect:
+      IdentityContext:
+        entityId: "e-principal"
+        summary: "identity:svc-backup@corp"
+      AssetContext:
+        entityId: "e-principal"
+        summary: "asset:svc-backup@corp"

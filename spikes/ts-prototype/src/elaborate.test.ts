@@ -1433,10 +1433,19 @@ wiring:
 
   it("rejects a .topology file referencing a node no .node file declares", async () => {
     const root = await writeFixture({
+      "edges/Seed.edge": PLAIN_EDGE("Seed"),
+      // A well-formed topology, so the schema passes and the *reference* check
+      // is what rejects it. The bare-wiring version of this fixture now fails at
+      // the schema instead, which says nothing about Ghost.
       "topology/main.topology": `
-Ghost:
-  then:
-    AlsoGhost: {}
+input: Seed
+output: Seed
+terminals:
+  - Ghost
+wiring:
+  Ghost:
+    then:
+      AlsoGhost: {}
 `,
     });
 

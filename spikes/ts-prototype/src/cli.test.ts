@@ -459,3 +459,59 @@ describe("runCli — accept", () => {
     expect(result.out).toContain("declared:");
   });
 });
+
+/**
+ * `weir test` — every declared example, a node's through the membrane and a
+ * topology's through a run
+ * (docs/superpowers/specs/2026-09-28-a-topology-can-be-tested.md §1).
+ */
+describe("runCli — test", () => {
+  /** Implementations for every soc-triage node, including the composite's inner two. */
+  async function socImpls(workdir: string): Promise<string> {
+    const { hashNode } = await import("./hash.js");
+    const { elaborate } = await import("./elaborate.js");
+    const { nodes } = await elaborate(SOC_SRC);
+    const impls: Record<string, string> = {
+      extractEntities: `export default function extractEntities(a) { return { "e-principal": { id: "e-principal", kind: "principal", value: a.principal }, "e-asset": { id: "e-asset", kind: "asset", value: a.asset } }; }`,
+      investigateIdentity: `export default function investigateIdentity(e) { return { entityId: e.id, summary: "identity:" + e.value }; }`,
+      investigateAsset: `export default function investigateAsset(e) { return { entityId: e.id, summary: "asset:" + e.value }; }`,
+      assembleEvidence: `export default function assembleEvidence(b) { return { entityId: b.IdentityContext.entityId, identitySummary: b.IdentityContext.summary, assetSummary: b.AssetContext.summary }; }`,
+      assess: `export default function assess(e) { return { entityId: e.entityId, verdict: e.identitySummary + " / " + e.assetSummary }; }`,
+      summarizeAlert: `export default function summarizeAlert(c) { const ids = Object.keys(c).sort(); return { entities: ids.join(","), entityCount: ids.length, summary: ids.length === 0 ? "no entities assessed" : ids.map((i) => i + ": " + c[i].verdict).join("; ") }; }`,
+    };
+    const implRoot = join(workdir, "impl");
+    for (const [name, fn] of Object.entries(impls)) {
+      for (const key of Object.keys(nodes).filter((k) => k === name || k.endsWith(`/${name}`))) {
+        const hash = (await hashNode(nodes[key]!)).short;
+        await mkdir(join(implRoot, nodes[key]!.name), { recursive: true });
+        await writeFile(join(implRoot, nodes[key]!.name, `${hash}.ts`), `${fn}\n`, "utf8");
+      }
+    }
+    return implRoot;
+  }
+
+  it("runs a composite's example alongside every node's, and exits zero", async () => {
+    const workdir = await fixture({ "placeholder.txt": "" });
+    const implRoot = await socImpls(workdir);
+
+    const result = await runCli(["test", SOC_SRC, "--impl", implRoot], workdir);
+
+    expect(result.code).toBe(0);
+    // Both kinds ran: soc-triage's nodes plus `investigate`'s own example, which
+    // is the first check the composite's contract has ever had.
+    expect(result.out).toMatch(/✓ \d+ passed, 0 failed, 0 skipped/);
+  });
+
+  it("exits non-zero and names the example when nothing supplies an implementation", async () => {
+    // No implementations at all: every example is *skipped*, and a run that
+    // skipped everything must not report a clean tick — `verify`'s rule.
+    const workdir = await fixture({ "placeholder.txt": "" });
+
+    const result = await runCli(["test", SOC_SRC, "--impl", join(workdir, "empty")], workdir);
+
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("skipped");
+    expect(result.out).toContain("no accepted implementation");
+    expect(result.out).not.toContain("✓");
+  });
+});

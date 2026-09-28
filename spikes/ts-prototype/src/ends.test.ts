@@ -63,7 +63,12 @@ describe("a root topology declares its end — at elaboration", () => {
       "topology/main.topology": `go: {}\n`,
     });
 
-    await expect(elaborate(root)).rejects.toThrow(/main\.topology.*declares only|unrecognized top-level key "go"/s);
+    // Rejected by the schema, which `.topology` is finally validated against —
+    // `assertDeclaration` had been wired for field, edge and node and not for
+    // topology. The parser's own "declares no output" message is defense in
+    // depth behind it, and is what a `.topology` with a *valid* shape but a
+    // missing key would hit.
+    await expect(elaborate(root)).rejects.toThrow(/not a valid \.topology declaration/);
   });
 
   /**
@@ -365,7 +370,9 @@ describe("a topology declares its beginning", () => {
       "topology/main.topology": `output: B\nterminals:\n  - go\nwiring:\n  go: {}\n`,
     });
 
-    await expect(elaborate(root)).rejects.toThrow(/declares no "input"/);
+    // Same: the schema requires all four keys, and reaches this before the
+    // parser's own message does.
+    await expect(elaborate(root)).rejects.toThrow(/not a valid \.topology declaration.*input/s);
   });
 
   /**
