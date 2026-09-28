@@ -406,3 +406,54 @@ describe("runCli — run reports a stall", () => {
     expect(result.out).not.toContain("waiting");
   });
 });
+
+/**
+ * `weir accept` — the gate, reachable
+ * (docs/superpowers/specs/2026-09-28-examples-reach-the-gate.md §4). It existed
+ * with no CLI entry at all, which is most of why nobody noticed that a `.node`
+ * file's examples could not pass it.
+ */
+describe("runCli — accept", () => {
+  it("accepts a correct implementation of a real example node, and persists it", async () => {
+    const workdir = await fixture({ "placeholder.txt": "" });
+    const source = join(workdir, "mix.ts");
+    await writeFile(source, `export default function mix(r) { return { title: r.title, servings: r.servings }; }\n`, "utf8");
+    const implRoot = join(workdir, "impl");
+
+    const result = await runCli(["accept", "mix", RECIPE_SRC, "--source", source, "--impl", implRoot], workdir);
+
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("✓ accepted mix");
+    expect(result.out).toContain("metadata");
+  });
+
+  it("rejects an implementation that fails its declared example, and persists nothing", async () => {
+    const workdir = await fixture({ "placeholder.txt": "" });
+    const source = join(workdir, "mix.ts");
+    await writeFile(source, `export default function mix(r) { return { title: "wrong", servings: r.servings }; }\n`, "utf8");
+    const implRoot = join(workdir, "impl");
+
+    const result = await runCli(["accept", "mix", RECIPE_SRC, "--source", source, "--impl", implRoot], workdir);
+
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("was not accepted");
+    // The report is the only record, since nothing is written.
+    expect(result.out).toContain("expected");
+    expect(result.out).toContain("actual");
+  });
+
+  it("names the declared nodes when asked for one that does not exist", async () => {
+    const workdir = await fixture({ "placeholder.txt": "" });
+    const source = join(workdir, "x.ts");
+    await writeFile(source, `export default function x() { return {}; }\n`, "utf8");
+
+    const result = await runCli(
+      ["accept", "nosuchnode", RECIPE_SRC, "--source", source, "--impl", join(workdir, "impl")],
+      workdir,
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.out).toContain('no node named "nosuchnode"');
+    expect(result.out).toContain("declared:");
+  });
+});

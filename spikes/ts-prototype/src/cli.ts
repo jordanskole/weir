@@ -24,6 +24,7 @@ import { resolve } from "node:path";
 import { elaborate } from "./elaborate.js";
 import { serializeNetlist } from "./netlist.js";
 import { exportContract } from "./contract.js";
+import { acceptImplementation } from "./accept.js";
 import { elaborateWithImplementations } from "./implementation.js";
 import { runNetlist } from "./runtime.js";
 import { FileLog } from "./file-log.js";
@@ -48,6 +49,8 @@ usage
                                 re-run each recorded invocation against its pinned implementation
   weir verify [dir] --impl <dir> --run <id> [--trace <file>]
                                 replay and compare — a mismatch means undeclared nondeterminism
+  weir accept <node> [dir] --source <file> --impl <dir>
+                                run one candidate implementation through the acceptance gate
 
   dir defaults to the current directory.
   --payload is a JSON object of origin node name -> that node's payload.
@@ -257,6 +260,73 @@ async function run(dir: string, flags: Map<string, string>): Promise<CliResult> 
   };
 }
 
+/**
+ * Runs one candidate implementation through the acceptance gate — its declared
+ * examples, generated structural cases, and property assertions — and persists
+ * it only if it passes (docs/design.md §10).
+ *
+ * The gate existed with no way to reach it: `acceptImplementation`'s only
+ * callers were tests, which is most of why nobody noticed that a `.node` file's
+ * examples could not pass it at all
+ * (docs/superpowers/specs/2026-09-28-examples-reach-the-gate.md).
+ */
+async function accept(nodeName: string, dir: string, flags: Map<string, string>): Promise<CliResult> {
+  const implRoot = flags.get("impl");
+  const sourcePath = flags.get("source");
+  if (implRoot === undefined || sourcePath === undefined) {
+    return { code: 1, out: `✗ accept needs --source and --impl.\n\n${USAGE}` };
+  }
+
+  let elaborated;
+  try {
+    elaborated = await elaborate(dir);
+  } catch (error) {
+    return failure(error, dir);
+  }
+  const node = elaborated.nodes[nodeName];
+  if (node === undefined) {
+    const known = Object.keys(elaborated.nodes).sort().join(", ") || "(none)";
+    return { code: 1, out: `✗ no node named "${nodeName}".\n\n  declared: ${known}` };
+  }
+
+  let source: string;
+  try {
+    source = await readFile(resolve(sourcePath), "utf8");
+  } catch (error) {
+    return { code: 1, out: `✗ could not read --source ${sourcePath}\n\n  ${(error as Error).message}` };
+  }
+
+  const result = await acceptImplementation(node, source, resolve(implRoot));
+  if (result.accepted) {
+    return {
+      code: 0,
+      out: [`✓ accepted ${nodeName}`, "", `  impl      ${result.path}`, `  metadata  ${result.metadataPath}`].join("\n"),
+    };
+  }
+  if (result.reason === "load-failed") {
+    return { code: 1, out: [`✗ ${nodeName} did not load`, "", `  ${result.error}`].join("\n") };
+  }
+
+  // Nothing was written — accept-before-persist means a rejected candidate
+  // leaves no trace, so the report is the only record of why.
+  const lines = [`✗ ${nodeName} was not accepted`, ""];
+  for (const failed of result.exampleFailures) {
+    lines.push(`  example   given ${JSON.stringify(failed.given)}`);
+    lines.push(`            expected ${JSON.stringify(failed.expected)}`);
+    lines.push(`            actual   ${JSON.stringify(failed.actual)}`);
+  }
+  for (const failed of result.fuzzReport.failures.slice(0, 5)) {
+    lines.push(`  generated ${JSON.stringify(failed.input)} — ${failed.error}`);
+  }
+  for (const failed of result.fuzzReport.propertyFailures.slice(0, 5)) {
+    lines.push(`  property  "${failed.property}" did not hold for ${JSON.stringify(failed.input)}`);
+  }
+  if (result.vacuous) {
+    lines.push(`  vacuous   no generated case produced a real output, so every property passed on nothing`);
+  }
+  return { code: 1, out: lines.join("\n") };
+}
+
 /** Replays each recorded invocation against the implementation its contract hash pins. No verdict — that is `verify`. */
 async function replay(dir: string, flags: Map<string, string>): Promise<CliResult> {
   const implRoot = flags.get("impl");
@@ -403,6 +473,10 @@ export async function runCli(argv: string[], cwd: string): Promise<CliResult> {
       return replay(rest[0] ?? cwd, flags);
     case "verify":
       return verify(rest[0] ?? cwd, flags);
+    case "accept": {
+      if (rest[0] === undefined) return { code: 1, out: `✗ accept needs a node name.\n\n${USAGE}` };
+      return accept(rest[0], rest[1] ?? cwd, flags);
+    }
     case "contract": {
       if (rest[0] === undefined) return { code: 1, out: `✗ contract needs a node name.\n\n${USAGE}` };
       return contract(rest[0], rest[1] ?? cwd);

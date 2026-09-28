@@ -1,6 +1,6 @@
 # Examples reach the gate
 
-Status: draft.
+Status: implemented.
 
 ## Motivation
 
@@ -102,6 +102,14 @@ implementations have never been compared by anything.
 **Any example this turns up is a finding, not an obstacle.** Fixing them is part
 of the build; recording what was wrong is the point of doing it.
 
+**It turned up nothing, and this prediction was wrong.** All **30 declared
+examples across 26 nodes** pass once the translation exists — no typo, no drifted
+value, no mismatched branch. Recorded rather than quietly deleted, because a
+prediction that does not pan out is evidence too: it says the examples were
+being maintained carefully by hand against implementations living in test files,
+which is a better state than this section assumed. What was broken was only ever
+the translation.
+
 ## 4. The gate needs a way to be run
 
 Untagging makes the gate *correct* for real declarations. It does not make it
@@ -109,9 +117,10 @@ Untagging makes the gate *correct* for real declarations. It does not make it
 tests. Two pieces, and they are separable:
 
 **A test that runs every example in `examples/` through the gate.** This is the
-guard that would have caught the defect and the one that keeps it caught. It
-needs an implementation per node, which the runtime tests already supply for
-every example — those move to a shared fixture rather than being written twice.
+guard that would have caught the defect and the one that keeps it caught.
+Originally scoped as needing a correct implementation per node; it does not —
+see Testing #5, which checks each example is well-formed against its own
+contract instead and so needs no `Fn` at all.
 
 **`weir accept <dir> --node <name> --source <file> --impl <dir>`**, so an agent
 or a human can run the gate on a candidate from outside the test suite. Smaller
@@ -137,7 +146,8 @@ three of `gather`'s did not and saying so is what kept them honest.
 
 1. **A real example from `examples/` passes the gate with a correct
    implementation.** `mix` is the case from the motivation; assert accepted,
-   which fails today.
+   which fails today. *Built*, and its break-proof is the defect restated:
+   reverting `untagExamples` to pass examples through unchanged reddens it.
 2. A correct implementation is still **rejected** when an example is genuinely
    wrong — the gate must not have been loosened into uselessness by the fix.
    Mutate one expected value and assert the rejection names it.
@@ -146,7 +156,19 @@ three of `gather`'s did not and saying so is what kept them honest.
 4. Each output kind untags correctly, `oneOf` and `allOf` especially, since those
    two *change shape* rather than merely losing a wrapper.
 5. **Every node in every example runs its declared examples through the gate.**
-   The corpus-wide guard, and the test that makes §3's findings visible.
+   The corpus-wide guard. *Built differently, and better:* rather than needing a
+   correct implementation for all 26 nodes, it asserts each declared example is
+   **well-formed against its own contract** — `given` valid for the node's input,
+   `expect` valid for its output. That is what the gate checks first, it is
+   exactly what was broken, and it needs no implementations, so it scales as
+   examples are added instead of requiring one more `Fn` per node. It carries two
+   floor assertions (>15 examples, >4 example roots) so it cannot pass by
+   examining nothing — this repo's most frequent bug.
+
+   A happy confirmation fell out of writing it: `assertOutput` (membrane.ts)
+   already accepts exactly the post-translation runtime form for all four output
+   kinds, which is independent evidence that §2's table targets the right shapes
+   rather than shapes invented for this spec.
 6. `exportContract`'s examples are the translated form, so an agent is shown what
    `Fn` receives.
 
@@ -158,3 +180,7 @@ three of `gather`'s did not and saying so is what kept them honest.
   more urgent by this, and deliberately not bundled.
 - **`weir accept`'s draft/iterate loop.** This spec adds a way to run the gate
   once on a candidate, not an agent workflow around it.
+- **Test #6 as specced.** `exportContract` passes `node.examples` straight
+  through, so it carries the translated form by construction the moment
+  `NodeDecl` does — there is no separate code path to test, and a test asserting
+  it would be asserting that a spread operator works.

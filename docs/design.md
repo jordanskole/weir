@@ -367,6 +367,12 @@ that domain further where declared; a field without them still generates from it
 type's full representable range, so tightening a bound is opt-in, not a new requirement
 on existing edges.
 
+An example is written **tagged by edge name** in a `.node` file (`given: { Recipe: … }`) and
+is translated at elaboration into the shape `Fn` receives and returns, so a declaration's
+examples mean one thing regardless of whether it was authored as YAML or constructed
+directly. The tagging is an authoring affordance, not part of the contract
+([spec](superpowers/specs/2026-09-28-examples-reach-the-gate.md)).
+
 **Generation, not mocking.** A property test runs the real `Fn` against a generated
 input — there is nothing to fake, because nodes have no impure dependencies to isolate
 from (§5, effects are data). An example is a real invocation with a chosen input, not a

@@ -338,6 +338,77 @@ function resolveInputSpec(input: unknown, resolveEdge: EdgeResolver): InputSpec 
 }
 
 /**
+ * Translates a `.node` file's authoring-form examples into the shapes `Fn`
+ * actually receives and returns
+ * (docs/superpowers/specs/2026-09-28-examples-reach-the-gate.md).
+ *
+ * A `.node` file tags examples by edge name — `given: { Recipe: … }` — which is
+ * what `nodeSchema()` validates and what `parseAnyOfNodeFile` routes shadows
+ * by. A `NodeDef`'s examples are bare: `given` is the payload `Fn` is called
+ * with, `expect` is what it returns. Nothing translated between them, so
+ * `accept.ts` asserted `{Recipe: …}` against the `Recipe` schema, it failed, and
+ * **every example in `examples/` failed its own acceptance gate** while being
+ * validated for shape and never run.
+ *
+ * Translating here rather than at the gate is what keeps `NodeDecl` uniform: a
+ * declaration's examples mean one thing regardless of whether it came from YAML
+ * or from `defineNode`, so the tagging is an authoring affordance that is gone
+ * by the time anything reads a declaration.
+ *
+ * **The asymmetry is real and is not an inconsistency.** An `allOf` *input* bag
+ * is keyed by edge name by design, so its authoring and runtime forms coincide
+ * and nothing is stripped. An `allOf` *output* is a list of tagged branches, so
+ * they differ — and a `oneOf` output *gains* structure (`{edge, payload}`)
+ * rather than losing a wrapper, because the tag carries which branch fired.
+ */
+function untagExamples(raw: unknown, input: InputSpec, output: OutputSpec): NodeDecl["examples"] {
+  if (!Array.isArray(raw)) return raw as NodeDecl["examples"];
+
+  /** The sole value under a one-key tag. Used where the tag only says which edge, which the spec already knows. */
+  const sole = (value: unknown, what: string, index: number): unknown => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`example ${index}: "${what}" must be tagged by edge name, e.g. "${what}: { EdgeName: … }".`);
+    }
+    const keys = Object.keys(value as Record<string, unknown>);
+    if (keys.length !== 1) {
+      throw new Error(
+        `example ${index}: "${what}" must carry exactly one edge-name tag, got ${keys.length === 0 ? "none" : keys.map((k) => `"${k}"`).join(", ")}.`,
+      );
+    }
+    return (value as Record<string, unknown>)[keys[0]!];
+  };
+
+  return raw.map((example, index) => {
+    const { given, expect } = example as { given?: unknown; expect?: unknown };
+
+    // `allOf` is the one input kind whose authoring form is already the runtime
+    // form — the bag is keyed by edge name either way.
+    const untaggedGiven = input.kind === "allOf" ? given : sole(given, "given", index);
+
+    let untaggedExpect: unknown;
+    if (output.kind === "single" || output.kind === "many") {
+      untaggedExpect = sole(expect, "expect", index);
+    } else if (output.kind === "oneOf") {
+      if (expect === null || typeof expect !== "object" || Array.isArray(expect)) {
+        throw new Error(`example ${index}: "expect" must name the branch that fired, e.g. "expect: { Branch: … }".`);
+      }
+      const keys = Object.keys(expect as Record<string, unknown>);
+      if (keys.length !== 1) {
+        throw new Error(`example ${index}: a oneOf output's "expect" names exactly one branch, got ${keys.length}.`);
+      }
+      untaggedExpect = { edge: keys[0]!, payload: (expect as Record<string, unknown>)[keys[0]!] };
+    } else {
+      if (expect === null || typeof expect !== "object" || Array.isArray(expect)) {
+        throw new Error(`example ${index}: an allOf output's "expect" tags each branch by edge name.`);
+      }
+      untaggedExpect = Object.entries(expect as Record<string, unknown>).map(([edge, payload]) => ({ edge, payload }));
+    }
+
+    return { ...(example as object), given: untaggedGiven, expect: untaggedExpect } as NonNullable<NodeDecl["examples"]>[number];
+  });
+}
+
+/**
  * Resolves a `.node` file's `output` value into an `OutputSpec` — the four
  * shapes `nodeSchema()` (schema.ts) validates: a bare edge name (`single`),
  * or an `oneOf`/`allOf`/`many` tagged object (docs/design-history.md,
@@ -403,13 +474,15 @@ export function parseNodeFile(yamlText: string, name: string, resolveEdge: EdgeR
     properties?: unknown;
   };
 
+  const inputSpec = resolveInputSpec(input, resolveEdge);
+  const outputSpec = resolveOutputSpec(output, resolveEdge);
   return {
     name,
     ...(typeof label === "string" && { label }),
     ...(typeof description === "string" && { description }),
-    input: resolveInputSpec(input, resolveEdge),
-    output: resolveOutputSpec(output, resolveEdge),
-    ...(examples !== undefined && { examples: examples as NodeDecl["examples"] }),
+    input: inputSpec,
+    output: outputSpec,
+    ...(examples !== undefined && { examples: untagExamples(examples, inputSpec, outputSpec) }),
     ...(closure !== undefined && { closure: closure as NodeDecl["closure"] }),
     ...(properties !== undefined && { properties: properties as NodeDecl["properties"] }),
     ...(typeof effect === "string" && { effect }),

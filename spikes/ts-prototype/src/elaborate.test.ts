@@ -463,7 +463,119 @@ examples:
     expect(node.name).toBe("birthday");
     expect(node.input).toEqual({ kind: "single", edge: Person });
     expect(node.output).toEqual({ kind: "single", edge: Person });
-    expect(node.examples).toEqual([{ given: { Person: { age: 41 } }, expect: { Person: { age: 42 } } }]);
+    // Untagged on the way in: a `.node` file tags examples by edge name, and a
+    // `NodeDecl`'s examples hold what `Fn` is called with and returns
+    // (2026-09-28-examples-reach-the-gate.md). The tagging is an authoring
+    // affordance and is gone by the time anything reads the declaration.
+    expect(node.examples).toEqual([{ given: { age: 41 }, expect: { age: 42 } }]);
+  });
+
+  /**
+   * The translation table, per kind
+   * (docs/superpowers/specs/2026-09-28-examples-reach-the-gate.md §2). Explicit
+   * rather than left to the corpus check, because the corpus does not exercise
+   * every kind: across all six examples the declared examples cover `single`,
+   * `allOf` and `gather` inputs and `single`, `many` and `oneOf` outputs — and
+   * **not `allOf` output**, which is the one translation that changes shape
+   * most (a tagged map becomes an array). The untested case is exactly the
+   * structurally hardest one, which is the usual way this goes.
+   */
+  it("leaves an allOf input's given alone — the bag is already keyed by edge name", () => {
+    const yaml = `
+label: E
+description: d
+input:
+  allOf:
+    - Todo
+    - TodoList
+output: TodoList
+examples:
+  - given:
+      Todo:
+        title: "Buy milk"
+      TodoList:
+        title: "Groceries"
+    expect:
+      TodoList:
+        title: "Groceries"
+`;
+    const node = parseNodeFile(yaml, "add", resolveEdge);
+    // Unchanged, and that is the point: an allOf input's authoring form and its
+    // runtime form genuinely coincide.
+    expect(node.examples![0]!.given).toEqual({ Todo: { title: "Buy milk" }, TodoList: { title: "Groceries" } });
+    expect(node.examples![0]!.expect).toEqual({ title: "Groceries" });
+  });
+
+  it("turns a oneOf output's expect into the tagged branch Fn returns", () => {
+    const yaml = `
+label: E
+description: d
+input: Person
+output:
+  oneOf:
+    - Pass
+    - Fail
+examples:
+  - given:
+      Person:
+        age: 42
+    expect:
+      Pass: {}
+`;
+    const node = parseNodeFile(yaml, "check", resolveEdge);
+    // Untagging *adds* structure here: the tag carries which branch fired.
+    expect(node.examples![0]!.expect).toEqual({ edge: "Pass", payload: {} });
+  });
+
+  it("turns an allOf output's expect into the array of tagged branches Fn returns", () => {
+    const yaml = `
+label: E
+description: d
+input: Person
+output:
+  allOf:
+    - Pass
+    - Fail
+examples:
+  - given:
+      Person:
+        age: 42
+    expect:
+      Pass: {}
+      Fail: {}
+`;
+    const node = parseNodeFile(yaml, "both", resolveEdge);
+    expect(node.examples![0]!.expect).toEqual([
+      { edge: "Pass", payload: {} },
+      { edge: "Fail", payload: {} },
+    ]);
+  });
+
+  it("rejects a given that carries more than one edge-name tag", () => {
+    const yaml = `
+label: E
+description: d
+input: Person
+output: Person
+examples:
+  - given:
+      Person:
+        age: 41
+      Todo:
+        title: "x"
+    expect:
+      Person:
+        age: 42
+`;
+    // Rejected — but by `nodeSchema()`'s `taggedOne`, which runs inside
+    // `parseNodeFile` before the untagging does. Worth pinning *which* check
+    // catches it: `untagExamples` has its own one-tag guard and that guard is
+    // **not reachable** through this path today. It is kept as defense in depth
+    // for the case the schema loosens, since silently taking the first tag is
+    // the quiet-wrong-answer this repo keeps finding — but it is not what is
+    // protecting you here, and a comment claiming otherwise would be the same
+    // false green in prose.
+    expect(() => parseNodeFile(yaml, "birthday", resolveEdge)).toThrow(/not a valid \.node declaration/);
   });
 
   it("resolves an allOf: input into multiple edges, in declared order", () => {
