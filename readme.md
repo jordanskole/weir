@@ -23,7 +23,7 @@ The name comes from a fish weir: rather than watching the whole ocean, you build
 > - **Data-driven fan-out, and its dual.** A `many` output materializes its elements as real tokens, so one alert becomes N entities each taking its own treatment with its own lineage ([spread](docs/superpowers/specs/2026-09-26-spread-materializes-elements.md)); `input: { gather: X }` collects every instance of one edge descended from a single spread and fires once with the collection ([gather](docs/superpowers/specs/2026-09-27-gather.md)). Together they are one `traverse` — see [`examples/soc-triage`](examples/soc-triage).
 > - **Composite nodes.** A `.topology` that declares a contract can be invoked wherever a node can, inlined at elaboration ([spec](docs/superpowers/specs/2026-09-26-composite-nodes.md)).
 > - **Effects, and a determinism check.** A node that needs the outside world declares `effect:` and the runtime's host performs it; replay feeds the *recorded* result back rather than re-performing ([spec](docs/superpowers/specs/2026-09-27-effects-are-data.md)). `weir verify` replays a run's recorded invocations against their pinned implementations and reports what disagreed — Principle 0 made mechanical ([spec](docs/superpowers/specs/2026-09-26-replay-and-the-determinism-check.md)).
-> - **Loud stalls.** A run reports every node left waiting when it stopped, so reaching quiescence with a half-formed join is an error naming the node rather than a checkmark ([spec](docs/superpowers/specs/2026-09-27-quiescence-is-not-success.md)).
+> - **Loud stalls, and a declared end.** A run reports every node left waiting when it stopped, so reaching quiescence with a half-formed join is an error naming the node rather than a checkmark ([spec](docs/superpowers/specs/2026-09-27-quiescence-is-not-success.md)). Every `.topology` also declares what finishing looks like — `output` plus the `terminals` that produce it — so a run that consumes everything and never gets there is an error too ([spec](docs/superpowers/specs/2026-09-28-a-root-topology-declares-its-end.md)).
 > - **A log that outlives the process.** Append-only `.jsonl` for both the log and the trace, so a run can be replayed and verified after the process that produced it is gone ([spec](docs/superpowers/specs/2026-09-26-a-log-that-outlives-the-process.md)).
 >
 > Not built yet: the planner and the rest of the `sys` queries — including the cut-vertex and complete-mediation analyses this readme describes below — zones and classification, and positional instance identity (`birthday.then.birthday` still runs once, not twice). `expect`-as-a-node is design intent, not built: examples today are declared `given`/`expect` data pairs the acceptance gate runs, not a graph execution. The host language is also undecided — `spikes/ts-prototype/` is a spike and the current lean is OCaml — so treat the TypeScript as evidence the design holds together rather than as the implementation.
@@ -99,22 +99,28 @@ The wiring is its own file:
 
 ```yaml
 # declarations/main.topology
-mix:
-  then:
-    bake:
-      then:
-        cool: {}
+output: Cookies
+terminals:
+  - cool
+wiring:
+  mix:
+    then:
+      bake:
+        then:
+          cool: {}
 
-preheatOven:
-  then:
-    bake: {}
+  preheatOven:
+    then:
+      bake: {}
 ```
+
+`output` and `terminals` say what reaching the end looks like: the run is finished when `cool` has produced the cookies. Declaring it is what lets a run that consumes everything and produces nothing be an error rather than a checkmark — and naming the *node* rather than only the edge is what makes that precise, since a topology can easily have two nodes producing the same edge, only one of which is the end.
 
 Two top-level keys are two origins: one external event — one call to the graph's outer membrane — populates every origin-shaped edge it declares needing at once. The dough gets mixed while the oven heats, and `bake` names as its own child under *both*. That is the whole program. The implementation of `bake` lives in a different tree, resolved by name and contract hash, and is regenerable build output rather than something you maintain.
 
 **A topology is a node.** A subgraph is indistinguishable from a single node at its boundary, so a `.topology` can be dropped into a larger graph wherever a node is expected and nothing upstream can tell the difference. Graphs nest without limit and bottom out at a **primitive** — a node whose body is host code rather than more graph. There is no separate module system, because the composition rule already is one.
 
-The file above is a root topology and could not itself be dropped in as a node, because it declares no boundary. One that can says so explicitly — `input`, `output`, and the `terminals` whose outputs *are* that output. This one is from [`examples/soc-triage`](examples/soc-triage), where it is the per-entity investigation:
+The file above declares its end but not its beginning, so it is still a root rather than something droppable into a larger graph. One that is droppable adds `input:` — and is otherwise the same shape. This one is from [`examples/soc-triage`](examples/soc-triage), where it is the per-entity investigation:
 
 ```yaml
 # declarations/investigate.topology — a composite
@@ -131,7 +137,7 @@ wiring:
   investigateAsset: {}
 ```
 
-The contract is declared rather than inferred from the inner wiring, deliberately: a boundary you can read is worth more than one a reader has to derive, and it makes the composite checkable against its terminals at elaboration. Note the output is `allOf`, not a single edge — a composite's boundary is an ordinary node contract, so it gets every output mode a node has. Composites are inlined at elaboration; the runtime never learns they exist.
+The contract is declared rather than inferred from the inner wiring, deliberately: a boundary you can read is worth more than one a reader has to derive, and it makes the composite checkable against its terminals at elaboration. Inference would not work anyway — a cyclic topology like [`examples/escalation`](examples/escalation) has no structural leaf at all, since the node that terminates is the same one that loops. Note the output is `allOf`, not a single edge — a composite's boundary is an ordinary node contract, so it gets every output mode a node has. Composites are inlined at elaboration; the runtime never learns they exist.
 
 That is also what lets a `.topology` file stay a tree while the graph it describes reconverges. A tree cannot express two branches meeting, so the join moves to a boundary: `investigate` fans out internally, and its *exit* is the join.
 

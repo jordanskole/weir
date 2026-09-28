@@ -1,6 +1,6 @@
 # A root topology declares its end
 
-Status: draft.
+Status: implemented.
 
 ## Motivation
 
@@ -21,7 +21,8 @@ one topology that is a bag of wiring.
 
 Which is why the readme's "a topology is a node" carries a caveat saying the
 root topology in its own example cannot be dropped into a larger graph. This
-spec deletes the caveat rather than adding a feature.
+spec shrinks that caveat rather than adding a feature — it cannot delete it,
+because a root still declares no `input` (§5).
 
 ## 1. The naive formulation is a false green, measured
 
@@ -173,23 +174,54 @@ since three of `gather`'s did not and saying so is what kept them honest.
    elaboration — the static half, reusing the composite check.
 3. A root naming a terminal that is not a declared node is rejected, with the
    same message a composite gets.
-4. **The rhombus case, which is why the spec exists.** `todo-list` with
-   `output: TodoList`, `terminals: [AddTodoToList]`: a run that fires only
-   `startList` must **not** satisfy the check, even though a `TodoList`
-   instance exists in the log. Assert against a log holding an intermediate —
-   if this passes with the `envelope.node` clause removed, the check is
-   decorative.
+4. **The rhombus case, which is why the spec exists.** A run that fires only
+   the non-terminal producer must **not** satisfy the check, even though an
+   instance of the declared output edge exists in the log. *Built*, and its
+   break-proof is the one that matters: with the `envelope.node` clause dropped
+   — checking only that an instance of the edge exists — the test **passes**,
+   which is exactly the false green the design is arranged around. If it ever
+   goes green with that clause removed, the check is decorative.
 5. A `oneOf` root is satisfied by **one** branch, and a declared terminal that
    never fired is not an error (`person-birthday`).
 6. An `allOf` root is satisfied only when **every** declared edge appeared
    (`todo-list`).
 7. A run that finishes reports success; a run that consumes everything and
    produces no declared output is an error naming what was expected. Both
-   through `weir run`, asserting the exit code.
+   through `weir run`, asserting the exit code. *Built.*
 8. This check and `residue` are independent: a run can stall *and* miss its
-   output, and both are reported. Neither message replaces the other.
+   output, and both are reported. Neither message replaces the other. *Built*,
+   and the CLI's stall fixture turned out to be **both** at once — it never
+   reaches its declared end *and* strands a node — so that test now asserts both
+   messages rather than one. The sibling case is also covered: a run that
+   *reaches* its end while stranding a side branch reports residue and no unmet
+   end.
 9. Every example still elaborates and runs after the migration — the guard
    against a constraint strict enough to reject the corpus it was written for.
+   *Built*, asserting each example declares exactly one end with a non-empty
+   terminal list, so a migration that dropped a contract would be caught rather
+   than silently skipping the check.
+
+## What the build added that this spec did not anticipate
+
+Two terminal names an author legitimately writes turn out not to exist by the
+time the check runs, because the elaborator replaced them. Both are now expanded
+rather than rejected, in `expandTerminals`:
+
+- **A terminal naming a composite.** The natural thing to write when a topology
+  ends on one — and after inlining, `pair` is gone, replaced by `pair/toLeft`
+  and `pair/toRight` (or `pair#1/…` and `pair#2/…` when referenced twice).
+  Expanding keeps the declaration in the author's vocabulary: they name the unit
+  they wired, not its insides. Deliberately done *after* inlining, since only
+  then is the instance count known.
+- **A terminal naming an `anyOf` node**, which desugars into `<name>__<edge>`
+  shadows the author never wrote — the same expansion `resolveNodeName` already
+  applies to the wiring. Exactly one shadow fires, so such an end behaves like a
+  `oneOf`; requiring every shadow to have produced would be the "every terminal
+  must fire" rule §4 rejects, arriving by a different route.
+
+Unresolvable names pass through unchanged rather than expanding to nothing, so a
+typo is reported by the contract check instead of silently emptying the terminal
+list and making the end vacuous.
 
 ## Explicitly out of scope
 

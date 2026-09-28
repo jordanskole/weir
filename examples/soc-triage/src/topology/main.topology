@@ -1,9 +1,14 @@
-extractEntities:
-  then:
-    investigate:
-      then:
-        assembleEvidence:
-          then:
-            assess:
-              then:
-                summarizeAlert: {}
+# The gather is the end: one conclusion about the alert as a whole.
+output: AlertAssessment
+terminals:
+  - summarizeAlert
+wiring:
+  extractEntities:
+    then:
+      investigate:
+        then:
+          assembleEvidence:
+            then:
+              assess:
+                then:
+                  summarizeAlert: {}

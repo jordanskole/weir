@@ -12,6 +12,22 @@ import {
 } from "./implementation.js";
 import type { AnyEdgeDef, NodeDecl } from "./types.js";
 
+/**
+ * A root `.topology`: its contract plus its wiring, the shape required since
+ * docs/superpowers/specs/2026-09-28-a-root-topology-declares-its-end.md.
+ * `output`/`terminals` say what finishing looks like; the wiring is indented
+ * under `wiring:` exactly as a composite's is.
+ */
+const rootTopology = (output: string, terminals: string[], wiring: string): string =>
+  `${output.includes("\n") ? `output:\n${output}` : `output: ${output}\n`}terminals:\n` +
+  terminals.map((t) => `  - ${t}\n`).join("") +
+  "wiring:\n" +
+  wiring
+    .split("\n")
+    .map((line) => (line.trim() ? `  ${line}` : line))
+    .join("\n");
+
+
 const PERSON_BIRTHDAY_SRC = fileURLToPath(
   new URL("../../../examples/person-birthday/src", import.meta.url),
 );

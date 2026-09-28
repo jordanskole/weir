@@ -1,3 +1,12 @@
-birthday:
-  then:
-    expect_Person_age_42: {}
+# A `oneOf` end — the run finished if *either* branch appeared. A declared
+# terminal that never fires is not an error; exactly one of these fires.
+output:
+  oneOf:
+    - Pass
+    - Fail
+terminals:
+  - expect_Person_age_42
+wiring:
+  birthday:
+    then:
+      expect_Person_age_42: {}

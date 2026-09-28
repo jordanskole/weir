@@ -744,49 +744,87 @@ describe("nodeSchema", () => {
 });
 
 describe("topologySchema", () => {
+  /**
+   * Every `.topology` declares a contract now
+   * (2026-09-28-a-root-topology-declares-its-end.md), so the wiring these
+   * cases are actually about lives under `wiring:`. Wrapped by a helper so a
+   * wiring-shape assertion still reads as one, and so a contract typo cannot
+   * make a wiring case pass or fail for the wrong reason.
+   */
+  const withWiring = (wiring: unknown) => ({ output: "Out", terminals: ["A"], wiring });
+
   it("accepts a single sequential chain", () => {
     const validate = validatorFor(topologySchema());
-    expect(validate({ A: { then: { B: {} } } })).toBe(true);
+    expect(validate(withWiring({ A: { then: { B: {} } } }))).toBe(true);
   });
 
   it("accepts a leaf node declared as null", () => {
     const validate = validatorFor(topologySchema());
-    expect(validate({ A: null })).toBe(true);
+    expect(validate(withWiring({ A: null }))).toBe(true);
   });
 
   it("accepts fan-out — one node feeding several next nodes", () => {
     const validate = validatorFor(topologySchema());
-    expect(validate({ A: { then: { B: {}, C: {} } } })).toBe(true);
+    expect(validate(withWiring({ A: { then: { B: {}, C: {} } } }))).toBe(true);
   });
 
   it("accepts a node fed by two parents, nested arbitrarily deep", () => {
     const validate = validatorFor(topologySchema());
-    const valid = validate({
-      A: { then: { B: { then: { C: {} } }, C: {} } },
-    });
+    const valid = validate(withWiring({ A: { then: { B: { then: { C: {} } }, C: {} } } }));
     expect(validate.errors).toBeNull();
     expect(valid).toBe(true);
   });
 
   it("accepts several independent top-level origins", () => {
     const validate = validatorFor(topologySchema());
-    expect(validate({ A: {}, B: null })).toBe(true);
+    expect(validate(withWiring({ A: {}, B: null }))).toBe(true);
   });
 
   it("rejects a then value that isn't an object", () => {
     const validate = validatorFor(topologySchema());
-    expect(validate({ A: { then: "oops" } })).toBe(false);
+    expect(validate(withWiring({ A: { then: "oops" } }))).toBe(false);
   });
 
   it("rejects a key other than then, at any depth", () => {
     const validate = validatorFor(topologySchema());
-    expect(validate({ A: { bogus: {} } })).toBe(false);
-    expect(validate({ A: { then: { B: { bogus: {} } } } })).toBe(false);
+    expect(validate(withWiring({ A: { bogus: {} } }))).toBe(false);
+    expect(validate(withWiring({ A: { then: { B: { bogus: {} } } } }))).toBe(false);
   });
 
-  it("rejects a top-level value that's neither null nor an object", () => {
+  it("rejects a wiring value that's neither null nor an object", () => {
     const validate = validatorFor(topologySchema());
-    expect(validate({ A: "oops" })).toBe(false);
+    expect(validate(withWiring({ A: "oops" }))).toBe(false);
+  });
+
+  /** The contract half, which is what this schema gained. */
+  it("rejects a topology declaring no output or terminals — the bare-wiring form is gone", () => {
+    const validate = validatorFor(topologySchema());
+    // Exactly what every root `.topology` in this repo looked like until now.
+    expect(validate({ A: { then: { B: {} } } })).toBe(false);
+    expect(validate({ wiring: { A: {} }, terminals: ["A"] })).toBe(false);
+    expect(validate({ wiring: { A: {} }, output: "Out" })).toBe(false);
+  });
+
+  it("rejects an empty terminals list", () => {
+    const validate = validatorFor(topologySchema());
+    expect(validate({ output: "Out", terminals: [], wiring: { A: {} } })).toBe(false);
+  });
+
+  it("accepts every output mode, since all three are used by the examples", () => {
+    const validate = validatorFor(topologySchema());
+    for (const output of [
+      "Cookies",
+      { oneOf: ["Pass", "Fail"] },
+      { allOf: ["TodoList", "Todo"] },
+    ]) {
+      expect(validate({ output, terminals: ["A"], wiring: { A: {} } })).toBe(true);
+    }
+  });
+
+  it("accepts a composite's extra `input`, and nothing else", () => {
+    const validate = validatorFor(topologySchema());
+    expect(validate({ input: "Entity", output: "Out", terminals: ["A"], wiring: { A: {} } })).toBe(true);
+    expect(validate({ output: "Out", terminals: ["A"], wiring: { A: {} }, bogus: 1 })).toBe(false);
   });
 });
 

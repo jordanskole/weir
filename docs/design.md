@@ -289,6 +289,26 @@ by construction, so `verify` reports effect nodes as a third category — *nonde
 enters here by declaration* — rather than counting them as passing checks
 ([spec](superpowers/specs/2026-09-27-effects-are-data.md)).
 
+**Every topology declares its end.** A `.topology` declares `output` — what
+reaching the end looks like — and the `terminals` whose outputs count as it; a
+*composite* adds `input` and is otherwise identical. Both halves are checked: at
+elaboration, the declared terminals must be able to produce the declared output;
+at the end of a run, the log must hold an instance of that output **produced by
+one of those terminals**.
+
+Naming the terminal is what makes that instance-level rather than type-level, and
+it is not pedantry — a topology can easily have two nodes producing one edge
+(`examples/todo-list` does), so "an instance of `TodoList` exists" is satisfied by
+an intermediate one emitted long before the run finished. Terminals are declared
+rather than inferred for the same reason a composite's are: a cyclic topology has
+no structural leaf, and even where one exists, which leaf *means finished* is an
+authoring decision rather than a fact about the wiring
+([spec](superpowers/specs/2026-09-28-a-root-topology-declares-its-end.md)).
+
+A declared terminal that never fires is **not** an error. Under a `oneOf` end
+exactly one branch fires by construction, so the check is on the output and never
+on "every terminal ran".
+
 **Quiescence is not success.** The loop ends when a pulse fires nothing, which
 is not the same as nothing being left to do — and the difference is a whole class
 of silent bug. A run therefore reports its **residue**: every node still holding
@@ -491,7 +511,8 @@ hover docs) is generated mechanically from the same types that already validate
 everything else; deferred, not designed away.
 
 `.edge` and `.topology` are pure data — every field maps directly onto existing types,
-nothing missing. `.node` is not: `Fn` is host code, which a data format can't and
+nothing missing. A `.topology` declares `output`, `terminals` and `wiring`, plus
+`input` when it is a composite meant to be invoked where a node would be (§5). `.node` is not: `Fn` is host code, which a data format can't and
 shouldn't hold (§5, "implementations are build output"). A `.node` file declares the
 contract only — never the body. What it may carry: `label`, `description`, `input`,
 `output`, `examples`, `properties` (§6), `closure` (values fixed at elaboration), `scope`

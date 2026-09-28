@@ -83,6 +83,7 @@
 
 import { assertOutput, membrane } from "./membrane.js";
 import type { InstanceEnvelope, InvocationContext, Log, LoggedInstance } from "./membrane.js";
+import { outputEdgeNames } from "./elaborate.js";
 import { gatherGroups, joinRows } from "./lineage.js";
 import type { GatherGroup } from "./lineage.js";
 import type { Program } from "./implementation.js";
@@ -166,6 +167,19 @@ export interface Residue {
   waiting: number;
 }
 
+/**
+ * A declared end the run did not reach
+ * (docs/superpowers/specs/2026-09-28-a-root-topology-declares-its-end.md).
+ */
+export interface UnmetEnd {
+  /** The root topology that declared it. */
+  topology: string;
+  /** The declared output edges no terminal produced. For a `oneOf` end, present only when *no* branch appeared. */
+  missing: string[];
+  /** The terminals that were supposed to produce them, for the error message. */
+  terminals: string[];
+}
+
 export interface RunResult {
   /**
    * Nodes left holding eligible unconsumed input when the run stopped. Empty is
@@ -179,6 +193,15 @@ export interface RunResult {
    * the churn.
    */
   residue: Residue[];
+  /**
+   * Declared ends the run did not reach. Empty is the healthy answer, and also
+   * the answer for a `Program` that declares no `ends` at all.
+   *
+   * Independent of `residue`, deliberately: a run can stall *and* miss its end,
+   * or reach its end while leaving a side branch stranded, and the two
+   * questions have different answers. Neither message replaces the other.
+   */
+  unmet: UnmetEnd[];
   /** How many times any node's Fn was invoked this run. */
   firings: number;
   /** How many pulses ran. */
@@ -805,9 +828,47 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
     return found;
   };
 
-  /** One place the three exits agree on what a `RunResult` is, so a new exit cannot forget the scan. */
+  /**
+   * Which declared ends the run failed to reach
+   * (docs/superpowers/specs/2026-09-28-a-root-topology-declares-its-end.md §2).
+   *
+   * **An instance of the declared output, produced by a declared terminal.**
+   * Both halves are load-bearing. Asking only "does an instance of this edge
+   * exist" is a false green for any topology whose nodes are rhombus-shaped:
+   * `examples/todo-list` has two nodes producing `TodoList`, so an
+   * *intermediate* one from `startList` would satisfy an end that `startList`
+   * has nothing to do with. `envelope.node` records the producer, so naming
+   * the terminal makes the question instance-level rather than type-level.
+   *
+   * A `oneOf` end is met by **one** branch, which is what `oneOf` means
+   * everywhere else; `single` and `allOf` need all of theirs. Note this is a
+   * check on the *output*, never on "every terminal fired" — under `oneOf`
+   * exactly one terminal fires by construction, so the stricter rule would
+   * reject `examples/person-birthday` on its first run.
+   */
+  const unmetNow = (): UnmetEnd[] => {
+    const out: UnmetEnd[] = [];
+    for (const end of program.ends ?? []) {
+      const terminals = new Set(end.terminals);
+      const producedByTerminal = (edgeName: string): boolean =>
+        log
+          .instances(edgeName, correlationId)
+          .some((instance) => instance.envelope !== undefined && terminals.has(instance.envelope.node));
+
+      const declared = outputEdgeNames(end.output);
+      const missing = declared.filter((name) => !producedByTerminal(name));
+      // `oneOf` is satisfied by any one branch, so it is unmet only when every
+      // branch is missing.
+      const unmet = end.output.kind === "oneOf" ? (missing.length === declared.length ? missing : []) : missing;
+      if (unmet.length > 0) out.push({ topology: end.name, missing: unmet, terminals: end.terminals });
+    }
+    return out;
+  };
+
+  /** One place the three exits agree on what a `RunResult` is, so a new exit cannot forget either scan. */
   const finish = (stopped: RunResult["stopped"], pulses: number): RunResult => ({
     residue: residueNow(),
+    unmet: unmetNow(),
     firings,
     pulses,
     stopped,

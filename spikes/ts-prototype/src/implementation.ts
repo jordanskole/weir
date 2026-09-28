@@ -16,7 +16,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { elaborate } from "./elaborate.js";
-import type { Wiring } from "./elaborate.js";
+import type { RootEnd, Wiring } from "./elaborate.js";
 import { hashNode, hashSource } from "./hash.js";
 import type { AnyEdgeDef, FieldDef, InputSpec, NodeDecl, NodeDef, OutputSpec } from "./types.js";
 
@@ -109,6 +109,14 @@ export interface Program {
   edges: Record<string, AnyEdgeDef>;
   nodes: Record<string, NodeDef>;
   wiring: Wiring;
+  /**
+   * What each root topology declares finishing looks like
+   * (docs/superpowers/specs/2026-09-28-a-root-topology-declares-its-end.md).
+   * Optional so a hand-built `Program` — tests, readiness fixtures — need not
+   * declare an end it has no opinion about; absent means the run's end is not
+   * checked, exactly as before this existed.
+   */
+  ends?: RootEnd[];
 }
 
 /**
@@ -119,7 +127,7 @@ export interface Program {
  * above).
  */
 export async function elaborateWithImplementations(declRoot: string, implRoot: string): Promise<Program> {
-  const { fields, edges, nodes, wiring } = await elaborate(declRoot);
+  const { fields, edges, nodes, wiring, ends } = await elaborate(declRoot);
 
   const resolved = await Promise.all(
     Object.entries(nodes).map(
@@ -127,5 +135,5 @@ export async function elaborateWithImplementations(declRoot: string, implRoot: s
     ),
   );
 
-  return { fields, edges, nodes: Object.fromEntries(resolved), wiring };
+  return { fields, edges, nodes: Object.fromEntries(resolved), wiring, ends };
 }

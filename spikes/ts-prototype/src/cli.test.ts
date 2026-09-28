@@ -5,6 +5,22 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runCli } from "./cli.js";
 
+/**
+ * A root `.topology`: its contract plus its wiring, the shape required since
+ * docs/superpowers/specs/2026-09-28-a-root-topology-declares-its-end.md.
+ * `output`/`terminals` say what finishing looks like; the wiring is indented
+ * under `wiring:` exactly as a composite's is.
+ */
+const rootTopology = (output: string, terminals: string[], wiring: string): string =>
+  `${output.includes("\n") ? `output:\n${output}` : `output: ${output}\n`}terminals:\n` +
+  terminals.map((t) => `  - ${t}\n`).join("") +
+  "wiring:\n" +
+  wiring
+    .split("\n")
+    .map((line) => (line.trim() ? `  ${line}` : line))
+    .join("\n");
+
+
 const SOC_SRC = fileURLToPath(new URL("../../../examples/soc-triage/src", import.meta.url));
 const RECIPE_SRC = fileURLToPath(new URL("../../../examples/recipe/src", import.meta.url));
 
@@ -61,7 +77,7 @@ describe("runCli", () => {
       "edges/B.edge": EDGE("B"),
       "nodes/makeA.node": `label: MA\ndescription: d\ninput: A\noutput: A\nexamples:\n  - given:\n      A: {}\n    expect:\n      A: {}\n`,
       "nodes/needsB.node": `label: NB\ndescription: d\ninput: B\noutput: B\nexamples:\n  - given:\n      B: {}\n    expect:\n      B: {}\n`,
-      "topology/main.topology": `makeA:\n  then:\n    needsB: {}\n`,
+      "topology/main.topology": rootTopology("B", ["needsB"], `makeA:\n  then:\n    needsB: {}\n`),
     });
 
     const result = await runCli(["check", root], "/nowhere");
@@ -78,7 +94,7 @@ describe("runCli", () => {
       "edges/B.edge": EDGE("B"),
       "nodes/makeA.node": `label: MA\ndescription: d\ninput: A\noutput: A\nexamples:\n  - given:\n      A: {}\n    expect:\n      A: {}\n`,
       "nodes/join.node": `label: J\ndescription: d\ninput:\n  allOf:\n    - A\n    - B\noutput: B\nexamples:\n  - given:\n      A: {}\n      B: {}\n    expect:\n      B: {}\n`,
-      "topology/main.topology": `makeA:\n  then:\n    join: {}\n`,
+      "topology/main.topology": rootTopology("B", ["join"], `makeA:\n  then:\n    join: {}\n`),
     });
 
     const result = await runCli(["check", root], "/nowhere");
@@ -201,7 +217,7 @@ describe("runCli — verify", () => {
     const workdir = await fixture({
       "edges/Reading.edge": `label: E\ndescription: R\nfields:\n  value:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
       "nodes/observe.node": `label: O\ndescription: d\ninput: Reading\noutput: Reading\nexamples:\n  - given:\n      Reading: {}\n    expect:\n      Reading: {}\n`,
-      "topology/main.topology": `observe: {}\n`,
+      "topology/main.topology": rootTopology("Reading", ["observe"], `observe: {}\n`),
     });
     const { hashNode } = await import("./hash.js");
     const { elaborate } = await import("./elaborate.js");
@@ -275,7 +291,7 @@ describe("runCli — run reports a stall", () => {
       "nodes/summarize.node":
         `label: Sum\ndescription: d\ninput:\n  gather: Looked\noutput: Summary\n` +
         `examples:\n  - given:\n      Looked:\n        a:\n          itemId: "a"\n    expect:\n      Summary:\n        n: 1\n`,
-      "topology/main.topology": `explode:\n  then:\n    lookOrSkip:\n      then:\n        summarize: {}\n`,
+      "topology/main.topology": rootTopology("Summary", ["summarize"], `explode:\n  then:\n    lookOrSkip:\n      then:\n        summarize: {}\n`),
     });
 
     const { hashNode } = await import("./hash.js");
@@ -322,9 +338,15 @@ describe("runCli — run reports a stall", () => {
       workdir,
     );
 
-    // The assertion the spec is about: a script can tell.
+    // The assertion both specs are about: a script can tell.
     expect(result.code).toBe(1);
-    expect(result.out).toContain("stalled");
+
+    // This fixture is *both* things at once, which is the point of Testing #8
+    // in 2026-09-28-a-root-topology-declares-its-end.md: it never reached its
+    // declared end, *and* a node is left waiting. Neither message replaces the
+    // other — the unmet end says what went wrong, the residue says where.
+    expect(result.out).toContain("did not reach its declared end");
+    expect(result.out).toContain("Summary");
     // Named specifically enough to act on without re-running.
     expect(result.out).toContain("summarize needs Looked");
     expect(result.out).toContain("1 unconsumed");

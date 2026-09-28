@@ -1,5 +1,12 @@
-openTicket:
-  then:
-    triage:
-      then:
-        triage: {}
+# `triage` both loops and terminates: it emits `Ticket` to escalate and
+# `Resolution` to stop. A cyclic topology has no structural leaf, which is
+# why terminals are declared rather than inferred.
+output: Resolution
+terminals:
+  - triage
+wiring:
+  openTicket:
+    then:
+      triage:
+        then:
+          triage: {}

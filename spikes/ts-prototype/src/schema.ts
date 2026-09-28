@@ -552,13 +552,33 @@ export function topologySchema(): object {
       },
     ],
   };
+  const wiring = { type: "object", propertyNames: { minLength: 1 }, additionalProperties: { $ref: "#/$defs/topologyNode" } };
 
+  // Every `.topology` declares a contract now
+  // (docs/superpowers/specs/2026-09-28-a-root-topology-declares-its-end.md):
+  // `output` + `terminals` + `wiring` for a root, plus `input` for a composite.
+  // The bare-adjacency form — the whole document being the wiring — is gone,
+  // which is why this schema no longer admits arbitrary top-level keys.
   return {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     title: "Weir topology",
     type: "object",
-    propertyNames: { minLength: 1 },
-    additionalProperties: { $ref: "#/$defs/topologyNode" },
+    required: ["output", "terminals", "wiring"],
+    properties: {
+      /** Present only on a composite — a topology invoked where a node would be. */
+      input: { oneOf: [edgeName, { type: "object", properties: { allOf: edgeNameList }, required: ["allOf"], additionalProperties: false }] },
+      output: {
+        oneOf: [
+          edgeName,
+          { type: "object", properties: { oneOf: edgeNameList }, required: ["oneOf"], additionalProperties: false },
+          { type: "object", properties: { allOf: edgeNameList }, required: ["allOf"], additionalProperties: false },
+          { type: "object", properties: { many: edgeName }, required: ["many"], additionalProperties: false },
+        ],
+      },
+      terminals: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
+      wiring,
+    },
+    additionalProperties: false,
     $defs: { topologyNode },
   };
 }

@@ -15,6 +15,22 @@ import type { Program } from "./implementation.js";
 import type { NodeDef } from "./types.js";
 import type { InstanceEnvelope } from "./membrane.js";
 
+/**
+ * A root `.topology`: its contract plus its wiring, the shape required since
+ * docs/superpowers/specs/2026-09-28-a-root-topology-declares-its-end.md.
+ * `output`/`terminals` say what finishing looks like; the wiring is indented
+ * under `wiring:` exactly as a composite's is.
+ */
+const rootTopology = (output: string, terminals: string[], wiring: string): string =>
+  `${output.includes("\n") ? `output:\n${output}` : `output: ${output}\n`}terminals:\n` +
+  terminals.map((t) => `  - ${t}\n`).join("") +
+  "wiring:\n" +
+  wiring
+    .split("\n")
+    .map((line) => (line.trim() ? `  ${line}` : line))
+    .join("\n");
+
+
 const PERSON_BIRTHDAY_SRC = fileURLToPath(
   new URL("../../../examples/person-birthday/src", import.meta.url),
 );
@@ -925,7 +941,7 @@ describe("runNetlist", () => {
         `label: E\ndescription: d\ninput:\n  anyOf:\n    - Failed_Todo\n    - Failed_Person\noutput: Start\nexamples:\n  - given:\n      Failed_Todo:\n        input:\n          title: "bad todo"\n        reason: "kaboom"\n    expect:\n      Start:\n        value: "recovered"\n  - given:\n      Failed_Person:\n        input:\n          name: "bad person"\n        reason: "kaboom"\n    expect:\n      Start:\n        value: "recovered"\n`,
         "utf8",
       );
-      await writeFile(join(root, "topology", "main.topology"), `failing:\n  then:\n    HandleFailed: {}\n`, "utf8");
+      await writeFile(join(root, "topology", "main.topology"), rootTopology("Start", ["HandleFailed"], `failing:\n  then:\n    HandleFailed: {}\n`), "utf8");
 
       const raw = await elaborate(root);
       // failing fails on Todo -> logs Failed_Todo, which HandleFailed__Failed_Todo

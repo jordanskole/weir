@@ -194,6 +194,34 @@ async function run(dir: string, flags: Map<string, string>): Promise<CliResult> 
   // Residue after `budget` is *not* an error: a bounded run has unconsumed
   // input by construction. It is still printed, because it is the most useful
   // thing to see when deciding whether the budget was too small.
+  // An unmet end and a stall are independent questions with independent
+  // answers (2026-09-28-a-root-topology-declares-its-end.md): a run can reach
+  // its declared end while stranding a side branch, or consume everything and
+  // never get there. Both are reported; neither message replaces the other.
+  const unmetLines = result.unmet.flatMap((u) => [
+    `  missing   ${u.missing.join(", ")} — declared by ${u.topology}, from ${u.terminals.join(", ")}`,
+  ]);
+
+  if (result.unmet.length > 0) {
+    return {
+      code: 1,
+      out: [
+        `✗ did not reach its declared end`,
+        ...detail,
+        "",
+        ...unmetLines,
+        ...(result.residue.length > 0
+          ? ["", ...result.residue.map((r) => `  waiting   ${r.node} needs ${r.edge} (${r.waiting} unconsumed)`)]
+          : []),
+        "",
+        `  The topology declares what finishing looks like; this run stopped`,
+        `  without producing it from a declared terminal. An intermediate`,
+        `  instance of the same edge does not count — the terminal is what`,
+        `  makes the end a real end rather than a type that happened to appear.`,
+      ].join("\n"),
+    };
+  }
+
   if (result.residue.length > 0 && result.stopped === "quiescence") {
     return {
       code: 1,

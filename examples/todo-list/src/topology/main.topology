@@ -1,7 +1,19 @@
-CreateTodo:
-  then:
-    startList:
-      then:
-        AddTodoToList: {}
-    AddTodoToList: {}
-    CompleteTodo: {}
+# Both terminals are rhombus-shaped — `AddTodoToList` takes a TodoList and
+# produces one — so naming the *edge* alone would be satisfied by an
+# intermediate `TodoList` that `startList` emitted earlier. Naming the node is
+# what makes the end instance-level.
+output:
+  allOf:
+    - TodoList
+    - Todo
+terminals:
+  - AddTodoToList
+  - CompleteTodo
+wiring:
+  CreateTodo:
+    then:
+      startList:
+        then:
+          AddTodoToList: {}
+      AddTodoToList: {}
+      CompleteTodo: {}

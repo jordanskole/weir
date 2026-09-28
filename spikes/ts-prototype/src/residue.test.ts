@@ -24,6 +24,22 @@ import { InMemoryLog } from "./membrane.js";
 import { runNetlist } from "./runtime.js";
 import type { Program } from "./implementation.js";
 
+/**
+ * A root `.topology`: its contract plus its wiring, the shape required since
+ * docs/superpowers/specs/2026-09-28-a-root-topology-declares-its-end.md.
+ * `output`/`terminals` say what finishing looks like; the wiring is indented
+ * under `wiring:` exactly as a composite's is.
+ */
+const rootTopology = (output: string, terminals: string[], wiring: string): string =>
+  `${output.includes("\n") ? `output:\n${output}` : `output: ${output}\n`}terminals:\n` +
+  terminals.map((t) => `  - ${t}\n`).join("") +
+  "wiring:\n" +
+  wiring
+    .split("\n")
+    .map((line) => (line.trim() ? `  ${line}` : line))
+    .join("\n");
+
+
 const utf8 = (label: string) => defineField({ type: "utf8", label, description: "d", nullable: false });
 
 const Seed = defineEdge({ name: "Seed", label: "Seed", description: "d", fields: { v: utf8("V") } });

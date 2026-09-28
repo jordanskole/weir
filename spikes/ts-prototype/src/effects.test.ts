@@ -11,6 +11,22 @@ import { runNetlist } from "./runtime.js";
 import { replayInvocation } from "./replay.js";
 import { verifyRun } from "./verify.js";
 
+/**
+ * A root `.topology`: its contract plus its wiring, the shape required since
+ * docs/superpowers/specs/2026-09-28-a-root-topology-declares-its-end.md.
+ * `output`/`terminals` say what finishing looks like; the wiring is indented
+ * under `wiring:` exactly as a composite's is.
+ */
+const rootTopology = (output: string, terminals: string[], wiring: string): string =>
+  `${output.includes("\n") ? `output:\n${output}` : `output: ${output}\n`}terminals:\n` +
+  terminals.map((t) => `  - ${t}\n`).join("") +
+  "wiring:\n" +
+  wiring
+    .split("\n")
+    .map((line) => (line.trim() ? `  ${line}` : line))
+    .join("\n");
+
+
 let dir: string | undefined;
 afterEach(async () => {
   if (dir) await rm(dir, { recursive: true, force: true });
@@ -34,7 +50,7 @@ const PROGRAM = {
   "nodes/ask.node": `label: Ask\ndescription: d\ninput: Ask\noutput: Ask\nexamples:\n  - given:\n      Ask: {}\n    expect:\n      Ask: {}\n`,
   "nodes/clock.node": `label: Clock\ndescription: Reads the wall clock\neffect: clock\ninput: Ask\noutput: Stamp\nexamples:\n  - given:\n      Ask: {}\n    expect:\n      Stamp: {}\n`,
   "nodes/note.node": `label: Note\ndescription: d\ninput: Stamp\noutput: Note\nexamples:\n  - given:\n      Stamp: {}\n    expect:\n      Note: {}\n`,
-  "topology/main.topology": `ask:\n  then:\n    clock:\n      then:\n        note: {}\n`,
+  "topology/main.topology": rootTopology("Note", ["note"], `ask:\n  then:\n    clock:\n      then:\n        note: {}\n`),
 };
 
 async function fixture(files: Record<string, string>): Promise<string> {
@@ -187,7 +203,7 @@ describe("effects", () => {
     const root = await fixture({
       ...EDGES,
       "nodes/clock.node": `label: Clock\ndescription: d\neffect: clock\ninput: Ask\noutput: Stamp\nexamples:\n  - given:\n      Ask: {}\n    expect:\n      Stamp: {}\n`,
-      "topology/main.topology": `clock: {}\n`,
+      "topology/main.topology": rootTopology("Stamp", ["clock"], `clock: {}\n`),
     });
     const program = await elaborateWithImplementations(root, join(root, "impl"));
     const log = new InMemoryLog();

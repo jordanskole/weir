@@ -1,9 +1,14 @@
-mix:
-  then:
-    bake:
-      then:
-        cool: {}
+# The run has finished when `cool` has produced the cookies.
+output: Cookies
+terminals:
+  - cool
+wiring:
+  mix:
+    then:
+      bake:
+        then:
+          cool: {}
 
-preheatOven:
-  then:
-    bake: {}
+  preheatOven:
+    then:
+      bake: {}
