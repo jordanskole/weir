@@ -1,6 +1,6 @@
 # A log that outlives the process
 
-Status: draft.
+Status: implemented.
 
 ## Motivation
 
@@ -46,6 +46,13 @@ One JSON object per line (`.jsonl`), one line per instance, in append order:
 `append`'s `envelope` is optional, and its absence currently means two different things: "this was staged from outside" and "this node's envelope could not be built". A durable log makes that permanent, and `eligibleInstances` already treats an envelope-less instance as eligible by type alone — a real bypass, keyed on an ambiguity.
 
 **Resolved: staged instances are marked.** A `"staged": true` field, written by a `stage()` method distinct from `append()`. The bypass then keys on an explicit marker rather than on an absence, and a reloaded log can still tell the two apart. `invokeWithInput` no longer stages (piece (3) §5), so the only caller is tests — which is an argument for making it explicit, not for leaving it implicit.
+
+**Built 2026-09-28**, two days after the rest of this spec shipped — which is why the status line above said `draft` while `FileLog` had been in use all along. Recorded rather than quietly corrected: a spec that is four-fifths implemented and still marked draft is the same claim-versus-enforcement drift this repo keeps auditing for, and `docs.test.ts` cannot see it, since that check only verifies *implemented* specs are linked.
+
+Two things the build settled:
+
+- **The load-bearing change is the arc rule**, and only one test in the suite distinguishes the two cases: an envelope-less *emission* (a node fired, `buildEnvelope` threw on a bad `scope`) is now **ineligible** rather than admitted on a technicality. Its producer is unknown, so the arc rule cannot pass it.
+- **The matching changes in `joinRows` are unreachable**, and are labelled so in the code rather than left looking load-bearing. The arc rule excludes an envelope-less emission before the join ever sees it, so no candidate reaching `joinRows` can be envelope-less without being staged — reverting those lines alone reddens nothing. They are changed so both modules mean the same thing by "has no lineage", not because a test proves they must.
 
 ### 4. Retention is deliberately not implemented
 

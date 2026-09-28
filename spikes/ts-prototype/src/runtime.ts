@@ -420,8 +420,19 @@ export function eligibleForEdge(
   const consumers = (producer: string): string[] => program.wiring.feeds[producer] ?? [];
   return log.instances(edgeName, correlationId).filter((instance) => {
     if (consumed.has(instance.seq)) return false;
+    // A *staged* instance is eligible by type alone: it was supplied from
+    // outside rather than produced by an arc, so there is no producer to check
+    // the wiring against. This used to key on `envelope === undefined`, which
+    // also caught an emission whose envelope could not be built — the two
+    // wanted opposite treatment, and a durable log made the ambiguity permanent
+    // (2026-09-26-a-log-that-outlives-the-process.md §3).
+    if (instance.staged === true) return true;
     const producer = instance.envelope?.node;
-    if (producer === undefined) return true;
+    // No envelope and not staged: a node emitted this and its provenance could
+    // not be built (a bad `scope` declaration). Its producer is unknown, so the
+    // arc rule cannot pass it — and it is left unconsumed rather than admitted
+    // on a technicality, which `residue` now reports instead of swallowing.
+    if (producer === undefined) return false;
     return consumers(producer).includes(nodeName);
   });
 }

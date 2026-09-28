@@ -616,16 +616,16 @@ describe("membrane — scope", () => {
 describe("InMemoryLog — retention", () => {
   it("retains every appended instance rather than overwriting", () => {
     const log = new InMemoryLog();
-    log.append("Person", "c1", { age: 41 });
-    log.append("Person", "c1", { age: 42 });
+    log.stage("Person", "c1", { age: 41 });
+    log.stage("Person", "c1", { age: 42 });
 
     expect(log.instances("Person", "c1").map((i) => i.payload)).toEqual([{ age: 41 }, { age: 42 }]);
   });
 
   it("still returns the most recent instance from latest and latestInstance", () => {
     const log = new InMemoryLog();
-    log.append("Person", "c1", { age: 41 });
-    log.append("Person", "c1", { age: 42 });
+    log.stage("Person", "c1", { age: 41 });
+    log.stage("Person", "c1", { age: 42 });
 
     expect(log.latest("Person", "c1")).toEqual({ age: 42 });
     expect(log.latestInstance("Person", "c1")?.payload).toEqual({ age: 42 });
@@ -633,9 +633,9 @@ describe("InMemoryLog — retention", () => {
 
   it("keeps correlations and edge types separate", () => {
     const log = new InMemoryLog();
-    log.append("Person", "c1", { age: 41 });
-    log.append("Person", "c2", { age: 1 });
-    log.append("Pet", "c1", { species: "cat" });
+    log.stage("Person", "c1", { age: 41 });
+    log.stage("Person", "c2", { age: 1 });
+    log.stage("Pet", "c1", { species: "cat" });
 
     expect(log.instances("Person", "c1")).toHaveLength(1);
     expect(log.instances("Person", "c2")).toHaveLength(1);
@@ -648,9 +648,9 @@ describe("InMemoryLog — retention", () => {
 
   it("mints a monotonic seq across edge types, not per edge type", () => {
     const log = new InMemoryLog();
-    log.append("Person", "c1", { age: 41 });
-    log.append("Pet", "c1", { species: "cat" });
-    log.append("Person", "c1", { age: 42 });
+    log.stage("Person", "c1", { age: 41 });
+    log.stage("Pet", "c1", { species: "cat" });
+    log.stage("Person", "c1", { age: 42 });
 
     const seqs = [
       log.instances("Person", "c1")[0].seq,
@@ -663,8 +663,8 @@ describe("InMemoryLog — retention", () => {
 
   it("mints a distinct id per instance and returns it from append", () => {
     const log = new InMemoryLog();
-    const first = log.append("Person", "c1", { age: 41 });
-    const second = log.append("Person", "c1", { age: 41 });
+    const first = log.stage("Person", "c1", { age: 41 });
+    const second = log.stage("Person", "c1", { age: 41 });
 
     expect(first).not.toBe(second);
     expect(log.instances("Person", "c1").map((i) => i.id)).toEqual([first, second]);
@@ -672,7 +672,7 @@ describe("InMemoryLog — retention", () => {
 
   it("does not let a returned instances array mutate the log", () => {
     const log = new InMemoryLog();
-    log.append("Person", "c1", { age: 41 });
+    log.stage("Person", "c1", { age: 41 });
     log.instances("Person", "c1").push({ id: "x", seq: 99, payload: { age: 0 } });
 
     expect(log.instances("Person", "c1")).toHaveLength(1);

@@ -27,6 +27,12 @@
  * 2. **Every spec marked implemented is reachable from a doc a reader starts
  *    from.** A spec nobody links is a spec nobody finds, and the status line
  *    is exactly the signal that it is worth finding.
+ * 3. **Every spec carries a recognized status at all.** Added after a spec sat
+ *    at `Status: draft` for two days while four of its five sections were in
+ *    use — invisible to check 2, which only looks at specs already claiming to
+ *    be implemented. This cannot tell whether a status is *true*; it can only
+ *    tell that one was written in a form the other check can read, which is the
+ *    honest limit and is why check 2 stays the one that matters.
  *
  * Deliberately not attempted: checking that prose *claims* match behaviour.
  * That is what the audit passes are for, and pretending a test could do it
@@ -84,6 +90,28 @@ describe("docs — relative links resolve", () => {
   }
 });
 
+describe("docs — every spec declares a status", () => {
+  it("every spec has a Status line in the form the findability check can read", async () => {
+    const specDir = join(REPO, "docs/superpowers/specs");
+    const specs = (await readdir(specDir)).filter((name) => name.endsWith(".md"));
+    expect(specs.length).toBeGreaterThan(10);
+
+    // The vocabulary actually in use, rather than one invented here — a status
+    // may carry trailing prose ("implemented. Part 1 …") or a compound form
+    // ("(a) implemented; (b) specified but not built"), so this asks that a
+    // recognized word appears, not that the line has a fixed shape.
+    const RECOGNIZED = /^Status:.*\b(draft|implemented|approved|paused|superseded|abandoned)\b/im;
+    const unreadable: string[] = [];
+    for (const name of specs) {
+      const text = await readFile(join(specDir, name), "utf8");
+      if (!RECOGNIZED.test(text)) unreadable.push(name);
+    }
+    // A status this cannot parse is a spec the findability check silently skips,
+    // which is how one stayed `draft` while most of it shipped.
+    expect(unreadable).toEqual([]);
+  });
+});
+
 describe("docs — an implemented spec is findable", () => {
   it("every spec marked `Status: implemented` is linked from at least one entry doc", async () => {
     const specDir = join(REPO, "docs/superpowers/specs");
@@ -92,9 +120,16 @@ describe("docs — an implemented spec is findable", () => {
     const implemented: string[] = [];
     for (const name of specs) {
       const text = await readFile(join(specDir, name), "utf8");
-      // The convention is a `Status:` line near the top; only "implemented"
-      // makes a spec something a reader should be able to reach.
-      if (/^Status:\s*implemented\.?$/im.test(text)) implemented.push(name);
+      // A `Status:` line near the top; "implemented" anywhere in it makes the
+      // spec something a reader should be able to reach.
+      //
+      // This used to require the line to be *exactly* `Status: implemented.`,
+      // which silently skipped six specs whose status carries trailing prose
+      // ("implemented. Part 1 … Part 2 …", "(a) implemented; (b) not built").
+      // A check that examines 17 of 23 specs while appearing to examine all of
+      // them is the failure mode this file exists to prevent, found in this
+      // file.
+      if (/^Status:.*\bimplemented\b/im.test(text)) implemented.push(name);
     }
     // Guard against the check silently examining nothing, which is this
     // repo's most frequent bug: if the status convention ever changes, this

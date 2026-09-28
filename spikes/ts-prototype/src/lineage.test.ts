@@ -196,7 +196,7 @@ describe("ancestorsOf", () => {
 
   it("returns an empty array for an instance nothing caused", async () => {
     const log = new InMemoryLog();
-    const id = log.append("Value", "c1", { value: "a" });
+    const id = log.stage("Value", "c1", { value: "a" });
 
     expect(ancestorsOf(log, id)).toEqual([]);
   });
@@ -205,7 +205,7 @@ describe("ancestorsOf", () => {
 describe("selfAndAncestorIds", () => {
   it("includes the instance itself", () => {
     const log = new InMemoryLog();
-    const id = log.append("Value", "c1", { value: "a" });
+    const id = log.stage("Value", "c1", { value: "a" });
 
     expect(selfAndAncestorIds(log, id)).toEqual(new Set([id]));
   });
@@ -243,7 +243,7 @@ describe("selfAndAncestorIds", () => {
   it("returns just the instance for one with no envelope", () => {
     // A staged instance has no invocation behind it, so no lineage.
     const log = new InMemoryLog();
-    const id = log.append("Value", "c1", { value: "a" });
+    const id = log.stage("Value", "c1", { value: "a" });
 
     expect(selfAndAncestorIds(log, id)).toEqual(new Set([id]));
   });
@@ -256,7 +256,7 @@ describe("selfAndAncestorIds", () => {
 describe("Log.instanceById", () => {
   it("finds an instance by the id append returned", () => {
     const log = new InMemoryLog();
-    const id = log.append("Value", "c1", { value: "a" });
+    const id = log.stage("Value", "c1", { value: "a" });
 
     expect(log.instanceById(id)?.payload).toEqual({ value: "a" });
   });
@@ -647,7 +647,7 @@ describe("joinRows", () => {
 
   it("returns nothing when an edge has no candidate", () => {
     const log = new InMemoryLog();
-    const a = log.instanceById(log.append("A", "c1", { v: 1 }))!;
+    const a = log.instanceById(log.stage("A", "c1", { v: 1 }))!;
 
     expect(joinRows(log, new Map([["A", [a]], ["B", []]]))).toEqual([]);
   });
@@ -711,9 +711,9 @@ describe("joinRows", () => {
     // nothing since the membrane started taking the bag as an argument
     // (spec §5), so nothing in production reaches this tier at all.
     const log = new InMemoryLog();
-    log.append("A", "c1", { v: 1 });
-    const newerA = log.instanceById(log.append("A", "c1", { v: 2 }))!;
-    const b = log.instanceById(log.append("B", "c1", { v: 3 }))!;
+    log.stage("A", "c1", { v: 1 });
+    const newerA = log.instanceById(log.stage("A", "c1", { v: 2 }))!;
+    const b = log.instanceById(log.stage("B", "c1", { v: 3 }))!;
 
     const rows = joinRows(
       log,

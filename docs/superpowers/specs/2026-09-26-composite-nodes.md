@@ -1,6 +1,6 @@
 # Composite nodes: a topology invoked as a node
 
-Status: approved. Finite nesting only — recursive composition deferred (§3).
+Status: implemented. Finite nesting only — recursive composition deferred (§3). (Said `approved` until 2026-09-28, two days after it shipped; found by the status check `docs.test.ts` grew that day, which cannot tell whether a status is *true* but can at least see that every spec has one.)
 
 ## Motivation
 

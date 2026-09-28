@@ -213,8 +213,8 @@ describe("runNetlist", () => {
     };
     const log = new InMemoryLog();
     const trace = new InMemoryTrace();
-    log.append("A", "thread-1", { value: "a" });
-    log.append("B", "thread-1", { value: "b" });
+    log.stage("A", "thread-1", { value: "a" });
+    log.stage("B", "thread-1", { value: "b" });
 
     await runNetlist(program, { correlationId: "thread-1", originPayloads: {} }, { log, trace });
 
@@ -532,8 +532,8 @@ describe("runNetlist", () => {
       wiring: { origins: ["failingJoin"], feeds: {} },
     };
     const log = new InMemoryLog();
-    log.append("A", "thread-1", { value: "a" });
-    log.append("B", "thread-1", { value: "b" });
+    log.stage("A", "thread-1", { value: "a" });
+    log.stage("B", "thread-1", { value: "b" });
 
     const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: {} }, { log });
 
@@ -816,8 +816,8 @@ describe("runNetlist", () => {
       // title should be a string — a real assertPayload type violation, not a
       // `validations` (minLength etc.) one, since those aren't enforced yet.
       const malformedTodo = { id: "todo-1", title: 12345, description: null, is_complete: false };
-      log.append("TodoList", "thread-1", validTodoList);
-      log.append("Todo", "thread-1", malformedTodo);
+      log.stage("TodoList", "thread-1", validTodoList);
+      log.stage("Todo", "thread-1", malformedTodo);
 
       // Only the wiring is narrowed, not `program.nodes`: CompleteTodo also
       // declares Todo as its input and the staged instance is envelope-less
@@ -1569,7 +1569,7 @@ describe("runNetlist — iteration", () => {
       },
     });
     const log = new InMemoryLog();
-    log.append("A", "c1", { value: "staged" });
+    log.stage("A", "c1", { value: "staged" });
 
     const result = await runNetlist(
       programWith({ wired, unwired }, { origins: ["wired"], feeds: {} }),
@@ -1687,11 +1687,42 @@ describe("eligibleInstances", () => {
     expect(eligibleInstances(program, log, new Set([seq]), program.nodes.downstream, "c1")).toEqual([]);
   });
 
-  it("treats an instance with no envelope as eligible by type — a staged input", () => {
+  /**
+   * The arc rule's bypass, now keyed on an explicit marker rather than on an
+   * absence (2026-09-26-a-log-that-outlives-the-process.md §3). A staged
+   * instance was supplied from outside, so there is no producer to check the
+   * wiring against.
+   */
+  it("treats a staged instance as eligible by type — it has no producer to check", () => {
     const log = new InMemoryLog();
-    log.append("Value", "c1", { value: "a" });
+    log.stage("Value", "c1", { value: "a" });
 
     expect(eligibleInstances(program, log, new Set(), program.nodes.downstream, "c1")).toHaveLength(1);
+  });
+
+  /**
+   * **The ambiguity this change exists to remove.** An envelope is *also*
+   * absent when a node emitted an instance and `buildEnvelope` threw on a bad
+   * `scope` declaration. That is not a staged input — its producer is unknown,
+   * so the arc rule cannot pass it, and it must not inherit a bypass meant for
+   * something else.
+   *
+   * Before this, both cases were `envelope === undefined` and both got through.
+   * A durable log made that permanent rather than per-process, which is what
+   * turned it from untidy into a real defect.
+   *
+   * Break-proof: keying the bypass back on `envelope === undefined` makes this
+   * return 1 instead of 0 — and it is the *only* test in the suite that
+   * distinguishes the two, which is why it is written out rather than folded
+   * into the one above.
+   */
+  it("does not treat an envelope-less emission as staged — an unknown producer fails the arc rule", () => {
+    const log = new InMemoryLog();
+    // `append` with no envelope: what the runtime does when `buildEnvelope`
+    // threw, and what every test used to write when it meant to stage.
+    log.append("Value", "c1", { value: "a" });
+
+    expect(eligibleInstances(program, log, new Set(), program.nodes.downstream, "c1")).toHaveLength(0);
   });
 
   it("returns instances oldest first", () => {

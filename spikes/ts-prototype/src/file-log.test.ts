@@ -150,3 +150,42 @@ describe("FileLog — durability", () => {
     for (const i of all) expect(reloaded.instanceById(i.id)).toBeDefined();
   });
 });
+
+/**
+ * Staging, made explicit
+ * (docs/superpowers/specs/2026-09-26-a-log-that-outlives-the-process.md §3).
+ * The marker has to survive a reload, because the whole reason it exists is
+ * that a durable log makes "envelope absent" permanently ambiguous — a log that
+ * forgot which instances were staged would reintroduce the defect on restart.
+ */
+describe("FileLog — staging is explicit and durable", () => {
+  it("marks a staged instance, does not mark an appended one, and keeps both across a reload", async () => {
+    const path = await logPath();
+    const log = FileLog.open(path);
+
+    const stagedId = log.stage("Value", "c1", { value: "staged" });
+    const appendedId = log.append("Value", "c1", { value: "appended" });
+
+    expect(log.instanceById(stagedId)!.staged).toBe(true);
+    expect(log.instanceById(appendedId)!.staged).toBeUndefined();
+
+    // The assertion that matters: a reloaded log can still tell them apart.
+    const reloaded = FileLog.open(path);
+    expect(reloaded.instanceById(stagedId)!.staged).toBe(true);
+    expect(reloaded.instanceById(appendedId)!.staged).toBeUndefined();
+  });
+
+  it("writes one line per call, whichever method wrote it", async () => {
+    // A first cut had `stage` call `append` and then write a second line with
+    // the marker, which indexed one instance and persisted two. Both go through
+    // one private writer now, and this is what says so.
+    const path = await logPath();
+    const log = FileLog.open(path);
+    log.stage("Value", "c1", { value: "a" });
+    log.append("Value", "c1", { value: "b" });
+
+    const lines = (await readFile(path, "utf8")).split("\n").filter((l) => l.trim() !== "");
+    expect(lines).toHaveLength(2);
+    expect(FileLog.open(path).instances("Value", "c1")).toHaveLength(2);
+  });
+});

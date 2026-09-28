@@ -334,6 +334,21 @@ export interface LoggedInstance {
    */
   id: string;
   /**
+   * Set only by `stage()` — this instance was supplied from outside rather
+   * than produced by an invocation
+   * (docs/superpowers/specs/2026-09-26-a-log-that-outlives-the-process.md §3).
+   *
+   * **An explicit marker, replacing an absence that meant two things.** The
+   * arc rule and the lineage join both let an instance with no envelope through
+   * unchecked, because a staged input has no producer to check against the
+   * wiring. But an envelope is *also* absent when `buildEnvelope` threw on a
+   * bad `scope` declaration — a real emitted instance whose provenance could
+   * not be built — and those two cases want opposite treatment. A durable log
+   * makes that ambiguity permanent rather than per-process, so the bypass keys
+   * on this marker and a reloaded log can still tell them apart.
+   */
+  staged?: true;
+  /**
    * Write order within one Log — a logical clock, not a causal
    * coordinate. `envelope.step` measures causal position and is shared by
    * everything in a pulse; `seq` is unique per instance, and many `seq`
@@ -368,6 +383,17 @@ export interface Log {
    * churn.
    */
   append(edgeName: string, correlationId: string, payload: unknown, envelope?: InstanceEnvelope): string;
+  /**
+   * Stores a value supplied from *outside* any invocation — a readiness
+   * fixture, a host seeding a log. Distinct from `append` because the two are
+   * genuinely different acts: `append` records what a node emitted, `stage`
+   * records what someone put there.
+   *
+   * They used to be the same method distinguished by whether `envelope` was
+   * passed, which made `Log` do two jobs under one name and made the arc
+   * rule's bypass key on an absence (see `LoggedInstance.staged`).
+   */
+  stage(edgeName: string, correlationId: string, payload: unknown): string;
   /**
    * `runtime.ts`'s `tryFire` is this method's one caller for an `allOf`
    * node — it reads each declared edge's latest payload to build the bag it
@@ -426,6 +452,11 @@ export class InMemoryLog implements Log {
     else this.entries.set(key, [instance]);
     this.byId.set(instance.id, instance);
     return instance.id;
+  }
+  stage(edgeName: string, correlationId: string, payload: unknown): string {
+    const id = this.append(edgeName, correlationId, payload);
+    this.byId.get(id)!.staged = true;
+    return id;
   }
   latest(edgeName: string, correlationId: string): unknown | undefined {
     return this.latestInstance(edgeName, correlationId)?.payload;

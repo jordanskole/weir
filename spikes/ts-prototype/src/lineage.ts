@@ -227,10 +227,19 @@ export function selfAndAncestorIds(log: Log, instanceId: string): Set<string> {
  * unconsumed until their partners arrive. Not newest-of-each, which drops
  * data, and not the cartesian product, which multiplies it.
  *
- * **When no candidate has an envelope, latest-wins.** An envelope records
- * that an invocation produced an instance; none means the values were
- * supplied from outside. There is no lineage to join on, so latest-wins
- * has nothing to choose between.
+ * **When every candidate is staged, latest-wins.** Staged means supplied from
+ * outside rather than produced by an invocation, so there is no lineage to join
+ * on and latest-wins has nothing to choose between.
+ *
+ * This keyed on `envelope === undefined` until staging became explicit
+ * (2026-09-26-a-log-that-outlives-the-process.md §3). **Changed for consistency,
+ * not because it was reachable**, and that is worth being exact about: the arc
+ * rule now excludes an envelope-less *emission* before `joinRows` ever sees it,
+ * so no candidate reaching here can be envelope-less without being staged. The
+ * break-proof confirms it — reverting this line alone reddens nothing. It is
+ * changed so both modules mean the same thing by "has no lineage", rather than
+ * one keying on a marker and the other on an absence that used to be its proxy;
+ * the same applies to the three checks below.
  *
  * This tier used to be described as the direct-invocation path — "an agent
  * tool call, `fuzz`, `accept`". It is not, and has not been since the
@@ -263,7 +272,7 @@ export function joinRows(
   if (edgeNames.some((name) => (candidates.get(name) ?? []).length === 0)) return [];
 
   const every = edgeNames.flatMap((name) => candidates.get(name)!);
-  if (every.every((instance) => instance.envelope === undefined)) {
+  if (every.every((instance) => instance.staged === true)) {
     const row = new Map<string, LoggedInstance>();
     for (const name of edgeNames) {
       const list = candidates.get(name)!;
@@ -330,9 +339,11 @@ export function joinRows(
    */
   const externalAncestorAllows = (instance: LoggedInstance, ancestorId: string): boolean => {
     if (log.instanceById(ancestorId)?.envelope !== undefined) return true;
-    if (instance.envelope === undefined) return true;
+    if (instance.staged === true) return true;
     if (instance.id === ancestorId) return true;
-    return instance.envelope.causationIds.includes(ancestorId);
+    // Not staged and no envelope means an emission whose provenance could not
+    // be built; it descends from nothing checkable, so it does not group here.
+    return instance.envelope?.causationIds.includes(ancestorId) ?? false;
   };
 
   const lineages = new Map<string, Set<string>>();
@@ -349,7 +360,7 @@ export function joinRows(
     const perEdge = byAncestor.get(ancestorId);
     const out = new Map<string, LoggedInstance[]>();
     for (const name of edgeNames) {
-      const wildcards = candidates.get(name)!.filter((i) => i.envelope === undefined);
+      const wildcards = candidates.get(name)!.filter((i) => i.staged === true);
       out.set(
         name,
         [...new Map([...(perEdge?.get(name) ?? []), ...wildcards].map((i) => [i.id, i])).values()]
@@ -405,7 +416,7 @@ export function joinRows(
     // Property: an envelope-less candidate has no ancestors, so "has a nearer
     // incomplete ancestor" is vacuously false. The latest-wins tier and the
     // wildcard behaviour are untouched by this check.
-    if (instance.envelope === undefined) return false;
+    if (instance.staged === true) return false;
     const own = lineageOf(instance.id);
 
     for (const nearerId of own) {
