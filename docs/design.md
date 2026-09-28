@@ -414,7 +414,16 @@ is last and disposable.
 ## 7. Placement and safety
 
 **Zones** annotate where a node runs — client, server, third-party, log. The topology is
-unchanged; edges crossing a zone boundary are the network hops. Field-level
+unchanged; edges crossing a zone boundary are the network hops.
+
+**Declared on the topology, not the node** ([spec](superpowers/specs/2026-09-28-zones-are-a-line-in-the-topology.md)).
+A `.topology` already declares where a unit begins, ends and what it contains; where it
+*runs* is the same kind of fact about the same unit, so placement is stated once for a
+subgraph rather than repeated on each of its nodes. A node's zone is its declaring
+topology's, which survives inlining. `zone:` is **optional**, and an unzoned topology's
+nodes are *unzoned* rather than defaulted — the difference decides what counts as a
+crossing, since nothing was claimed about where they run. `weir sys` reports the hops and
+`weir plan` counts them per route. Field-level
 classification labels (PII, financial) combine with zones to make leakage a static
 query: *no edge carrying an unredacted PII field may cross into a non-client zone.*
 

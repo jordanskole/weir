@@ -28,6 +28,7 @@ import { acceptImplementation } from "./accept.js";
 import { runExamples } from "./test-run.js";
 import { analyze, mediation } from "./sys.js";
 import { plan } from "./plan.js";
+import { crossings, zoneOf } from "./zones.js";
 import { elaborateWithImplementations, resolveImplementation } from "./implementation.js";
 import { resolveTrigger, runNetlist } from "./runtime.js";
 import { FileLog } from "./file-log.js";
@@ -325,6 +326,7 @@ async function planRoutes(from: string, to: string, dir: string, json: boolean):
   for (const route of routes) {
     const tags = [`${route.depth} pulse${route.depth === 1 ? "" : "s"}`, `${route.nodes.length} nodes`];
     if (route.effectful.length > 0) tags.push(`effectful: ${route.effectful.join(", ")}`);
+    if (route.crossings.length > 0) tags.push(`${route.crossings.length} zone crossing(s)`);
     lines.push(`  ${tags.join(", ")}`);
     lines.push(`    origins   ${route.wiring.origins.join(", ")}`);
     for (const [parent, children] of Object.entries(route.wiring.feeds)) {
@@ -387,6 +389,25 @@ async function sys(dir: string, flags: Map<string, string>, json: boolean): Prom
   if (report.refines.length > 0) {
     lines.push("", `  refines`);
     for (const r of report.refines) lines.push(`    ${r.edge.padEnd(24)} refines ${r.refines.padEnd(20)} (by ${r.by})`);
+  }
+  const zones = zoneOf(program);
+  const hops = crossings(program);
+  if (Object.keys(zones).length > 0) {
+    lines.push("", `  zones`);
+    // Only the nodes actually wired: inlining leaves a composite's inner nodes
+    // under their original names too, and listing both places one node in its
+    // zone twice. `zoneOf` still answers for them — the leftover really was
+    // declared there — but the report is about this program.
+    const wired = new Set([...program.wiring.origins, ...Object.values(program.wiring.feeds).flat()]);
+    const byZone = new Map<string, string[]>();
+    for (const [node, zone] of Object.entries(zones)) {
+      if (!wired.has(node)) continue;
+      byZone.set(zone, [...(byZone.get(zone) ?? []), node]);
+    }
+    for (const [zone, nodes] of [...byZone].sort()) lines.push(`    ${zone.padEnd(14)} ${nodes.sort().join(", ")}`);
+    lines.push("", `  crossings`);
+    if (hops.length === 0) lines.push(`    none — no edge crosses a declared zone boundary`);
+    for (const h of hops) lines.push(`    ${h.edge.padEnd(20)} ${h.from} (${h.fromZone}) -> ${h.to} (${h.toZone})`);
   }
   if (report.unroutedFailureEdges > 0) {
     lines.push(`    ${String(report.unroutedFailureEdges).padStart(2)} synthesized Failed_* edge(s), none routed`);

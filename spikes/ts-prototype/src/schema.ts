@@ -578,6 +578,11 @@ export function topologySchema(): object {
         ],
       },
       terminals: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
+      // Where this topology runs (design.md §7). Optional, and deliberately not
+      // validated against a vocabulary: §7's client/server/third-party/log are
+      // examples rather than a closed set, and a closed set is easy to add and
+      // impossible to remove.
+      zone: { type: "string", minLength: 1 },
       wiring,
       // What this topology claims its composition does, in the same
       // `given`/`expect` form a node declares

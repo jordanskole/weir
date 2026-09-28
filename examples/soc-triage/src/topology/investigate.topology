@@ -1,3 +1,6 @@
+# Enrichment talks to third-party systems, so it is placed there; the alert
+# pipeline around it stays on our own infrastructure (design.md §7).
+zone: third-party
 input: Entity
 output:
   allOf:

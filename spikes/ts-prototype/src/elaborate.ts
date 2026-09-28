@@ -606,6 +606,19 @@ export interface CompositeDecl {
   terminals: string[];
   wiring: Wiring;
   /**
+   * Where this topology runs — `design.md` §7's zone, declared once for the
+   * subgraph rather than repeated on every node in it
+   * (docs/superpowers/specs/2026-09-28-zones-are-a-line-in-the-topology.md).
+   *
+   * **Optional**, unlike `input`/`output`/`terminals`: most programs have no
+   * placement concern, and an unzoned topology's nodes are *unzoned* rather than
+   * in a default zone. That distinction is load-bearing at the boundary — an
+   * edge between an unzoned node and a zoned one is not a crossing, because
+   * nothing was claimed about where the first one runs, and inventing a default
+   * would manufacture crossings nobody declared.
+   */
+  zone?: string;
+  /**
    * What this topology claims its composition does, in the same
    * `given`/`expect` form a node declares
    * (docs/superpowers/specs/2026-09-28-a-topology-can-be-tested.md).
@@ -638,7 +651,7 @@ export interface RootEnd {
 }
 
 /** Top-level keys a `.topology` reserves for its contract. */
-export const TOPOLOGY_RESERVED_KEYS = ["input", "output", "terminals", "wiring", "examples"] as const;
+export const TOPOLOGY_RESERVED_KEYS = ["input", "output", "terminals", "wiring", "examples", "zone"] as const;
 
 /** Whether a parsed `.topology` document declares a contract rather than being bare wiring. */
 export function isCompositeTopology(yamlText: string): boolean {
@@ -671,12 +684,13 @@ export function parseCompositeTopologyFile(
   // The hand-written parsing below catches an unrecognized *key*; only the
   // schema catches a malformed *value*.
   assertDeclaration("topology", raw);
-  const { input, output, terminals, wiring, examples, ...rest } = raw as {
+  const { input, output, terminals, wiring, examples, zone, ...rest } = raw as {
     input?: unknown;
     output?: unknown;
     terminals?: unknown;
     wiring?: unknown;
     examples?: unknown;
+    zone?: unknown;
   };
   const unrecognized = Object.keys(rest)[0];
   if (unrecognized !== undefined) {
@@ -708,6 +722,7 @@ export function parseCompositeTopologyFile(
     output: outputSpec,
     terminals: terminals.map(String),
     wiring: parseWiringObject(wiring as Record<string, unknown>, resolveNodeName),
+    ...(typeof zone === "string" && { zone }),
     ...(examples !== undefined && { examples: untagExamples(examples, inputSpec, outputSpec) }),
   };
 }
@@ -1195,6 +1210,13 @@ export interface Elaborated {
    */
   entries: CompositeDecl[];
   /**
+   * Which topology each node key was declared in — the lookup a zone is read
+   * through (`zones.ts`). Recorded here rather than derived from the qualified
+   * key because an entry's own nodes carry no prefix, so the key alone cannot
+   * say where an unqualified node came from.
+   */
+  declaredIn: Record<string, string>;
+  /**
    * Every declared topology by name, entries included — what `weir test` needs
    * to run a *composite* standalone, which the entry list alone cannot supply
    * because a composite is referenced and therefore not an entry.
@@ -1410,5 +1432,27 @@ export async function elaborate(root: string): Promise<Elaborated> {
 
   assertWiringTypes(nodes, wiring, anyOfAliases);
 
-  return { fields, edges, nodes, wiring, entries: expanded, topologies: [...declared.values()] };
+  // Which topology declared each node key. An inlined node's key carries its
+  // composite's prefix (`investigate/investigateIdentity`), so that half is
+  // derivable — but an entry's own nodes carry none, and a node declared in no
+  // topology at all has no entry here rather than a default one.
+  const declaredIn: Record<string, string> = {};
+  for (const [name, decl] of declared) {
+    for (const inner of [...decl.wiring.origins, ...Object.values(decl.wiring.feeds).flat()]) {
+      if (declared.has(inner)) continue; // a composite reference, not a node
+      for (const shadow of anyOfAliases.get(inner) ?? [inner]) {
+        if (shadow in nodes) declaredIn[shadow] = name;
+        // The inlined copies of this composite's inner nodes, under every
+        // instance prefix the inlining minted.
+        for (const key of Object.keys(nodes)) {
+          const slash = key.lastIndexOf("/");
+          if (slash === -1 || key.slice(slash + 1) !== shadow) continue;
+          const instance = key.slice(0, slash);
+          if (instance === name || instance.startsWith(`${name}#`)) declaredIn[key] = name;
+        }
+      }
+    }
+  }
+
+  return { fields, edges, nodes, wiring, entries: expanded, topologies: [...declared.values()], declaredIn };
 }

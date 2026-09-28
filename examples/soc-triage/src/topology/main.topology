@@ -1,4 +1,5 @@
 # The gather is the end: one conclusion about the alert as a whole.
+zone: server
 input: Alert
 output: AlertAssessment
 terminals:
