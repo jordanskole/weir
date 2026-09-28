@@ -551,9 +551,12 @@ overwritten. Draft attempts an agent iterates on before acceptance aren't versio
 don't live here; only what passes gets written. A new file is generated when the node's
 **contract** hash no longer matches the one an accepted implementation exists for — the same
 staleness check §5 describes for an edge's *schema* hash, applied one layer up rather than
-down: a node's hash covers its whole contract (input, output, examples, properties,
-closure, scope) and transitively the schema of every edge it names, so an edge change reaches
-its nodes automatically. If regenerating
+down: a node's hash covers its name, input, output, closure, scope and properties, and
+transitively the schema of every edge it names, so an edge change reaches its nodes
+automatically. **`examples` is deliberately excluded** — examples are the acceptance suite
+*for* a contract, not part of the contract being accepted against. The cost of that asymmetry
+(adding an example does not invalidate an already-accepted implementation) is recorded in
+open-questions.md rather than settled. If regenerating
 against an *unchanged* contract ever produces a different accept/reject outcome, that's
 underdetermination in the examples (§6), not a versioning case — fix the contract, don't
 paper over it with more storage. Nothing is destructively regenerated; every accepted
