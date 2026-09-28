@@ -488,7 +488,15 @@ classification.
 
 The topology, the ontology, and the log are all data, so the framework ships queries
 over them: what edges exist, what refines what, what is unreachable or orphaned, which
-nodes are cut vertices, and which paths bypass a given node.
+nodes are cut vertices, and which paths bypass a given node. **Built** as `weir sys`
+([spec](superpowers/specs/2026-09-28-the-sys-queries.md)), from declarations alone — no
+implementations and no run, which is the readable-program claim made structural.
+
+Two definitions this section had left implicit. **`X` refines `Y`** when a single-input
+node takes `Y` and emits `X` as one branch of a `oneOf` output — narrow on purpose,
+since `allOf` output is fission and `many` is cardinality, and neither decided anything.
+**Cut vertices and bypasses are one computation**: remove the node, walk reachability
+from each origin, and a terminal that was reachable and now is not was mediated.
 
 The **planner** is the important one: `plan(from: Edge, to: Edge) → [Topology]`,
 type-directed search returning candidate routes annotated with what the definitions

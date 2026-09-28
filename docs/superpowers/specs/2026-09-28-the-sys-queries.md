@@ -1,6 +1,6 @@
 # The `sys` queries
 
-Status: draft.
+Status: implemented (the queries; the planner is §3, not built).
 
 ## Motivation
 
@@ -138,6 +138,39 @@ break-proof showed — including breaks that do **not** redden.
    analysis that only works on the shape it was written against.
 9. `--json` emits the same findings as the human form, so neither can drift into
    reporting something the other does not.
+
+## What the build found
+
+**A false positive, and then a worse over-correction.** The first run reported
+`examples/person-birthday`'s `Address` as orphaned. It is not — `PersonWithAddress`
+embeds it as a compound field, so an edge can be part of the ontology without ever
+crossing a wire, and a query reading only node inputs and outputs cannot see that.
+
+The fix was worse than the bug for about ten minutes. Collecting nested references
+from *every* edge includes the synthesized `Failed_X`, which embeds `X` as its
+`input` field by construction — so every edge looked nested, nothing was ever
+orphaned, and the findings list went empty. **An empty findings list reads exactly
+like a clean program**, which is why this needed a debug print to tell apart from
+success. A correction that silently disables the check it was correcting is worse
+than the false positive it fixed, and the test now fails in both directions.
+
+**An edge's producers had to be restricted to *wired* nodes.** A composite's inner
+nodes survive inlining under both the qualified key that is wired
+(`investigate/investigateAsset`) and the original that is not, so the first output
+reported two producers for every edge a composite touches — one of which is not in
+the program. Restricting to the wiring also made a new finding available for free:
+**nodes declared and never wired**, which `assertWiringTypes`' Rule B deliberately
+skips ("can this node become ready" is a question about a wiring, and an unwired
+node is not in one), so nothing had ever reported them.
+
+**Unrouted `Failed_*` edges are counted, not listed.** In `soc-triage` they are
+nine of sixteen; enumerating them buried the seven edges the program is actually
+about.
+
+**The queries need no implementations**, which is typed rather than commented:
+`sys.ts` takes `Elaborated`'s shape rather than `Program`'s, because requiring a
+`NodeDef` would mean requiring an `fn` it never calls. That is the readme's
+argument made structural — a weir program can be *read*.
 
 ## Explicitly out of scope
 

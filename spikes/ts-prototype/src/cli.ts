@@ -26,6 +26,7 @@ import { serializeNetlist } from "./netlist.js";
 import { exportContract } from "./contract.js";
 import { acceptImplementation } from "./accept.js";
 import { runExamples } from "./test-run.js";
+import { analyze, mediation } from "./sys.js";
 import { elaborateWithImplementations, resolveImplementation } from "./implementation.js";
 import { resolveTrigger, runNetlist } from "./runtime.js";
 import { FileLog } from "./file-log.js";
@@ -54,6 +55,10 @@ usage
                                 run one candidate implementation through the acceptance gate
   weir test [dir] --impl <dir>  run every declared example — a node's through the
                                 membrane, a topology's through a run
+  weir sys [dir] [--node <name>] [--json]
+                                query the ontology and topology: what exists, what
+                                refines what, what is orphaned or dropped; with
+                                --node, what it mediates and what bypasses it
 
   dir defaults to the current directory.
   --payload is the trigger: one external event, shaped by the entry topology's
@@ -279,6 +284,79 @@ async function run(dir: string, flags: Map<string, string>): Promise<CliResult> 
         : []),
     ].join("\n"),
   };
+}
+
+/**
+ * The `sys` queries (design.md §8) — everything derivable from the elaborated
+ * program with no run required
+ * (docs/superpowers/specs/2026-09-28-the-sys-queries.md).
+ *
+ * **Findings exit 0.** Unlike `check`, `test` and `run`, which each answer a
+ * yes/no question, an orphaned edge may be a genuine mistake or an edge declared
+ * ahead of the node that will use it — and that is not decidable here.
+ */
+async function sys(dir: string, flags: Map<string, string>, json: boolean): Promise<CliResult> {
+  let program;
+  try {
+    program = await elaborate(dir);
+  } catch (error) {
+    return failure(error, dir);
+  }
+
+  const node = flags.get("node");
+  if (node !== undefined) {
+    if (!(node in program.nodes)) {
+      const known = Object.keys(program.nodes).sort().join(", ") || "(none)";
+      return { code: 1, out: `✗ no node named "${node}".\n\n  declared: ${known}` };
+    }
+    const result = mediation(program, node);
+    if (json) return { code: 0, out: JSON.stringify(result, null, 2) };
+    const lines = [`${node}`, ""];
+    lines.push(
+      result.mediates.length === 0
+        ? `  mediates  nothing — no origin reaches a terminal only through it`
+        : `  mediates  ${result.mediates.map((m) => `${m.origin} -> ${m.terminal}`).join(", ")}`,
+    );
+    lines.push(
+      result.bypasses.length === 0
+        ? `  bypassed  by nothing — every route crosses it`
+        : `  bypassed  ${result.bypasses.map((b) => `${b.origin} -> ${b.terminal}`).join(", ")}`,
+    );
+    return { code: 0, out: lines.join("\n") };
+  }
+
+  const report = analyze(program);
+  if (json) return { code: 0, out: JSON.stringify(report, null, 2) };
+
+  const lines: string[] = [`${dir}`, ""];
+  lines.push(`  edges     ${report.edges.length}`);
+  for (const use of report.edges) {
+    const from = use.producedBy.length === 0 ? "—" : use.producedBy.join(", ");
+    const to = use.consumedBy.length === 0 ? "—" : use.consumedBy.join(", ");
+    lines.push(`    ${use.edge.padEnd(24)} from ${from.padEnd(28)} to ${to}`);
+  }
+  if (report.refines.length > 0) {
+    lines.push("", `  refines`);
+    for (const r of report.refines) lines.push(`    ${r.edge.padEnd(24)} refines ${r.refines.padEnd(20)} (by ${r.by})`);
+  }
+  if (report.unroutedFailureEdges > 0) {
+    lines.push(`    ${String(report.unroutedFailureEdges).padStart(2)} synthesized Failed_* edge(s), none routed`);
+  }
+  if (report.unwiredNodes.length > 0) {
+    lines.push("", `  unwired`);
+    for (const n of report.unwiredNodes) lines.push(`    ${n} — declared, never wired into any topology`);
+  }
+  if (report.orphans.length > 0) {
+    lines.push("", `  findings`);
+    for (const o of report.orphans) {
+      lines.push(
+        o.kind === "orphaned"
+          ? `    orphaned  ${o.edge} — nothing produces or consumes it`
+          : `    dropped   ${o.edge} — produced by ${o.producedBy.join(", ")}, consumed by nothing, and not a declared terminal output`,
+      );
+    }
+  }
+  return { code: 0, out: lines.join("\n") };
 }
 
 /**
@@ -566,6 +644,8 @@ export async function runCli(argv: string[], cwd: string): Promise<CliResult> {
       return replay(rest[0] ?? cwd, flags);
     case "verify":
       return verify(rest[0] ?? cwd, flags);
+    case "sys":
+      return sys(rest[0] ?? cwd, flags, argv.includes("--json"));
     case "test":
       return test(rest[0] ?? cwd, flags);
     case "accept": {
