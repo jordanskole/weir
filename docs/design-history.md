@@ -854,3 +854,19 @@ Recorded 2026-09-25, same day as the claim it corrects. Two entries above — "A
 **What survives, and what does not.** The prior-art observation stands — Joyal–Street still makes "you need the diagram to see the join" a theorem, and that was the load-bearing part of the earlier entry. What does not survive is the *formal justification for `noop`*: it rested on a copy obligation weir does not have. `noop`'s remaining justification is branch termination alone, which needs composite nodes (piece 4) to terminate into. That strengthens rather than weakens the build order already recorded in the system-nodes spec — `noop` is designed and deliberately unbuilt — since it now has exactly one job and that job has no home yet.
 
 Caught while about to build `noop`: the claim was checked against `runtime.ts` rather than carried forward, and did not survive the check.
+
+## `gather` is `sequence`, and the whole spread shape is `traverse`
+
+Named 2026-09-27, working out what to call the dual of `spread` before building it. Keeping the vocabulary honest matters here because the wrong name imports the wrong laws.
+
+**The operation.** Given N instances of one edge, each produced separately from an element of an earlier collection, produce one collection token holding them. `Many Entity` spreads into entities, a subgraph runs per entity, and the results are regathered into `Many Assessment`.
+
+**It is `sequence`.** `sequence : t (f a) → f (t a)` — a collection of things each produced by a computation becomes one computation producing a collection. That is precisely the shape. And the composite — spread, run a subgraph per element, gather — is **`traverse`**: `traverse : (a → f b) → t a → f (t b)`. `examples/soc-triage`'s entire fan-out/fan-in shape is one `traverse`.
+
+**`join` would have been wrong twice over**, which is why it was rejected. In category theory `join` is the monad multiplication `μ : T∘T ⇒ T`, which *flattens* nested structure (`Many (Many X) → Many X`); gather does not flatten, it inverts the nesting order. And in lattice theory `join` is `⊔`, the least upper bound — a **coproduct**, which in weir's vocabulary is `oneOf`, not `allOf`.
+
+**A pre-existing imprecision this surfaces, recorded rather than fixed.** The docs routinely call an `allOf`-input node "the join" or "the fan-in". Categorically `allOf` is a **product** (`A × B`, a meet, `∧`) and `oneOf` is the **join** (`A + B`, `∨`) — so weir's usage is inverted from the lattice sense. It is standard dataflow vocabulary and reads correctly to the audience weir is for, so it stays; this entry exists so that it is a known looseness rather than an accident, for anyone reading the design categorically.
+
+**`gather` is kept as the user-facing name** even though `sequence` is the precise one. It pairs with `spread` the way scatter/gather does in parallel computing, and it reads correctly for someone writing a triage topology; `sequence` would be opaque to exactly that reader. Naming the primitive after the domain and recording the concept beside it gets both.
+
+**What naming it buys immediately, which is the point.** `sequence`'s signature settles a policy question that would otherwise be decided by taste: if any `f a` is a failure, the whole `f (t a)` is a failure — that is what `sequence` does in every language that has it. So **all-or-nothing is the law-abiding default** for a gather whose elements can fail, and "gather what succeeded" is the deviation that needs justifying rather than the reverse. It also names the degenerate case: `traverse` over an empty collection yields an empty collection, never a hang — which is exactly the barrier's zero case, and the one most likely to be forgotten.
