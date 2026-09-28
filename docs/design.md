@@ -504,6 +504,14 @@ already know — lossy or not, pure or effectful, depth, zone crossings, and obs
 success rate drawn from the log. Log statistics are the cost model, the way `ANALYZE`
 is for a query planner.
 
+**Built** as `weir plan`, search only ([spec](superpowers/specs/2026-09-28-the-planner.md)):
+it is the pulse loop with types instead of tokens — a node is applicable when every
+edge it declares is available as a *type*, which is why it crosses `allOf` joins that
+a path-finder routes around. Routes come back as runnable wirings ordered by depth in
+pulses. The **ranking** is not built, for the reason the next paragraph gives: there
+are no runs of a real program to draw statistics from, and a cost model built on
+fixtures would rank by noise.
+
 Weights must remain **statistics, not parameters** — attributable to specific runs, or
 the planner stops being auditable. Path enumeration requires bounded depth and top-k
 pruning. Type-legal is not the same as sensible; types shrink the search space, prose

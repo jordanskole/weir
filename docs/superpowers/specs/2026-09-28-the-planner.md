@@ -1,6 +1,6 @@
 # The planner
 
-Status: draft.
+Status: implemented (the search; the ranking is §5, not built).
 
 ## Motivation
 
@@ -43,9 +43,18 @@ is quiescence with the tokens taken out). `allOf` falls out rather than needing 
 case, and so does `gather`: both are just nodes whose declared input happens to
 name more than one edge or the same edge many times.
 
-**`Failed_*` edges are not available.** Every node can emit one, so admitting them
-would make almost everything reachable "via failure" — technically true, never the
-route anyone asked for, and it would drown every real answer.
+**`Failed_*` edges are not available.** Written on the reasoning that every node
+can emit one, so admitting them would make almost everything reachable "via
+failure". **That reasoning is wrong**, found by break-proofing the filter and
+watching nothing redden: `outputEdgeNames` returns only *declared* outputs, and a
+`Failed_X` is synthesized and emitted implicitly, never declared. The planner
+never sees one. Failure routes stay out because they were never candidates, not
+because they are filtered.
+
+The filter is kept for the case it actually guards — an author declaring
+`output: Failed_X` explicitly, which the elaborator permits since the synthesized
+edges are real — and is labelled in the code so nobody reads it as load-bearing
+for the other thing.
 
 ## 2. A route is a topology, not a list
 
@@ -149,6 +158,31 @@ break-proof showed — including breaks that do **not** redden.
    The assertion that "a route is a topology" is not a figure of speech.
 9. Annotations report `effectful` for a route through an `effect:` node and not
    otherwise — and no route claims anything about lossiness (§4).
+
+## What the build found
+
+**Two of my own break-proofs came back green**, and both claims were wrong in the
+same way — a guard that reads as load-bearing while something else does the work.
+
+The `Failed_*` filter is one (§1, corrected above). The other: deduplicating
+results by the sorted node set reddens nothing, because `seenStates` already
+prunes by the same sorted set before a second ordering can reach the result. Both
+are kept and both are now labelled, with a test written for the case the filter
+*does* catch. A green test whose stated cause is not its real cause is the same
+false green in a new place.
+
+**Inlined duplicates had to be excluded from the search**, which the spec had not
+anticipated. A composite's inner nodes survive under two keys, and searching both
+returned three routes for `soc-triage` differing only in which copy they named.
+The planner searches distinct *contracts* — and deliberately **not** only wired
+nodes, unlike `weir sys`: a declared-but-unwired node is exactly what a planner
+exists to find a use for.
+
+**The answer it gives is worth recording.** Asked for `Alert -> AlertAssessment`
+on `examples/soc-triage`, it returns the hand-written topology — origin,
+fan-out to two investigations, join, assess, gather — rediscovered from edge
+types alone, five pulses, one route. That is the §8 claim working rather than
+being argued for.
 
 ## Explicitly out of scope
 

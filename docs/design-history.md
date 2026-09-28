@@ -1014,3 +1014,27 @@ An empty findings list reads exactly like a clean program. It took a debug print
 **The queries need no implementations, and that is typed rather than commented.** `sys.ts` takes `Elaborated`'s shape rather than `Program`'s, because requiring a `NodeDef` would mean requiring an `fn` it never calls. The readable-program claim, made structural.
 
 **The planner is deliberately next.** §8 calls it "the important one" and it is type-directed search *annotated with observed success rate drawn from the log*. That cost model needs runs of a real program, and this repo has none — `design.md` §10 says so and `soc-triage`'s README calls its domain nouns deliberately fake. A planner ranked by statistics from fixtures is ranked by noise, and the fix would be a heuristic weight, which §8 forbids in as many words.
+
+## The planner is the pulse loop over types, and two of my break-proofs were wrong
+
+Built 2026-09-28, completing §8's search half. `plan(from, to)` returns candidate routes as runnable wirings, ordered by depth.
+
+**The design is one sentence: it is the pulse loop with types instead of tokens.** The tempting implementation is a graph path-finder, and the way that fails is worth keeping in view — a linear path cannot cross an `allOf` node, because reaching one needs *two* edges available and a path carries one. A path-based planner silently routes around every fan-in in the program, which is most of the interesting ones. The rule weir already had is the right one one level up: `runNetlist` fires a node when every edge it declares is available as tokens; the planner applies one when every edge it declares is available as **types**. Same predicate, same fixpoint termination. `allOf` and `gather` fall out rather than needing cases.
+
+**A route is returned as a `Wiring`, and the test runs it.** §8 says the return is `[Topology]`, which is worth taking literally rather than returning a list of names a human then wires. Deriving it needs nothing new — `N` feeds `M` when `N` produces an edge `M` consumes, the relation `weir sys` already computes — and the strongest test takes the planner's own output, runs it, and asserts the target edge appears with the planner's predicted pulse count.
+
+**Depth is measured in pulses, not nodes**, so the number means something a reader already understands. A five-node route running in two pulses is genuinely better than a three-node chain running in three, and ordering by node count inverts that.
+
+**The result worth recording.** Asked for `Alert -> AlertAssessment` on `examples/soc-triage`, it returns the hand-written topology — origin, fan-out to two investigations, join, assess, gather — rediscovered from edge types alone. One route, five pulses. That is §8's claim working rather than being argued for.
+
+**Two of my own break-proofs came back green, and both claims were wrong the same way:** a guard that reads as load-bearing while something else does the work.
+
+The `Failed_*` exclusion was written on the reasoning that every node can emit a failure, so admitting them would make everything reachable "via failure". It would not — `outputEdgeNames` returns only *declared* outputs, and a `Failed_X` is synthesized and emitted implicitly, never declared, so the planner never sees one. Failure routes stay out because they were never candidates. The filter does guard something real (an author declaring `output: Failed_X` explicitly, which the elaborator permits), and now has a test for exactly that case and a comment saying which job it does.
+
+The second: deduplicating results by the sorted node set reddens nothing, because `seenStates` already prunes by the same sorted set before a second ordering can reach the result. Kept, because the two prunings answer different questions — one bounds the search, the other defines the result — but labelled rather than left looking necessary.
+
+Both are the pattern this repo keeps finding, arriving from the direction that is hardest to see: not a check that fails to fire, but **a green test whose stated cause is not its real cause**. The only way either surfaced was running the break-proof and being surprised by silence.
+
+**One thing the spec had not anticipated.** Inlining leaves a composite's inner nodes under two keys, and searching both returned three routes for `soc-triage` differing only in which copy they named. The planner searches distinct *contracts* — and deliberately not only *wired* nodes, unlike `weir sys`, because a declared-but-unwired node is exactly what a planner exists to find a use for. The two queries want opposite answers to the same question, which is worth knowing before they look like duplicated logic.
+
+**The ranking stays unbuilt**, and §5 of the spec is the reason rather than an apology: log statistics are the cost model, there are no runs of a real program here, and a model built from fixtures would rank by noise — with the obvious repair being a hand-tuned weight, which §8 forbids in as many words.

@@ -27,6 +27,7 @@ import { exportContract } from "./contract.js";
 import { acceptImplementation } from "./accept.js";
 import { runExamples } from "./test-run.js";
 import { analyze, mediation } from "./sys.js";
+import { plan } from "./plan.js";
 import { elaborateWithImplementations, resolveImplementation } from "./implementation.js";
 import { resolveTrigger, runNetlist } from "./runtime.js";
 import { FileLog } from "./file-log.js";
@@ -55,6 +56,9 @@ usage
                                 run one candidate implementation through the acceptance gate
   weir test [dir] --impl <dir>  run every declared example — a node's through the
                                 membrane, a topology's through a run
+  weir plan <from> <to> [dir] [--json]
+                                type-directed search: candidate routes from one edge
+                                to another, each a runnable wiring, ordered by depth
   weir sys [dir] [--node <name>] [--json]
                                 query the ontology and topology: what exists, what
                                 refines what, what is orphaned or dropped; with
@@ -284,6 +288,51 @@ async function run(dir: string, flags: Map<string, string>): Promise<CliResult> 
         : []),
     ].join("\n"),
   };
+}
+
+/**
+ * The planner (design.md §8,
+ * docs/superpowers/specs/2026-09-28-the-planner.md).
+ *
+ * Search only — routes come back ordered by **depth**, which is a fact, not by
+ * observed success rate, which needs runs of a real program this repo does not
+ * have. §8 is explicit that weights must remain statistics rather than
+ * parameters, so an unranked planner is the honest first half.
+ */
+async function planRoutes(from: string, to: string, dir: string, json: boolean): Promise<CliResult> {
+  let program;
+  try {
+    program = await elaborate(dir);
+  } catch (error) {
+    return failure(error, dir);
+  }
+  for (const edge of [from, to]) {
+    if (!(edge in program.edges)) {
+      return { code: 1, out: `✗ no edge named "${edge}".\n\n  declared: ${Object.keys(program.edges).sort().join(", ")}` };
+    }
+  }
+
+  const routes = plan(program, from, to);
+  if (json) return { code: 0, out: JSON.stringify(routes, null, 2) };
+  if (routes.length === 0) {
+    return {
+      code: 1,
+      out: `✗ no route from "${from}" to "${to}".\n\n  No sequence of declared nodes makes "${to}" available starting from "${from}". Failure edges are deliberately not routed through.`,
+    };
+  }
+
+  const lines = [`${routes.length} route(s) from ${from} to ${to}`, ""];
+  for (const route of routes) {
+    const tags = [`${route.depth} pulse${route.depth === 1 ? "" : "s"}`, `${route.nodes.length} nodes`];
+    if (route.effectful.length > 0) tags.push(`effectful: ${route.effectful.join(", ")}`);
+    lines.push(`  ${tags.join(", ")}`);
+    lines.push(`    origins   ${route.wiring.origins.join(", ")}`);
+    for (const [parent, children] of Object.entries(route.wiring.feeds)) {
+      lines.push(`    ${parent} -> ${children.join(", ")}`);
+    }
+    lines.push("");
+  }
+  return { code: 0, out: lines.join("\n").trimEnd() };
 }
 
 /**
@@ -644,6 +693,12 @@ export async function runCli(argv: string[], cwd: string): Promise<CliResult> {
       return replay(rest[0] ?? cwd, flags);
     case "verify":
       return verify(rest[0] ?? cwd, flags);
+    case "plan": {
+      if (rest[0] === undefined || rest[1] === undefined) {
+        return { code: 1, out: `✗ plan needs a from-edge and a to-edge.\n\n${USAGE}` };
+      }
+      return planRoutes(rest[0], rest[1], rest[2] ?? cwd, argv.includes("--json"));
+    }
     case "sys":
       return sys(rest[0] ?? cwd, flags, argv.includes("--json"));
     case "test":
