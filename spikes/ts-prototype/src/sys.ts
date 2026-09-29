@@ -214,17 +214,41 @@ function nestedReferences(program: AnyProgram): Set<string> {
   return referenced;
 }
 
+/**
+ * Edges some other edge spread its fields from (`"...Name":`).
+ *
+ * A spread **copies** fields rather than embedding the source, so after
+ * elaboration the source is a declared edge that nothing produces, consumes or
+ * nests — indistinguishable, to `orphans`, from genuine dead weight. Reported
+ * as such on the first real program anyone pointed at `weir sys`, which is how
+ * it was found: `Provenanced` exists precisely to be spread, and was named a
+ * defect for doing its job.
+ *
+ * Read off the elaborated edge's own `spreadFrom` rather than re-parsing, so
+ * the fact travels with the edge wherever it goes.
+ */
+function spreadSources(program: AnyProgram): Set<string> {
+  const sources = new Set<string>();
+  for (const edge of Object.values(program.edges as Record<string, { spreadFrom?: string }>)) {
+    if (edge.spreadFrom !== undefined) sources.add(edge.spreadFrom);
+  }
+  return sources;
+}
+
 export function orphans(program: AnyProgram): Orphan[] {
   const uses = edgeUses(program);
   const nested = nestedReferences(program);
+  const spread = spreadSources(program);
   const answers = new Set((program.entries ?? []).flatMap((entry) => outputEdgeNames(entry.output)));
   const found: Orphan[] = [];
   for (const use of uses) {
     if (use.edge.startsWith("Failed_")) continue;
     if (use.producedBy.length === 0 && use.consumedBy.length === 0) {
-      // Unless another edge embeds it: part of the ontology without ever
-      // crossing a wire.
-      if (!nested.has(use.edge)) found.push({ edge: use.edge, kind: "orphaned", producedBy: [] });
+      // Unless another edge embeds it, or spreads its fields from it: part of
+      // the ontology without ever crossing a wire.
+      if (!nested.has(use.edge) && !spread.has(use.edge)) {
+        found.push({ edge: use.edge, kind: "orphaned", producedBy: [] });
+      }
       continue;
     }
     if (use.producedBy.length > 0 && use.consumedBy.length === 0 && !answers.has(use.edge)) {

@@ -528,3 +528,41 @@ describe("hashNode — scope", () => {
     expect(a.hash).toBe(b.hash);
   });
 });
+
+describe("hash — spreadFrom is declaration provenance, not contract", () => {
+  const utf8 = { type: "utf8", label: "V", description: "d", nullable: false };
+
+  /**
+   * A `"...Meta":` spread copies the source's fields in, so an edge written by
+   * spread and the same edge with those fields typed out by hand are the same
+   * edge on the wire. `spreadFrom` records which it was, for `sys`'s benefit —
+   * and must not reach the fingerprint, or replacing a spread with its expansion
+   * would move every dependent contract hash and invalidate accepted
+   * implementations for a change that altered no data.
+   *
+   * Break-proof: adding `spreadFrom` to `fingerprint`'s returned object reddens
+   * this. It is excluded structurally rather than by omission — `fingerprint`
+   * names the keys it emits (`name`, `index`, `fields`) instead of spreading the
+   * edge — so this test guards a property of that style, and would catch a
+   * future rewrite to `{ ...edge }` too.
+   */
+  it("does not move an edge's hash, or the contract hash of a node naming it", async () => {
+    const byHand = ({ name: "E", label: "E", description: "d", fields: { p: utf8 } });
+    const bySpread = ({
+      name: "E",
+      label: "E",
+      description: "d",
+      fields: { p: utf8 },
+      spreadFrom: "Meta",
+    });
+
+    expect((await hashEdge(bySpread)).hash).toBe((await hashEdge(byHand)).hash);
+
+    const asNode = (edge) => ({
+      name: "n",
+      input: { kind: "single", edge },
+      output: { kind: "single", edge },
+    });
+    expect((await hashNode(asNode(bySpread))).hash).toBe((await hashNode(asNode(byHand))).hash);
+  });
+});

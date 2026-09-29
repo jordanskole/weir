@@ -645,6 +645,72 @@ describe("joinRows", () => {
     expect(rows[0].get("Recipe")).toEqual(recipes[0]);
   });
 
+  /**
+   * **The same rule, several hops up, driven through the real pulse loop.**
+   *
+   * The test above covers the origin-adjacent case: `Recipe` comes straight off
+   * the origin, so the ancestor *is* the joined instance. The first real program
+   * anyone modelled in weir produced the general shape instead — `resolve`
+   * joins `Parcel` with a `Township` derived from it two nodes later, so the
+   * ancestor sits mid-graph with a chain below it.
+   *
+   * The spec already states the rule (2026-09-25-allof-joins-by-lineage.md,
+   * *"Self counts as an ancestor"*) and `joinRows` already implements it; what
+   * no fixture covered was a run reaching it through `runNetlist`, where the
+   * held-candidate rule also gets a say. Worth pinning because the outside
+   * report that prompted it assumed this case was undocumented and untested,
+   * and the useful half of that turned out to be the missing *end-to-end*
+   * coverage, not the rule.
+   *
+   * Break-proof: switching `selfAndAncestorIds` to `ancestorsOf` in
+   * `joinRows` makes the group empty — `Parcel`'s own id is the key, and a
+   * pure-ancestors reading cannot see it — so nothing fires, the run reaches
+   * quiescence with no `Ident`, and this reddens on the length assertion.
+   */
+  it("joins a node with a descendant several hops down, through a real run", async () => {
+    const f = defineField({ type: "utf8", label: "v", description: "d", nullable: false });
+    const E = (name: string) => defineEdge({ name, label: name, description: "d", fields: { v: f } });
+    const [Parcel, Centroid, Township, Ident] = [E("Parcel"), E("Centroid"), E("Township"), E("Ident")];
+
+    const nodes = {
+      start: defineNode({ name: "start", input: single(Value), output: single(Parcel), fn: (v) => ({ v: v.value }) }),
+      centroid: defineNode({ name: "centroid", input: single(Parcel), output: single(Centroid), fn: (p) => ({ v: `c:${p.v}` }) }),
+      lookup: defineNode({ name: "lookup", input: single(Centroid), output: single(Township), fn: (c) => ({ v: `t:${c.v}` }) }),
+      // The fan-in: one arm is the other arm's ancestor.
+      resolve: defineNode({
+        name: "resolve",
+        input: allOf(Parcel, Township),
+        output: single(Ident),
+        fn: (bag) => ({ v: `${bag.Parcel.v}+${bag.Township.v}` }),
+      }),
+    };
+    const wiring = {
+      origins: ["start"],
+      feeds: { start: ["centroid", "resolve"], centroid: ["lookup"], lookup: ["resolve"] },
+    };
+
+    const log = new InMemoryLog();
+    const result = await runNetlist(
+      programWith(nodes as never, wiring),
+      { correlationId: "c1", originPayloads: { start: { value: "x" } } },
+      { log, maxPulses: 20 },
+    );
+
+    const idents = log.instances("Ident", "c1");
+    expect(idents).toHaveLength(1);
+    expect(idents[0]!.payload).toEqual({ v: "x+t:c:x" });
+    expect(result.residue).toEqual([]);
+
+    // And it really is the degenerate shape: the Parcel it consumed is an
+    // ancestor of the Township it consumed, not a sibling.
+    const parcel = log.instances("Parcel", "c1")[0]!;
+    const township = log.instances("Township", "c1")[0]!;
+    expect(idents[0]!.envelope?.causationIds).toEqual(
+      expect.arrayContaining([parcel.id, township.id]),
+    );
+    expect(selfAndAncestorIds(log, township.id)).toContain(parcel.id);
+  });
+
   it("returns nothing when an edge has no candidate", () => {
     const log = new InMemoryLog();
     const a = log.instanceById(log.stage("A", "c1", { v: 1 }))!;

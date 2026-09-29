@@ -26,7 +26,7 @@
  * weight, which §8 forbids in as many words.
  */
 
-import { outputEdgeNames } from "./elaborate.js";
+import { distinctContracts as sharedDistinctContracts, outputEdgeNames } from "./elaborate.js";
 import type { CompositeDecl, Wiring } from "./elaborate.js";
 import { crossings } from "./zones.js";
 import type { Crossing } from "./zones.js";
@@ -77,14 +77,13 @@ type Planable = {
  *
  * Unlike `weir sys`, this deliberately does **not** restrict to wired nodes: a
  * declared-but-unwired node is exactly what a planner exists to find a use for.
+ *
+ * The rule itself now lives in `elaborate.ts`, beside the inlining that creates
+ * the duplicates: `test` needed the identical rule and had silently grown the
+ * identical bug, reporting one declaration as two results under two names.
  */
 function distinctContracts(program: Planable): Record<string, NodeDecl> {
-  const byName: Record<string, NodeDecl> = {};
-  for (const [key, decl] of Object.entries(program.nodes)) {
-    // Prefer the unqualified key; an inlined instance only fills a gap.
-    if (key === decl.name || !(decl.name in byName)) byName[decl.name] = decl;
-  }
-  return byName;
+  return sharedDistinctContracts(program.nodes);
 }
 
 /**

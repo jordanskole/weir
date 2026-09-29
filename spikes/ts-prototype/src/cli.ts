@@ -21,6 +21,7 @@
 
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { elaborate } from "./elaborate.js";
 import { serializeNetlist } from "./netlist.js";
 import { exportContract } from "./contract.js";
@@ -47,7 +48,8 @@ usage
   weir check [dir]              elaborate the declarations and report what fails
   weir graph [dir] [--json]     print the topology, or the netlist as JSON
   weir contract <node> [dir]    print one node's sealed contract, as an agent receives it
-  weir run [dir] --impl <dir> --payload <file.json> [--log <file>] [--run <id>]
+  weir run [dir] --impl <dir> --payload <file.json> [--effects <file.ts>]
+                 [--log <file>] [--run <id>]
                                 elaborate, resolve implementations, and execute
   weir replay [dir] --impl <dir> --run <id> [--trace <file>]
                                 re-run each recorded invocation against its pinned implementation
@@ -69,6 +71,12 @@ usage
   --payload is the trigger: one external event, shaped by the entry topology's
   declared input. A bare payload for a single input; a bag keyed by edge name
   for an allOf one. Every origin declaring that edge is populated from it.
+  --effects supplies the host's handlers: a module default-exporting an object
+  keyed by the name each .node's "effect:" field gives. Required when the
+  program declares any effect, because an effect is performed by the host and
+  never by a drafted implementation — which is what keeps every other node
+  pure (design.md §0).
+
   --log defaults to ./weir.jsonl and is appended to, never truncated.
 
   --trace defaults to ./weir-trace.jsonl, written by run and read by the
@@ -202,12 +210,72 @@ async function run(dir: string, flags: Map<string, string>): Promise<CliResult> 
     };
   }
 
+  // **The host performs the effects, and the CLI is the host.** Without this,
+  // `weir run` could not execute any program with an `effect:` node at all —
+  // `runNetlist` refuses to start when a declared effect has no handler, and
+  // nothing here ever passed one. Found by pointing the CLI at the first real
+  // program anyone modelled, every fetch in which is an effect.
+  let effects: Record<string, (payload: unknown) => Promise<unknown> | unknown> = {};
+  const effectsPath = flags.get("effects");
+  if (effectsPath !== undefined) {
+    try {
+      const mod = (await import(pathToFileURL(resolve(effectsPath)).href)) as { default?: unknown };
+      const supplied = mod.default;
+      if (supplied === null || typeof supplied !== "object") {
+        return {
+          code: 1,
+          out: `✗ --effects ${effectsPath} must default-export an object keyed by effect name, got ${supplied === null ? "null" : typeof supplied}.`,
+        };
+      }
+      // Checked here rather than left to fail mid-pulse: a non-function value
+      // would otherwise surface as a type error deep inside a firing, with the
+      // run already part-written to the log.
+      const notFunctions = Object.entries(supplied).filter(([, v]) => typeof v !== "function");
+      if (notFunctions.length > 0) {
+        return {
+          code: 1,
+          out: `✗ --effects ${effectsPath} exports non-function handler(s): ${notFunctions.map(([k]) => k).join(", ")}.`,
+        };
+      }
+      effects = supplied as typeof effects;
+    } catch (error) {
+      return { code: 1, out: `✗ could not load --effects ${effectsPath}\n\n  ${(error as Error).message}` };
+    }
+  }
+
+  // Named before the run starts, so the message says what to supply rather than
+  // reporting a half-written run. `runNetlist` enforces the same rule; this is
+  // the CLI turning it into an instruction.
+  const declared = [
+    ...new Set(Object.values(program.nodes).flatMap((n) => (n.effect === undefined ? [] : [n.effect]))),
+  ];
+  const unhandled = declared.filter((name) => typeof effects[name] !== "function");
+  if (unhandled.length > 0) {
+    return {
+      code: 1,
+      out: [
+        `✗ no handler for effect(s) ${unhandled.map((e) => `"${e}"`).join(", ")}.`,
+        "",
+        `  An effect is performed by the host, never by a drafted implementation`,
+        `  — that is what keeps every other node pure (design.md §0). Supply them`,
+        `  with --effects <file.ts>, default-exporting an object keyed by the name`,
+        `  each .node's \`effect:\` field gives:`,
+        "",
+        `      export default { ${unhandled[0]}: async (payload) => { /* ... */ } }`,
+      ].join("\n"),
+    };
+  }
+
   const logPath = resolve(flags.get("log") ?? "weir.jsonl");
   const tracePath = resolve(flags.get("trace") ?? "weir-trace.jsonl");
   const log = FileLog.open(logPath);
   const trace = FileTrace.open(tracePath);
   const correlationId = flags.get("run") ?? crypto.randomUUID();
-  const result = await runNetlist(program, { correlationId, originPayloads: resolvedPayloads }, { log, trace });
+  const result = await runNetlist(
+    program,
+    { correlationId, originPayloads: resolvedPayloads },
+    { log, trace, effects },
+  );
 
   const detail = [
     "",
@@ -481,12 +549,18 @@ async function test(dir: string, flags: Map<string, string>): Promise<CliResult>
       lines.push(`  skipped   ${label} — ${r.reason}`);
       continue;
     }
+    if (r.outcome === "effect") {
+      lines.push(`  effect    ${label} — ${r.reason}`);
+      continue;
+    }
     lines.push(`  failed    ${label}${r.reason === undefined ? "" : ` — ${r.reason}`}`);
     if (r.expected !== undefined) lines.push(`            expected ${JSON.stringify(r.expected)}`);
     if (r.actual !== undefined) lines.push(`            actual   ${JSON.stringify(r.actual)}`);
   }
 
-  const summary = `${report.passed} passed, ${report.failed} failed, ${report.skipped} skipped`;
+  const summary =
+    `${report.passed} passed, ${report.failed} failed, ${report.skipped} skipped` +
+    (report.effects > 0 ? `, ${report.effects} effect` : "");
   // **A skip is not a pass**, and a tick over a partly-skipped run would claim
   // more than was checked — the same rule `verify` follows when it refuses to
   // report a clean pass over zero checks. So a ✓ means every declared example
@@ -495,6 +569,13 @@ async function test(dir: string, flags: Map<string, string>): Promise<CliResult>
   // This is strict during development on purpose: an agent implementing one
   // node at a time reads the skip list, which is the useful output either way,
   // and gets a green tick exactly when the program is actually finished.
+  //
+  // **An effect is not a skip and does not block the tick.** A skip says "not
+  // implemented yet", which finishing the work clears. An effect node is never
+  // going to have an `fn` — the runtime performs it through a host handler — so
+  // counting it as a skip made a declared example on an effect node a permanent
+  // red that no amount of implementing could fix. It is still never a pass:
+  // nothing was checked, so it is listed and named, not folded into the count.
   const clean = report.failed === 0 && report.skipped === 0 && report.passed > 0;
   const headline = clean
     ? `✓ ${summary}`

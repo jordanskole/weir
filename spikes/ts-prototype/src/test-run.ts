@@ -25,7 +25,7 @@
  */
 
 import { isDeepStrictEqual } from "node:util";
-import { outputEdgeNames } from "./elaborate.js";
+import { distinctContracts, outputEdgeNames } from "./elaborate.js";
 import type { CompositeDecl } from "./elaborate.js";
 import { invokeWithInput } from "./invoke.js";
 import { InMemoryLog } from "./membrane.js";
@@ -52,7 +52,19 @@ export interface ExampleResult {
   kind: "node" | "topology";
   name: string;
   index: number;
-  outcome: "passed" | "failed" | "skipped";
+  /**
+   * `effect` is a fourth category, not a kind of skip, and `verify` already has
+   * the same one for the same reason (`declaredNondeterministic`). An effect
+   * node has no pure function to invoke — `resolveImplementationAt` gives it a
+   * deliberately throwing stub, since the runtime performs it through a
+   * host-supplied handler instead. Running its example through the membrane
+   * therefore does not fail the example; it calls the stub and throws.
+   *
+   * A skip means *not yet implemented* and must block a green tick. An effect
+   * is never going to be implemented as an `fn`, so counting it as a skip made
+   * a declared example on an effect node a permanent, unfixable red.
+   */
+  outcome: "passed" | "failed" | "skipped" | "effect";
   /** Present when it failed: what was declared against what came back. */
   expected?: unknown;
   actual?: unknown;
@@ -65,6 +77,8 @@ export interface TestReport {
   passed: number;
   failed: number;
   skipped: number;
+  /** Declared on an effect node, so never invoked here. Never counted as a pass. */
+  effects: number;
 }
 
 /**
@@ -186,9 +200,30 @@ async function runTopologyExample(
 export async function runExamples(program: TestableProgram, topologies: CompositeDecl[]): Promise<TestReport> {
   const results: ExampleResult[] = [];
 
-  for (const [name, node] of Object.entries(program.nodes)) {
+  // **One contract, one set of examples.** Inlining a composite leaves its
+  // inner nodes under two keys — `fetchDirect` and `directCountyFetch/fetchDirect`
+  // — and iterating the raw map ran every such node's examples twice, reporting
+  // one declaration as two results under two names. `plan` hit the same thing
+  // and fixed it the same way; this is that rule applied to the second caller.
+  //
+  // Deduped only for *reading examples off a node*. `program.nodes` itself is
+  // left alone, because a topology's wiring names the qualified keys and
+  // `runTopologyExample` resolves through it.
+  for (const node of Object.values(distinctContracts(program.nodes))) {
+    const name = node.name;
     for (const [index, example] of (node.examples ?? []).entries()) {
       const base = { kind: "node" as const, name, index };
+      // Before the `fn` check, because an effect node *has* an `fn`: a stub
+      // that throws by design. It would otherwise be invoked and the throw
+      // would escape `runExamples` entirely.
+      if (node.effect !== undefined) {
+        results.push({
+          ...base,
+          outcome: "effect",
+          reason: `performed by the host's "${node.effect}" handler, not callable as an Fn`,
+        });
+        continue;
+      }
       if (typeof (node as NodeDef).fn !== "function") {
         results.push({ ...base, outcome: "skipped", reason: "no accepted implementation" });
         continue;
@@ -220,5 +255,6 @@ export async function runExamples(program: TestableProgram, topologies: Composit
     passed: results.filter((r) => r.outcome === "passed").length,
     failed: results.filter((r) => r.outcome === "failed").length,
     skipped: results.filter((r) => r.outcome === "skipped").length,
+    effects: results.filter((r) => r.outcome === "effect").length,
   };
 }

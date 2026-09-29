@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
@@ -513,5 +513,93 @@ describe("runCli — test", () => {
     expect(result.out).toContain("skipped");
     expect(result.out).toContain("no accepted implementation");
     expect(result.out).not.toContain("✓");
+  });
+});
+
+describe("runCli — run supplies the host's effect handlers", () => {
+  /**
+   * A program whose only node is an effect, which is the shape of every real
+   * ETL entry point and was unrunnable through the CLI until `--effects`.
+   */
+  async function effectfulFixture(): Promise<{ workdir: string; implRoot: string; payload: string }> {
+    const workdir = await fixture({
+      "edges/A.edge": EDGE("A"),
+      "edges/B.edge": EDGE("B"),
+      "nodes/fetch.node":
+        `label: Fetch\ndescription: d\neffect: http\ninput: A\noutput: B\n` +
+        `examples:\n  - given:\n      A:\n        v: "x"\n    expect:\n      B:\n        v: "got:x"\n`,
+      "topology/main.topology": rootTopology("A", "B", ["fetch"], `fetch: {}\n`),
+      "effects.ts": `export default { http: async (p) => ({ v: "got:" + p.v }) };\n`,
+    });
+    const implRoot = join(workdir, "impl");
+    await mkdir(implRoot, { recursive: true });
+    const payload = join(workdir, "payload.json");
+    await writeFile(payload, JSON.stringify({ v: "x" }), "utf8");
+    return { workdir, implRoot, payload };
+  }
+
+  /**
+   * **The gap the first real program found.** `runNetlist` refuses to start when
+   * a declared effect has no handler, and nothing in the CLI ever passed one —
+   * so `weir run` could not execute *any* effectful program, for a framework
+   * whose stated division of labour is that the host performs the effects.
+   *
+   * Break-proof: dropping the `effects` argument from the `runNetlist` call
+   * reddens this with `runNetlist`'s own "No handler for effect(s)" thrown from
+   * inside the run, rather than the CLI's instruction — which is the before
+   * state, and the reason the up-front check earns its place.
+   */
+  it("executes an effectful program when handlers are supplied", async () => {
+    const { workdir, implRoot, payload } = await effectfulFixture();
+
+    const result = await runCli([
+      "run", workdir, "--impl", implRoot, "--payload", payload,
+      "--effects", join(workdir, "effects.ts"),
+      "--run", "e1", "--log", join(workdir, "log.jsonl"), "--trace", join(workdir, "trace.jsonl"),
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("✓");
+    const log = (await readFile(join(workdir, "log.jsonl"), "utf8")).trim().split("\n").map((l) => JSON.parse(l));
+    expect(log.find((r) => r.edge === "B")?.payload).toEqual({ v: "got:x" });
+  });
+
+  /** The message has to say what to write, since there is nothing to copy from. */
+  it("refuses an effectful program with no handlers, naming the effect and the flag", async () => {
+    const { workdir, implRoot, payload } = await effectfulFixture();
+
+    const result = await runCli(["run", workdir, "--impl", implRoot, "--payload", payload]);
+
+    expect(result.code).toBe(1);
+    expect(result.out).toContain(`no handler for effect(s) "http"`);
+    expect(result.out).toContain("--effects");
+  });
+
+  it("rejects an --effects module whose export is not an object of functions", async () => {
+    const { workdir, implRoot, payload } = await effectfulFixture();
+    await writeFile(join(workdir, "bad.ts"), `export default { http: "not a function" };\n`, "utf8");
+
+    const result = await runCli([
+      "run", workdir, "--impl", implRoot, "--payload", payload, "--effects", join(workdir, "bad.ts"),
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.out).toContain("non-function handler(s): http");
+  });
+
+  /**
+   * The other half of the same bug: `weir test` invoked the effect node's
+   * deliberately-throwing stub and reported the throw as the author's failing
+   * example. It is now its own category — listed, never counted as a pass, and
+   * no longer a permanent red.
+   */
+  it("test: reports an effect node's example as an effect, not a failure", async () => {
+    const { workdir, implRoot } = await effectfulFixture();
+
+    const result = await runCli(["test", workdir, "--impl", implRoot]);
+
+    expect(result.out).toContain("1 effect");
+    expect(result.out).not.toContain("1 failed");
+    expect(result.out).toContain("performed by the host");
   });
 });

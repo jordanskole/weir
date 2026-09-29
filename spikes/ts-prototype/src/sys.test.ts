@@ -120,6 +120,35 @@ describe("sys — orphans", () => {
   });
 
   /**
+   * **The second false positive, found on the first real program pointed at
+   * `weir sys`.** A `"...Name":` spread *copies* the source's fields rather than
+   * embedding the source, so after elaboration the source is a declared edge
+   * that nothing produces, consumes or nests — indistinguishable from dead
+   * weight, and duly reported as orphaned. It exists precisely to be spread.
+   *
+   * Break-proof, both directions, which is the lesson the `Address`
+   * over-correction above taught: dropping the `spreadSources` check reports
+   * `Meta`, and the second assertion is what stops the fix from being another
+   * blanket disable — `Dead` is spread from nothing and must still be found.
+   */
+  it("does not report an edge another edge spreads its fields from, and still finds a real orphan", async () => {
+    const root = await fixture({
+      "edges/Meta.edge": EDGE("Meta"),
+      "edges/Dead.edge": EDGE("Dead"),
+      "edges/A.edge": EDGE("A"),
+      "edges/Answer.edge":
+        `label: Answer\ndescription: d\nfields:\n  "...Meta":\n`,
+      "nodes/go.node": NODE("A", "Answer"),
+      "topology/main.topology": `input: A\noutput: Answer\nterminals:\n  - go\nwiring:\n  go: {}\n`,
+    });
+
+    const found = orphans(await elaborate(root)).map((o) => o.edge);
+
+    expect(found).not.toContain("Meta");
+    expect(found).toContain("Dead");
+  });
+
+  /**
    * Spec Testing #4 — the query that was impossible before topologies declared
    * their terminals. A produced-and-unconsumed edge is either the answer or a
    * drop, and nothing could tell them apart.

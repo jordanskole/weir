@@ -203,3 +203,75 @@ describe("weir test — both kinds, and skips", () => {
     expect(report.results[0]!.reason).toContain("no accepted implementation");
   });
 });
+
+describe("weir test — effect nodes and inlined duplicates", () => {
+  /**
+   * An effect node's `fn` is the deliberately-throwing stub
+   * `resolveImplementationAt` supplies, since the runtime performs the effect
+   * through a host handler instead. This is that stub, exactly.
+   */
+  const effectful = (calls: string[]) => ({
+    name: "fetch",
+    effect: "http",
+    input: single(A),
+    output: single(L),
+    examples: [{ given: { v: "x" }, expect: { v: "L:x" } }],
+    fn: () => {
+      calls.push("called");
+      throw new Error(`"fetch" is an effect ("http") — it is performed by the runtime's handler, never called as an ordinary Fn.`);
+    },
+  });
+
+  /**
+   * **Found by pointing `weir test` at the first real program anyone modelled.**
+   * Six of its twelve cases failed for this reason alone, and no amount of
+   * implementing could have fixed them: declaring an example on an effect node
+   * was a permanent red.
+   *
+   * Break-proof: removing the `node.effect` guard reddens this, and the shape of
+   * the failure is the point. The membrane catches the stub's throw and turns it
+   * into a `Failed_` payload, so the example is reported as **failed** with
+   * `actual.reason` set to the stub's own words — *"it is performed by the
+   * runtime's handler, never called as an ordinary Fn"*. `weir test` was
+   * printing the explanation of its own bug as if it were the author's mistake.
+   *
+   * This comment first claimed the throw escaped `runExamples` and rejected the
+   * whole call. It does not; the membrane catches it. Corrected after running
+   * the break, because a break-proof whose stated mechanism is wrong is the
+   * false green this repo keeps finding, one level up.
+   */
+  it("does not invoke an effect node's stub, and reports it as its own category", async () => {
+    const calls: string[] = [];
+    const report = await runExamples(program({ fetch: effectful(calls) }), []);
+
+    expect(calls).toEqual([]);
+    expect(report.effects).toBe(1);
+    expect(report.results[0]!.outcome).toBe("effect");
+    expect(report.results[0]!.reason).toContain("http");
+    // Never a pass: nothing was checked. And never a skip, which would block a
+    // green tick forever.
+    expect(report.passed).toBe(0);
+    expect(report.failed).toBe(0);
+    expect(report.skipped).toBe(0);
+  });
+
+  /**
+   * `inlineComposites` leaves a composite's inner nodes under both the bare name
+   * and the qualified position, so reading examples off the raw map ran each
+   * declaration twice and reported it under two names.
+   *
+   * Break-proof: iterating `Object.entries(program.nodes)` instead of
+   * `distinctContracts` returns two results here, `passed` 2, one of them named
+   * `wrap/toLeft` — one declaration counted twice, which would also let a
+   * duplicate quietly inflate a green run's numbers.
+   */
+  it("runs one declaration once, though inlining leaves it under two keys", async () => {
+    const withExample = { ...toLeft, examples: [{ given: { v: "x" }, expect: { v: "L:x" } }] };
+
+    const report = await runExamples(program({ toLeft: withExample, "wrap/toLeft": withExample }), []);
+
+    expect(report.results).toHaveLength(1);
+    expect(report.passed).toBe(1);
+    expect(report.results[0]!.name).toBe("toLeft");
+  });
+});

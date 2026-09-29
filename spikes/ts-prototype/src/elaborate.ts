@@ -239,6 +239,7 @@ export function parseEdgeFile(yamlText: string, name: string, resolveField: Fiel
 
   const resolvedFields: Record<string, FieldDef | LiteralFieldDef | AnyEdgeDef | ManyEdgeDef> = {};
   let spreadIndex: string | undefined;
+  let spreadFrom: string | undefined;
   if (spreadEntries.length === 1) {
     const [spreadKey, spreadValue] = spreadEntries[0]!;
     if (spreadValue !== null && spreadValue !== undefined) {
@@ -251,6 +252,7 @@ export function parseEdgeFile(yamlText: string, name: string, resolveField: Fiel
     }
     Object.assign(resolvedFields, source.fields);
     spreadIndex = source.index;
+    spreadFrom = sourceName;
   }
 
   for (const [key, value] of fieldEntries) {
@@ -299,6 +301,7 @@ export function parseEdgeFile(yamlText: string, name: string, resolveField: Fiel
     label: label as string,
     description: description as string,
     ...(typeof index === "string" ? { index } : spreadIndex !== undefined && { index: spreadIndex }),
+    ...(spreadFrom !== undefined && { spreadFrom }),
     fields: resolvedFields,
   });
 }
@@ -1074,6 +1077,28 @@ function inlineComposites(
  * produce. Rule B at the boundary rather than a new rule: the same question
  * `assertWiringTypes` asks of a node's parents, asked of a composite's exits.
  */
+/**
+ * One entry per distinct node *contract*, keyed by the node's own name.
+ *
+ * `inlineComposites` deliberately leaves a composite's inner nodes under two
+ * keys — the bare `fetchDirect` and the qualified `directCountyFetch/fetchDirect`
+ * — so that a wiring can name either. Every caller that asks "what nodes does
+ * this program have?" rather than "what does this wiring point at?" wants the
+ * contracts, not the placements, and gets duplicates if it reads the map
+ * directly. That produced combinatorially many equivalent routes in `plan` and
+ * double-reported examples in `test`.
+ *
+ * The unqualified key wins; an inlined instance only fills a gap, which is what
+ * keeps the answer stable regardless of map order.
+ */
+export function distinctContracts<T extends { name: string }>(nodes: Record<string, T>): Record<string, T> {
+  const byName: Record<string, T> = {};
+  for (const [key, decl] of Object.entries(nodes)) {
+    if (key === decl.name || !(decl.name in byName)) byName[decl.name] = decl;
+  }
+  return byName;
+}
+
 /** The edge names an OutputSpec names, whatever its mode. */
 export function outputEdgeNames(output: OutputSpec): string[] {
   return output.kind === "single" || output.kind === "many"

@@ -147,6 +147,22 @@ export interface EdgeDef<
   /** Field that uniquely identifies an instance, where one exists. */
   index?: string;
   fields: F;
+  /**
+   * The edge this one's fields were spread from, where `"...Name":` was used
+   * (docs/superpowers/specs/2026-09-09-edge-spread.md).
+   *
+   * Provenance of the *declaration*, not of the data: the spread copies fields
+   * in, so an edge written by spread and one written by hand are the same edge
+   * on the wire. `fingerprint` names its keys explicitly and does not include
+   * this, which is what keeps that true — changing a spread into four typed-out
+   * fields must not move a contract hash.
+   *
+   * Recorded because the copy is otherwise lossy in one place that matters:
+   * the spread source is a real, declared edge that nothing produces, consumes
+   * or embeds, so `sys` reported it as orphaned with no way to tell it apart
+   * from actual dead weight.
+   */
+  spreadFrom?: string;
 }
 
 /**
