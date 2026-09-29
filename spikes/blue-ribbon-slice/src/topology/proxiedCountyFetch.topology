@@ -1,0 +1,19 @@
+# app.fetchgis.com -- a commercial third party that proxies Iosco's and
+# Otsego's county FeatureServers. The PIN crosses this line, and for corridor
+# queries so does the full buffer geometry.
+#
+# This is the boundary that motivated the whole exercise: in blue-ribbon it is
+# indistinguishable from the direct path, because both counties' adapters
+# satisfy the same `CountyParcelAdapter` interface. Here `weir sys` can answer
+# "what crosses into third-party-proxy" from declarations alone, with no run
+# and no implementations -- and the answer is "a PIN, classified linkable".
+#
+# That is a real capability blue-ribbon does not have and could not easily
+# retrofit, and it is the clearest single argument for weir in this report.
+zone: third-party-proxy
+input: ProxiedCountyQuery
+output: RawParcelFeature
+terminals:
+  - fetchProxied
+wiring:
+  fetchProxied: {}

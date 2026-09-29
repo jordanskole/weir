@@ -1,0 +1,49 @@
+label: Parcel Centroid
+description: >-
+  A point inside the parcel, area-weighted (shoelace formula). The only reason
+  it exists is that the statewide Minor Civil Division layer answers
+  point-in-polygon queries, not polygon ones.
+
+  blue-ribbon's `polygonCentroid` in
+  apps/etl/src/counties/shared/township-lookup.ts:20 -- a pure function that is
+  currently a private helper inside the module that calls it. Promoting it to a
+  node with its own contract and examples is a small, genuine improvement: it
+  is verified against DuckDB's ST_Centroid "to sub-meter agreement" in a
+  comment, which is the kind of claim that should be a property assertion.
+fields:
+  pin:
+    classification: linkable
+    type: utf8
+    label: PIN
+    description: The parcel this point is inside
+    nullable: false
+    validations:
+      minLength: 8
+      maxLength: 40
+  lng:
+    # This coordinate is sent to a statewide ArcGIS service once per parcel --
+    # 3,265 times for one Iosco corridor run. Individually it is a public land
+    # record. In aggregate it discloses exactly which parcels are being
+    # assembled, to a third party, at volume.
+    #
+    # FRICTION (#9): no field-level label can express that. The sensitivity is
+    # a property of the CARDINALITY of the traversal, not of the field. weir
+    # knows the cardinality -- a spread's width is in the log -- but
+    # classification cannot reach it.
+    classification: location
+    type: f64
+    label: Longitude
+    description: WGS84 longitude of the parcel's area-weighted centroid
+    nullable: false
+    validations:
+      min: -180
+      max: 180
+  lat:
+    classification: location
+    type: f64
+    label: Latitude
+    description: WGS84 latitude of the parcel's area-weighted centroid
+    nullable: false
+    validations:
+      min: -90
+      max: 90

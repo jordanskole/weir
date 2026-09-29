@@ -1,0 +1,28 @@
+label: Lookup Township
+description: >-
+  Ask Michigan's statewide Minor Civil Division layer which township contains
+  this point. The host performs the HTTP.
+
+  blue-ribbon's `fetchTownship`, township-lookup.ts:35.
+
+  Its output is `provenance: verified` even though this is a third party,
+  because the statewide layer is more authoritative than the county's own
+  township field -- Roscommon's maps ID 11 to two different townships. Trust
+  is not monotone in distance from the primary source.
+effect: http
+input: ParcelCentroid
+output: TownshipLookup
+examples:
+  - given:
+      ParcelCentroid:
+        pin: "062-026-300-020-00"
+        lng: -83.35
+        lat: 44.44
+    expect:
+      TownshipLookup:
+        pin: "062-026-300-020-00"
+        township: "Oscoda"
+        provenance: "verified"
+        vintageAsOf: "2026-08-30"
+        vintageSourceType: "periodic"
+        vintageNote: "statewide MCD point-in-polygon; county layer has no township field"

@@ -1,0 +1,93 @@
+label: Raw Parcel Feature
+description: >-
+  ########################################################################
+  # THIS EDGE IS THE ONE THAT DOES NOT FIT. READ THE COMMENT.            #
+  ########################################################################
+
+  What blue-ribbon actually has here is:
+
+      interface RawParcelFeature {
+        properties: Record<string, unknown>;
+        geometry: { type: string; coordinates: unknown };
+      }
+
+  `Record<string, unknown>` is not an accident or laziness. It is the entire
+  reason the adapter layer exists. Five counties return five different field
+  names for the same concept -- Osceola `PIN`/`OWNER`/`PROPADD`/`UNIT`,
+  Iosco `TaxID`, Otsego `parcelid`, Manistee `BSA_PIN`, Roscommon `PIN` with
+  shapefile-truncated siblings like `c_Parcel_I` and `ParcelMa_3` that
+  05_SPIKE_FINDINGS.md says "need a decode pass". The shape is DISCOVERED by
+  querying a live server, not declared. Some of it is discovered wrong and
+  corrected months later.
+
+  weir says an edge is "the complete description of what crosses a wire". An
+  ArcGIS FeatureServer response is a wire whose contents I genuinely cannot
+  describe in advance, and if I could, I would not want to -- the whole point
+  of `normalize()` is that the mess stops at one place.
+
+  WHAT I ACTUALLY WANT, and weir has no way to say:
+
+      fields:
+        featureJson:
+          type: opaque          # <-- does not exist
+          schema: unchecked     # <-- does not exist
+          note: "asserted by normalizeParcel, not by the membrane"
+
+  i.e. an edge that is explicitly OUTSIDE the schema guarantee, so that a
+  reader can see the guarantee stops here rather than believing a `utf8` that
+  is lying to them.
+
+  WHAT I DID INSTEAD: stuffed the whole ArcGIS feature into one utf8 field as
+  a JSON string. This parses and it is a lie. The membrane will happily assert
+  `featureJson` is a string of length < 2000000 and tell me nothing. Every
+  guarantee weir advertises -- schema assertion, structural hashing, typed
+  generators for property testing -- is inert across this one hop, and this
+  one hop is where every real bug in blue-ribbon's adapter layer has been.
+
+  THE ALTERNATIVE I REJECTED: fold fetch and normalize into a single effect
+  node, so the untyped blob never becomes an edge. That is worse. `normalize()`
+  is pure, is the interesting logic, and is the one part of the adapter layer
+  with real unit tests (apps/etl/test/counties/*.test.ts, 5 files). Putting it
+  inside a host-supplied effect handler moves it PAST the acceptance gate --
+  weir would have taken my best-tested code and made it untestable.
+fields:
+  county:
+    type: utf8
+    label: County
+    description: Which county's adapter must interpret the payload below
+    nullable: false
+    validations:
+      minLength: 4
+      maxLength: 20
+  sourceTrust:
+    type: utf8
+    label: Source Trust
+    description: >-
+      FRICTION (#5): this field exists only because the oneOf decision made by
+      `routeCounty` is erased the moment both branches converge on this edge.
+      weir's pitch is "a decision becomes a type, so the consumer's input type
+      IS the proof the decision was made". That holds right up until two
+      branches produce the same edge -- and converging is the normal case in
+      ETL, because the point of an adapter is that downstream stops caring.
+
+      To keep it as a type I would need RawParcelFeatureDirect and
+      RawParcelFeatureProxied, and then normalizeParcel takes anyOf of two
+      edges, and every node below it does too. The type survives only by
+      duplicating the rest of the graph.
+
+      So: back to a string field, checked by nobody, exactly as blue-ribbon
+      has it today. weir gained me nothing here.
+    nullable: false
+    enumValues:
+      - verified
+      - aggregator
+  featureJson:
+    type: utf8
+    label: Feature JSON
+    description: >-
+      The entire ArcGIS GeoJSON feature, serialized. See the edge description:
+      this is a hole in the type system, deliberately marked.
+    nullable: false
+    validations:
+      minLength: 2
+      maxLength: 2000000

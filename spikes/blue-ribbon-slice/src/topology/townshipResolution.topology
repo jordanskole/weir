@@ -1,0 +1,21 @@
+# Michigan's statewide Minor Civil Division service. A third party, but a more
+# authoritative one than the counties for this particular field.
+#
+# The centroid crosses this line once per parcel -- 3,265 times for one Iosco
+# corridor run. Individually a public land record; in aggregate, disclosure of
+# exactly which parcels are being assembled.
+#
+# FRICTION (#9, restated where it bites): the zone crossing is declared and
+# queryable, but its WIDTH is not. `weir sys` will report "ParcelCentroid
+# crosses into state-gis carrying location" whether that happens once or 3,265
+# times, and those are different facts about the same program. The cardinality
+# is knowable -- it is the spread width, and it is in the log -- so this feels
+# like something the sys queries could answer rather than something the model
+# forbids.
+zone: state-gis
+input: ParcelCentroid
+output: TownshipLookup
+terminals:
+  - lookupTownship
+wiring:
+  lookupTownship: {}

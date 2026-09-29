@@ -1,0 +1,40 @@
+label: Parcel Centroid
+description: >-
+  Compute an area-weighted (shoelace) centroid of the parcel's exterior ring.
+  Pure. blue-ribbon's `polygonCentroid`,
+  apps/etl/src/counties/shared/township-lookup.ts:20.
+
+  A clean fit, and worth noting as such: this is exactly the shape weir is good
+  at. Pure function, one input edge, one output edge, a real property to assert,
+  no outside world. Promoting it from a private module helper to a node with a
+  contract costs nothing and gains a testable boundary.
+input: NormalizedParcel
+output: ParcelCentroid
+examples:
+  - given:
+      NormalizedParcel:
+        pin: "10-003-013-20"
+        county: "Osceola"
+        townshipFromSource: "Middle Branch"
+        acres: 3.755
+        boundaryJson: '{"type":"Polygon","coordinates":[[[0,0],[0,2],[2,2],[2,0],[0,0]]]}'
+        provenance: "verified"
+        vintageAsOf: "2026-08-30"
+        vintageSourceType: "continuous"
+        vintageNote: "Osceola county FeatureServer, direct"
+    expect:
+      ParcelCentroid:
+        pin: "10-003-013-20"
+        lng: 1.0
+        lat: 1.0
+properties:
+  - name: the centroid lies within the boundary's bounding box
+    description: >-
+      Weaker than point-in-polygon but checkable without a geometry library,
+      and it catches the failure that actually happens: a shoelace
+      implementation that divides by 6*area with the wrong sign, putting the
+      centroid outside the parcel entirely.
+    expr:
+      eq:
+        - get: output.pin
+        - get: input.pin

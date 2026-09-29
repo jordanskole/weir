@@ -1,0 +1,93 @@
+# ##########################################################################
+# THIS FILE DOES NOT PARSE AND IS NOT MEANT TO. It is the answer to
+# "your effects are chatty -- tell me what that wants to be."
+# ##########################################################################
+#
+# THE REAL THING, in blue-ribbon:
+#
+#   fetchParcelsIntersecting(polygon) pages an ArcGIS FeatureServer until the
+#   server stops setting `exceededTransferLimit`. Osceola caps at
+#   maxRecordCount: 2000; one 6-mile stream returns 839 parcels; the Pine
+#   River (57 miles) returns far more. `fetchAllEsriPages` loops, accumulating
+#   into one array. Iosco's Au Sable corridor returns 3,265 candidates, and
+#   then fetchTownship is called ONCE PER CANDIDATE -- 3,265 sequential
+#   requests to a shared statewide service, which reliably hit an HTTP/2
+#   GOAWAY partway through, which is why retryOnTransportError exists.
+#
+# So one logical step, "get me the parcels in this corridor", is somewhere
+# between 2 and 4,000 HTTP requests whose count is NOT KNOWN UNTIL THE SERVER
+# SAYS SO.
+#
+# WHAT WEIR OFFERS, and how far it gets:
+#
+#   A cycle is recursion, terminated by a oneOf branch nothing routes back:
+#
+#     input: PageRequest
+#     output:
+#       oneOf:
+#         - MorePages      # routed back to fetchParcelPage
+#         - PagesComplete  # routed onward
+#
+#   This genuinely works, and it is nicer than the while loop: every page is a
+#   logged, replayable token, and `resultOffset` is carried in the edge rather
+#   than mutated in a local. The readme is right that the accumulator was
+#   redundant with the log.
+#
+# WHERE IT STOPS WORKING -- three things, in increasing severity:
+#
+# 1. REASSEMBLY. I need every page's parcels as one collection. `gather`
+#    "collects every instance of one edge descended from a SINGLE SPREAD".
+#    A cycle is not a spread. The page count is not known when the loop
+#    starts, so there is nothing to spread over. I can see no way to express
+#    "gather everything this cycle produced" -- which means the one shape
+#    weir offers for iteration cannot be rejoined, and an ETL that cannot
+#    rejoin its pages has not done anything.
+#
+#    This is the single blocking gap for modelling blue-ribbon's real
+#    workload rather than my one-parcel slice.
+#
+# 2. GRANULARITY. Even if reassembly worked: is one HTTP request one node
+#    firing? At 3,265 township lookups per corridor that is 3,265 log entries
+#    per run for ONE FIELD, plus a trace entry each, plus a pinned
+#    implementation hash each. The log stops being an audit trail and becomes
+#    the dominant cost of running the pipeline. I do not think you want
+#    fetch-level granularity here, but the alternative -- one effect node that
+#    internally makes 3,265 requests -- hides the chattiness at exactly the
+#    place Principle 0 says to expose it, AND makes replay feed back one giant
+#    recorded blob rather than 3,265 checkable ones.
+#
+#    WHAT I THINK IT WANTS TO BE: an effect whose declared cardinality is
+#    `many`, performed by the host as a batch, recorded per-element, and
+#    spread on return. i.e. the host is allowed to be chatty, the log is
+#    per-element, and the topology shows ONE crossing.
+#
+#      effect: http
+#      effectCardinality: many     # <-- does not exist
+#      input: CorridorQuery
+#      output:
+#        many: RawParcelFeature
+#
+#    That keeps the boundary honest (one place the world gets in), keeps
+#    replay granular, and lets the host own retry/backoff/pagination, which
+#    is where that policy belongs anyway -- the effects spec already puts
+#    "retries, timeouts, backoff" explicitly out of scope, but pagination is
+#    not policy, it is how you obtain the data at all.
+#
+# 3. PARTIAL FAILURE. `retryOnTransportError` exists because request 1,847 of
+#    3,265 fails. In weir that parcel's branch emits Failed<In>, and the run
+#    stalls at the gather with residue. blue-ribbon's actual semantics are
+#    "that parcel gets a null with a note saying why, and the corridor still
+#    produces a card for the other 3,264". A gather that cannot tolerate a
+#    missing element cannot express a batch job. What I want is a gather that
+#    fires on quiescence with holes, and records the holes -- which is very
+#    close to your `residue` concept, except reported INTO the payload rather
+#    than to the run's exit code.
+#
+label: Fetch Parcel Page
+description: NOT A REAL DECLARATION -- see the comment block above.
+effect: http
+input: PageRequest
+output:
+  oneOf:
+    - MorePages
+    - PagesComplete

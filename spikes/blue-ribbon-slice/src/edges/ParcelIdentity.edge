@@ -1,0 +1,54 @@
+label: Parcel Identity
+description: >-
+  The resolved identity block of a parcel card -- blue-ribbon's
+  `ParcelIdentity` (packages/schema/src/identity.ts). The output of the fan-in,
+  and the end of this slice.
+
+  The provenance here is the interesting part: it is `combineProvenance` over
+  the parcel source and the township source, so a parcel whose geometry came
+  direct from its county but whose township came from the statewide layer is
+  only as trustworthy as the weaker of the two. That combine is a lattice meet,
+  and it is the thing weir's classification propagation should BE.
+fields:
+  pin:
+    classification: linkable
+    type: utf8
+    label: PIN
+    description: Canonical dash-separated parcel identification number
+    nullable: false
+    validations:
+      minLength: 8
+      maxLength: 40
+  county:
+    type: utf8
+    label: County
+    description: The county this parcel is in
+    nullable: false
+    validations:
+      minLength: 4
+      maxLength: 20
+  township:
+    type: utf8
+    label: Township
+    description: The city or township containing the parcel
+    nullable: false
+    validations:
+      minLength: 2
+      maxLength: 100
+  acres:
+    type: f64
+    label: Acres
+    description: Parcel area in acres
+    nullable: false
+    validations:
+      min: 0
+      max: 100000
+  boundaryJson:
+    type: utf8
+    label: Boundary JSON
+    description: The parcel's polygon boundary, serialized GeoJSON
+    nullable: false
+    validations:
+      minLength: 2
+      maxLength: 2000000
+  "...Provenanced":

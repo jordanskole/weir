@@ -1,0 +1,58 @@
+label: Proxied County Query
+description: >-
+  A parcel query that transits app.fetchgis.com, a commercial third party,
+  before reaching the county. Iosco and Otsego resolve this way -- see
+  apps/etl/src/counties/iosco.ts:15-20 and otsego.ts:15-20 in
+  blue-ribbon-properties, which embed the target URL in `proxy.ashx?` and
+  send a spoofed Referer.
+
+  The PIN and (for corridor queries) the full buffer geometry are disclosed to
+  the proxy operator. Nothing in blue-ribbon records that. Here it is a
+  distinct edge type consumed only by a node inside a `zone: third-party-proxy`
+  topology, so `weir sys` can answer "what leaves for the proxy" without anyone
+  having remembered to write it down.
+fields:
+  pin:
+    classification: linkable
+    type: utf8
+    label: PIN
+    description: The parcel identification number being queried
+    nullable: false
+    validations:
+      minLength: 8
+      maxLength: 40
+  county:
+    type: utf8
+    label: County
+    description: The county whose FeatureServer sits behind the proxy
+    nullable: false
+    enumValues:
+      - Iosco
+      - Otsego
+  endpoint:
+    type: utf8
+    label: Endpoint
+    description: The county FeatureServer URL, which is embedded as a proxy parameter
+    nullable: false
+    validations:
+      minLength: 10
+      maxLength: 500
+  proxyHost:
+    type: utf8
+    label: Proxy Host
+    description: The third party the query actually goes to
+    nullable: false
+    enumValues:
+      - app.fetchgis.com
+  referer:
+    type: utf8
+    label: Referer
+    description: >-
+      The Referer header the proxy requires. blue-ribbon spoofs this to
+      `https://app.fetchgis.com/?currentMap=iosco`. Carried as data rather
+      than buried in the fetch implementation, because it is the closest thing
+      this pipeline has to a credential and it should be visible.
+    nullable: false
+    validations:
+      minLength: 10
+      maxLength: 200

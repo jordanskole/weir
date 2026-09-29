@@ -1,0 +1,24 @@
+# A county's own ArcGIS FeatureServer. The county is the authoritative
+# publisher of its own parcel geometry, so this is the trusted path.
+#
+# FRICTION (#13, zones): this topology exists ONLY to carry a `zone:` label,
+# because `zone` is a topology-level key and there is no `zone` on a node. It
+# wraps exactly one node and adds nothing else. That is ceremony -- three
+# lines of wrapper per effect to say one word about the node inside.
+#
+# It also flattens a distinction I care about. "county-gis" is not one zone:
+# it is five separate county governments' ArcGIS deployments, each with its
+# own availability, its own field-name dialect, and in Roscommon's case its
+# own known data bug. weir gives me one string per topology. To distinguish
+# them I would need five single-node topologies, which is the (a) branch from
+# routeCounty.node's comment showing up again by a different route.
+#
+# WHAT I WANT: `zone:` declarable on a `.node`, and a zone that can be a path
+# ("county-gis/osceola") so queries can ask at either granularity.
+zone: county-gis
+input: DirectCountyQuery
+output: RawParcelFeature
+terminals:
+  - fetchDirect
+wiring:
+  fetchDirect: {}

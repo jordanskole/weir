@@ -1,0 +1,62 @@
+label: Route County
+description: >-
+  Decide which trust path this parcel's county resolves through. Osceola,
+  Manistee and Roscommon go direct to the county's own FeatureServer; Iosco and
+  Otsego transit app.fetchgis.com.
+
+  This node does not exist in blue-ribbon. `getCountyAdapter(county)`
+  (apps/etl/src/counties/registry.ts) returns a `CountyParcelAdapter` and the
+  distinction dies there. Making it a `oneOf` is weir's "a decision becomes a
+  type" applied to the finding that motivated this exercise.
+
+  FRICTION (#2, the shape of an adapter): weir has no interfaces, typeclasses,
+  or dispatch. blue-ribbon has ONE interface with FIVE implementations, which
+  is the correct factoring -- each county differs only in URL, field names and
+  an area formula. In weir I get two choices:
+
+    (a) five nodes, fetchOsceola..fetchOtsego, and a five-way oneOf. Honest
+        about the differences, but every downstream node then takes anyOf of
+        five edges and the graph is five parallel copies of one shape.
+    (b) two nodes split by TRUST rather than by county, with county as a field.
+
+  I took (b), and I think it is genuinely better than what blue-ribbon has --
+  but note what made it work: the five counties differ along an axis (trust)
+  that has only two values. If they differed along an axis with five values I
+  would have been forced into (a), and weir would have made the code worse.
+  weir has no way to say "these five things vary only in configuration".
+input: ParcelRequest
+output:
+  oneOf:
+    - DirectCountyQuery
+    - ProxiedCountyQuery
+examples:
+  - given:
+      ParcelRequest:
+        pin: "10-003-013-20"
+        county: "Osceola"
+    expect:
+      DirectCountyQuery:
+        pin: "10-003-013-20"
+        county: "Osceola"
+        endpoint: "https://services8.arcgis.com/FmKMwUEmDSC75SQm/arcgis/rest/services/OsceolaCountyParcels_view/FeatureServer/0/query"
+  - given:
+      ParcelRequest:
+        pin: "062-026-300-020-00"
+        county: "Iosco"
+    expect:
+      ProxiedCountyQuery:
+        pin: "062-026-300-020-00"
+        county: "Iosco"
+        endpoint: "https://services3.arcgis.com/iosco/FeatureServer/0/query"
+        proxyHost: "app.fetchgis.com"
+        referer: "https://app.fetchgis.com/?currentMap=iosco"
+properties:
+  - name: the PIN is never altered by routing
+    description: >-
+      Routing decides where to ask, never what to ask about. Stated against
+      both branches because a router that rewrote the PIN on one path only
+      would otherwise pass.
+    expr:
+      eq:
+        - get: output.pin
+        - get: input.pin

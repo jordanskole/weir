@@ -1,0 +1,49 @@
+label: Township Lookup
+description: >-
+  The answer from Michigan's statewide Minor Civil Division layer: which
+  city/township contains this point. blue-ribbon's `fetchTownship`
+  (apps/etl/src/counties/shared/township-lookup.ts:35).
+
+  Used because some counties have no township field (Iosco) and one county's
+  own township layer is buggy (Roscommon maps ID 11 to both "Roscommon
+  Township" and "Nester Township"). So this is a third party we trust MORE
+  than the primary source -- provenance is not monotone in distance from the
+  county, which is the sort of thing a static zone label cannot express.
+fields:
+  pin:
+    classification: linkable
+    type: utf8
+    label: PIN
+    description: The parcel this township was resolved for
+    nullable: false
+    validations:
+      minLength: 8
+      maxLength: 40
+  township:
+    type: utf8
+    label: Township
+    description: >-
+      The Minor Civil Division name containing the parcel's centroid.
+
+      FRICTION (#3, the null-is-data problem): this is `nullable: false`, and
+      it should not be. blue-ribbon's rule 2 says a null is data -- a parcel
+      in a county with no digital layer legitimately has no township, and that
+      is a FACT to record, not a failure to retry. But in weir, if this edge
+      never arrives, `resolveIdentity`'s allOf never becomes ready, the run
+      reaches quiescence with residue, and `weir run` exits non-zero naming the
+      node. A legitimate null becomes a stalled run.
+
+      The fix weir offers is `oneOf: [TownshipLookup, TownshipUnavailable]` and
+      routing both. But then resolveIdentity needs
+      `allOf: [NormalizedParcel, anyOf: [TownshipLookup, TownshipUnavailable]]`
+      and NESTED READINESS CONDITIONS ARE NOT EXPRESSIBLE -- input is `allOf`
+      OR `anyOf` OR `gather`, never a composition of them. So I need an extra
+      node whose only job is to flatten two branches back into one nullable
+      edge. A node that exists to work around the type system is ceremony, and
+      in a domain where ragged coverage IS the subject matter I would be
+      writing that node constantly.
+    nullable: false
+    validations:
+      minLength: 2
+      maxLength: 100
+  "...Provenanced":

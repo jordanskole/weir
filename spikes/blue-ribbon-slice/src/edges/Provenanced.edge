@@ -1,0 +1,71 @@
+label: Provenanced
+description: >-
+  blue-ribbon's `Field<T>` metadata, minus the value. Spread into any edge
+  that carries a measured value, via `"...Provenanced":`.
+
+  This is a WIN and I want to be fair about it. blue-ribbon wraps every card
+  field as `Field<T> = { value, provenance, vintage }`, which at the storage
+  boundary flattens into five columns per logical field (see
+  packages/schema/src/duckdb-columns.ts -- 68 columns for 13 measurements).
+  weir has no generics, so `Field<T>` cannot be declared once. But the field
+  spread syntax gets me the four metadata fields without retyping them, and
+  the `value` is declared per-edge with its real type. That is close enough to
+  parametricity for this shape, and it is better than blue-ribbon's current
+  situation where the five-column expansion is hand-written in
+  duckdb-columns.ts AND hand-written again in store.ts's CREATE TABLE.
+
+  FRICTION (#6) remains, and it is the one most relevant to weir's
+  classification feature: `provenance` below is COMPUTED AT RUNTIME by
+  combineProvenance -- a lattice meet over the sources that actually answered.
+  weir's `classification:` is a STATIC declaration on a field. So blue-ribbon's
+  trust lattice cannot be a weir classification, and weir's classification
+  cannot be computed. They are the same algebra with different lifetimes, and
+  weir currently supports only one lifetime. Two lattices, one mechanism, is
+  the feature I actually want.
+fields:
+  provenance:
+    type: utf8
+    label: Provenance
+    description: >-
+      How much this value can be trusted, ranked verified > inferred >
+      aggregator > listing claim. A value derived from several sources takes
+      the weakest of them (combineProvenance in
+      packages/schema/src/provenance.ts).
+    nullable: false
+    enumValues:
+      - verified
+      - inferred
+      - aggregator
+      - listing claim
+  vintageAsOf:
+    type: utf8
+    label: Vintage As Of
+    description: ISO date this value was true as of
+    nullable: false
+    validations:
+      minLength: 10
+      maxLength: 10
+  vintageSourceType:
+    type: utf8
+    label: Vintage Source Type
+    description: How often the underlying source changes
+    nullable: false
+    enumValues:
+      - static
+      - periodic
+      - continuous
+      - manual-confirmation
+  vintageNote:
+    # FRICTION: this is free text, and it is the one field on a card that can
+    # carry anything at all. In blue-ribbon it holds methodology ("not yet
+    # computed"), but nothing stops it holding an owner name someone pasted
+    # while debugging. It should NOT inherit the classification of the value
+    # it annotates -- which means a per-field label is right here and a
+    # per-edge label would be wrong. Cuts in weir's favour.
+    classification: freetext
+    type: utf8
+    label: Vintage Note
+    description: Why this value is what it is, or why it is null
+    nullable: true
+    validations:
+      maxLength: 500

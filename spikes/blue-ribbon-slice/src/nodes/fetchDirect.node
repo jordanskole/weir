@@ -1,0 +1,25 @@
+label: Fetch Direct
+description: >-
+  Query a county's own ArcGIS FeatureServer for one parcel. The host performs
+  the HTTP.
+
+  Corresponds to `fetchParcel` in osceola.ts / manistee.ts / roscommon.ts.
+
+  FRICTION (#10, the one you asked about -- chatty effects): this node is fine
+  because a single-parcel query is one request. Its sibling
+  `fetchParcelsIntersecting` is not, and does not fit at all. See
+  fetchParcelPage.node, which I wrote as a deliberately non-conforming file.
+effect: http
+input: DirectCountyQuery
+output: RawParcelFeature
+examples:
+  - given:
+      DirectCountyQuery:
+        pin: "10-003-013-20"
+        county: "Osceola"
+        endpoint: "https://services8.arcgis.com/FmKMwUEmDSC75SQm/arcgis/rest/services/OsceolaCountyParcels_view/FeatureServer/0/query"
+    expect:
+      RawParcelFeature:
+        county: "Osceola"
+        sourceTrust: "verified"
+        featureJson: '{"properties":{"PIN":"10 003 013 20","OWNER":"SPRAGUE WILLIAM E","UNIT":"MIDDLE BRANCH TOWNSHIP","Shape__Area":163567.8},"geometry":{"type":"Polygon","coordinates":[[[-85.3,44.1],[-85.3,44.2],[-85.2,44.2],[-85.3,44.1]]]}}'

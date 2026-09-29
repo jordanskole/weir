@@ -1,0 +1,40 @@
+label: Parcel Request
+description: >-
+  One parcel to resolve, as it enters the pipeline. The external trigger:
+  one request is one run.
+
+  FRICTION (run granularity): this is a lie about blue-ribbon's real unit of
+  work. The real ETL is `batch.ts` over a Blue Ribbon corridor -- 17,839
+  parcels across 5 counties in one invocation, ending in ONE parquet file.
+  Modelling one parcel as one run makes the parquet write homeless, because
+  it is a fold across every run and "nothing joins across correlation ids by
+  design". See friction #4 in the report. I picked per-parcel because it is
+  the only granularity that actually runs.
+fields:
+  pin:
+    # The PIN is public record, but it is the join key into BS&A assessor
+    # records (owner name, mailing address, valuation). It is not pii; it is
+    # the capability to obtain pii. weir has one axis here and I want two.
+    # See friction #7.
+    classification: linkable
+    type: utf8
+    label: PIN
+    description: >-
+      The county parcel identification number, canonical dash-separated form.
+      Segment count and width are a county convention, not a fixed shape --
+      "10-003-013-20" (Osceola) and "062-026-300-020-00" (Iosco) are both valid.
+    nullable: false
+    validations:
+      minLength: 8
+      maxLength: 40
+  county:
+    type: utf8
+    label: County
+    description: Which Michigan county's adapter resolves this PIN
+    nullable: false
+    enumValues:
+      - Osceola
+      - Manistee
+      - Roscommon
+      - Iosco
+      - Otsego

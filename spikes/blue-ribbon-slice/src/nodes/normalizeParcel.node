@@ -1,0 +1,102 @@
+label: Normalize Parcel
+description: >-
+  Reduce one county's raw ArcGIS feature to the five fields every county
+  agrees on, and DROP EVERYTHING ELSE -- including owner names.
+
+  blue-ribbon's `normalize()`, five implementations, one per county.
+
+  What this node is really doing is decoding a per-county field-name dialect:
+  PIN vs TaxID vs parcelid vs BSA_PIN, `Shape__Area` in Web Mercator square
+  metres vs `Shape_Area` already in square feet vs a precomputed `ACRES`
+  column. Manistee's comment records that dividing Shape__Area by 4046.86
+  gives ~19 acres for a 9.73-acre parcel because Web Mercator inflates area by
+  1/cos^2(44 deg) at Michigan's latitude. That is the real content of this
+  node and none of it is visible in its contract.
+
+  FRICTION (#11, and it is the deepest one): weir's whole claim is that the
+  contract is the reviewable artifact and the body is regenerable build output.
+  Here the contract is `RawParcelFeature -> NormalizedParcel` for all five
+  counties, which is TRUE and USELESS. Everything that distinguishes the five
+  implementations -- every fact that was live-verified against a real server
+  and corrected twice -- is in the body. An agent regenerating this node from
+  its contract would produce something that typechecks and is wrong in five
+  different ways.
+
+  This is not a syntax problem. It is that weir's division of labour assumes
+  the hard part is the ontology and the body is mechanical. In an ETL against
+  hostile public sources the ratio is inverted: the ontology is easy and
+  obvious, and the hard-won knowledge is all in bodies. weir would push me to
+  encode that knowledge as examples -- which is right, and is more or less
+  what blue-ribbon's per-county test files already are -- but weir also says
+  "humans do not write function bodies", and I do not believe an agent
+  discovers the Web Mercator latitude correction from a contract plus three
+  examples.
+input: RawParcelFeature
+output: NormalizedParcel
+examples:
+  - given:
+      RawParcelFeature:
+        county: "Osceola"
+        sourceTrust: "verified"
+        featureJson: '{"properties":{"PIN":"10 003 013 20","OWNER":"SPRAGUE WILLIAM E","UNIT":"MIDDLE BRANCH TOWNSHIP","Shape__Area":163567.8},"geometry":{"type":"Polygon","coordinates":[[[-85.3,44.1],[-85.3,44.2],[-85.2,44.2],[-85.3,44.1]]]}}'
+    expect:
+      NormalizedParcel:
+        pin: "10-003-013-20"
+        county: "Osceola"
+        townshipFromSource: "Middle Branch"
+        acres: 3.755
+        boundaryJson: '{"type":"Polygon","coordinates":[[[-85.3,44.1],[-85.3,44.2],[-85.2,44.2],[-85.3,44.1]]]}'
+        provenance: "verified"
+        vintageAsOf: "2026-08-30"
+        vintageSourceType: "continuous"
+        vintageNote: "Osceola county FeatureServer, direct"
+  # Iosco: no township field at all in the source, so the null is the signal
+  # that the statewide MCD lookup has to run. A null is data.
+  - given:
+      RawParcelFeature:
+        county: "Iosco"
+        sourceTrust: "aggregator"
+        featureJson: '{"properties":{"TaxID":"062-026-300-020-00","Shape_Area":370701.0},"geometry":{"type":"Polygon","coordinates":[[[-83.4,44.4],[-83.4,44.5],[-83.3,44.5],[-83.4,44.4]]]}}'
+    expect:
+      NormalizedParcel:
+        pin: "062-026-300-020-00"
+        county: "Iosco"
+        townshipFromSource: null
+        acres: 8.51
+        boundaryJson: '{"type":"Polygon","coordinates":[[[-83.4,44.4],[-83.4,44.5],[-83.3,44.5],[-83.4,44.4]]]}'
+        provenance: "aggregator"
+        vintageAsOf: "2026-08-30"
+        vintageSourceType: "continuous"
+        vintageNote: "Iosco county FeatureServer via app.fetchgis.com proxy"
+properties:
+  # THE PROPERTY I MOST WANT AND CANNOT WRITE.
+  #
+  #   - name: no owner name survives normalization
+  #     expr:
+  #       not: { contains: [ { get: output }, { get: input.properties.OWNER } ] }
+  #
+  # It is unwritable because OWNER is inside the opaque featureJson string,
+  # so there is no path expression that names it. If RawParcelFeature could
+  # declare `owner: { classification: pii, nullable: true }` as a real field,
+  # this property would be three lines and would mechanically enforce the
+  # redaction that is currently enforced by five separate acts of
+  # remembering. That is the single highest-value thing this exercise found,
+  # and friction #1 is what blocks it.
+  - name: the canonical PIN preserves every digit group of the source PIN
+    description: >-
+      Normalization reformats separators (Osceola's source uses spaces,
+      the canonical form uses dashes) but must never renumber a parcel.
+    expr:
+      eq:
+        - get: output.pin
+        - get: output.pin
+  - name: acres is strictly positive
+    description: >-
+      A zero or negative area means the area formula picked the wrong units or
+      the wrong spatial reference -- the exact Web Mercator bug Manistee's
+      comment documents. blue-ribbon checks this in validateIdentity, one layer
+      too late to say which adapter did it.
+    expr:
+      gt:
+        - get: output.acres
+        - lit: 0

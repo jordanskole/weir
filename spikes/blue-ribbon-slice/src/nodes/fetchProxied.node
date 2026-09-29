@@ -1,0 +1,35 @@
+label: Fetch Proxied
+description: >-
+  Query a county FeatureServer THROUGH app.fetchgis.com. The PIN is disclosed
+  to the proxy operator; for corridor queries the full buffer geometry is too.
+
+  Corresponds to `fetchParcel` in iosco.ts / otsego.ts, which build
+  `${PROXY}proxy.ashx?${encodeURIComponent(targetUrl)}` and send a spoofed
+  Referer header.
+
+  Note the output: `sourceTrust: aggregator`, not `verified`. blue-ribbon does
+  not currently make that distinction -- OPEN_ITEMS.md:143-146 worries about
+  "depending on a re-aggregator rather than the county's own authoritative
+  source, a different trust posture than every other adapter", but that worry
+  lives in a markdown file and nothing in the code acts on it. Here it is the
+  node's declared output, and it propagates through combineProvenance
+  automatically.
+
+  THIS IS THE STRONGEST ARGUMENT FOR WEIR IN THE WHOLE EXERCISE. A concern
+  that was prose became a value that flows.
+effect: http
+input: ProxiedCountyQuery
+output: RawParcelFeature
+examples:
+  - given:
+      ProxiedCountyQuery:
+        pin: "062-026-300-020-00"
+        county: "Iosco"
+        endpoint: "https://services3.arcgis.com/iosco/FeatureServer/0/query"
+        proxyHost: "app.fetchgis.com"
+        referer: "https://app.fetchgis.com/?currentMap=iosco"
+    expect:
+      RawParcelFeature:
+        county: "Iosco"
+        sourceTrust: "aggregator"
+        featureJson: '{"properties":{"TaxID":"062-026-300-020-00","Shape_Area":370701.0},"geometry":{"type":"Polygon","coordinates":[[[-83.4,44.4],[-83.4,44.5],[-83.3,44.5],[-83.4,44.4]]]}}'

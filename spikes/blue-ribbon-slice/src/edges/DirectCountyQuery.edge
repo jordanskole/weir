@@ -1,0 +1,40 @@
+label: Direct County Query
+description: >-
+  A parcel query addressed to a county's own ArcGIS FeatureServer, with no
+  intermediary. Osceola, Manistee and Roscommon resolve this way.
+
+  This edge exists ONLY to make the trust boundary a type. In blue-ribbon the
+  distinction is invisible: `getCountyAdapter(county)` returns a
+  `CountyParcelAdapter`, and all five implementations satisfy the same
+  interface, so nothing in the type system says Iosco's parcels transit a
+  commercial proxy and Osceola's do not. Splitting the query into two edges is
+  the single clearest win weir produced in this exercise.
+fields:
+  pin:
+    classification: linkable
+    type: utf8
+    label: PIN
+    description: The parcel identification number being queried
+    nullable: false
+    validations:
+      minLength: 8
+      maxLength: 40
+  county:
+    type: utf8
+    label: County
+    description: The county whose FeatureServer is being queried
+    nullable: false
+    enumValues:
+      - Osceola
+      - Manistee
+      - Roscommon
+  endpoint:
+    type: utf8
+    label: Endpoint
+    description: >-
+      The county FeatureServer query URL. Verified-provenance source: the
+      county is the authoritative publisher of its own parcel geometry.
+    nullable: false
+    validations:
+      minLength: 10
+      maxLength: 500

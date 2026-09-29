@@ -1,0 +1,90 @@
+# Resolve one Michigan parcel's identity block: route by trust path, fetch,
+# normalize (dropping owner names), find a point inside it, ask the statewide
+# layer what township that point is in, and join the two halves.
+#
+# The run has finished when `resolveIdentity` has produced the identity block.
+#
+# ---------------------------------------------------------------------------
+# FRICTION (#4, RUN GRANULARITY -- the structural one you asked about)
+# ---------------------------------------------------------------------------
+#
+# `input: ParcelRequest` says one parcel is one run. That is NOT blue-ribbon's
+# unit of work, and the mismatch is not cosmetic.
+#
+# The real ETL (apps/etl/src/batch.ts) runs a Blue Ribbon corridor: 5 counties,
+# 17,839 parcels, ONE DuckDB table, ONE parquet file, ONE manifest.json whose
+# cardCount is 17839. The final step is `COPY cards TO ... (FORMAT PARQUET)` --
+# a fold over every parcel that was resolved.
+#
+# Neither granularity works:
+#
+#   ONE RUN PER PARCEL (what I wrote). 17,839 runs. The export has no home:
+#   it is a fold across correlation ids, and "nothing joins across correlation
+#   ids, by design". So the parquet write is simply NOT A WEIR NODE. It sits
+#   outside the program, reading the log. That may be the right answer -- it
+#   is a materialized view over the log, which is exactly what the readme says
+#   tables are -- but it means the thing the pipeline EXISTS TO PRODUCE is
+#   outside the model, and `output:`/`terminals:` describe the end of one
+#   parcel rather than the end of the job. A run that "finishes" 17,839 times
+#   and has produced nothing a human wanted is a strange definition of done.
+#
+#   ONE RUN PER CORRIDOR. Then the export is a `gather` and fits beautifully.
+#   But: the spread is 17,839 wide; one failed township lookup out of 3,265
+#   leaves residue and the whole corridor exits non-zero; the log for one run
+#   is millions of entries; and pagination still cannot be gathered (see
+#   fetchParcelPage.node #1). blue-ribbon's real semantics are "that parcel
+#   gets a null with a note, the other 3,264 still produce cards" -- a gather
+#   that tolerates holes and records them.
+#
+# MY ACTUAL ANSWER: blue-ribbon is ONE run per corridor, and weir cannot
+# express it today because of the gather-with-holes gap, not because of
+# anything about correlation ids. The per-parcel framing below is a workaround
+# I chose to get something runnable, and I want to be clear that it is a
+# retreat rather than a modelling decision.
+#
+# ---------------------------------------------------------------------------
+# The diamond, drawn, because the tree below obscures it:
+#
+#   routeCounty --oneOf--> directCountyFetch  [zone: county-gis] ----+
+#                     \                                              |
+#                      +-> proxiedCountyFetch [zone: third-party] ---+
+#                                                                    |
+#                                                          RawParcelFeature
+#                                                                    |
+#                                                            normalizeParcel
+#                                                              /          \
+#                                              ParcelCentroid             |
+#                                                    |                    |
+#                                      townshipResolution [zone:state-gis]|
+#                                                    |                    |
+#                                            TownshipLookup      NormalizedParcel
+#                                                    \                    /
+#                                                     +--> resolveIdentity
+#
+# Note the right-hand arc: NormalizedParcel feeds the join directly AND is the
+# ancestor of the other input. That is the lineage question flagged in
+# resolveIdentity.node, and it is the shape I am least sure weir supports.
+zone: server
+input: ParcelRequest
+output: ParcelIdentity
+terminals:
+  - resolveIdentity
+wiring:
+  routeCounty:
+    then:
+      directCountyFetch:
+        then:
+          normalizeParcel:
+            then:
+              parcelCentroid:
+                then:
+                  townshipResolution:
+                    then:
+                      resolveIdentity: {}
+              # The short side of the diamond: the normalized parcel is also
+              # an input to the join, alongside the township derived from it.
+              resolveIdentity: {}
+
+      proxiedCountyFetch:
+        then:
+          normalizeParcel: {}

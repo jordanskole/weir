@@ -1,0 +1,120 @@
+label: Resolve Identity
+description: >-
+  ##### THE FAN-IN #####
+
+  Join the normalized parcel with its resolved township into a complete
+  identity block, and combine their provenances -- the output is only as
+  trustworthy as the weaker input (combineProvenance,
+  packages/schema/src/provenance.ts).
+
+  This is blue-ribbon's provenance lattice meet expressed as weir's readiness
+  condition, and the two line up well. `combineProvenance` is literally a fold
+  taking the minimum rank over its inputs; `input: allOf` is literally "fire
+  when all of them exist". The algebra and the wiring agree.
+
+  ##### BUT: A LINEAGE QUESTION I COULD NOT ANSWER FROM THE DOCS #####
+
+  This is a DIAMOND WITH ONE SHORT SIDE:
+
+      NormalizedParcel ---------------------------+
+             |                                    |
+             +--> ParcelCentroid --> TownshipLookup --> resolveIdentity
+
+  One of the two inputs is the ANCESTOR of the other. The readme says a fan-in
+  fires "once per lineage group -- instances grouped by nearest common ancestor
+  and zipped positionally". The nearest common ancestor of NormalizedParcel#1
+  and TownshipLookup#1 is NormalizedParcel#1 -- itself. Does an instance form a
+  lineage group with its own descendant, or does grouping assume the two inputs
+  are siblings the way Dough and Oven are in the recipe?
+
+  I could not tell from readme.md or the join spec, so I RAN IT.
+
+  ##### ANSWER: IT WORKS. #####
+
+  Run brp-1, 6 firings / 6 pulses, no residue. The log:
+
+    ProxiedCountyQuery  step 1  <- [Run]
+    RawParcelFeature    step 2  <- [ProxiedCountyQuery]
+    NormalizedParcel    step 3  <- [RawParcelFeature]
+    ParcelCentroid      step 4  <- [NormalizedParcel]
+    TownshipLookup      step 5  <- [ParcelCentroid]
+    ParcelIdentity      step 6  <- [NormalizedParcel#3, TownshipLookup#5]
+
+  The fan-in cites an instance from step 3 and one from step 5 and fires
+  correctly. An instance DOES form a lineage group with its own descendant.
+  Leaving the question written down because it was a real doubt and the
+  behaviour is not stated anywhere in readme.md or the joins spec -- every
+  example in the repo joins siblings, and "carry the original forward
+  alongside something derived from it" is most of what ETL is. It deserves a
+  sentence in the spec and a test, since nothing currently pins it.
+input:
+  allOf:
+    - NormalizedParcel
+    - TownshipLookup
+output: ParcelIdentity
+examples:
+  - given:
+      NormalizedParcel:
+        pin: "062-026-300-020-00"
+        county: "Iosco"
+        townshipFromSource: null
+        acres: 8.51
+        boundaryJson: '{"type":"Polygon","coordinates":[[[-83.4,44.4],[-83.4,44.5],[-83.3,44.5],[-83.4,44.4]]]}'
+        provenance: "aggregator"
+        vintageAsOf: "2026-08-30"
+        vintageSourceType: "continuous"
+        vintageNote: "Iosco county FeatureServer via app.fetchgis.com proxy"
+      TownshipLookup:
+        pin: "062-026-300-020-00"
+        township: "Oscoda"
+        provenance: "verified"
+        vintageAsOf: "2026-08-30"
+        vintageSourceType: "periodic"
+        vintageNote: "statewide MCD point-in-polygon; county layer has no township field"
+    expect:
+      ParcelIdentity:
+        pin: "062-026-300-020-00"
+        county: "Iosco"
+        township: "Oscoda"
+        acres: 8.51
+        boundaryJson: '{"type":"Polygon","coordinates":[[[-83.4,44.4],[-83.4,44.5],[-83.3,44.5],[-83.4,44.4]]]}'
+        # Iosco came through the fetchgis proxy, so the parcel side is
+        # `aggregator`; the township side is `verified`; the meet is
+        # `aggregator`. This is the whole point of the fan-in.
+        provenance: "aggregator"
+        vintageAsOf: "2026-08-30"
+        vintageSourceType: "continuous"
+        vintageNote: "parcel: Iosco county FeatureServer via app.fetchgis.com proxy; township: statewide MCD point-in-polygon; county layer has no township field"
+properties:
+  - name: both inputs describe the same parcel
+    description: >-
+      Stated against BOTH inputs, following assembleEvidence.node's reasoning
+      in soc-triage: comparing the output to only one of them is a false green,
+      because an implementation handed parcel A and township B could project A
+      and pass. That is exactly the cross-parcel pairing this must prevent, and
+      in a corridor run with 3,265 concurrent parcels it is a real hazard
+      rather than a hypothetical one.
+    expr:
+      and:
+        - eq:
+            - get: output.pin
+            - get: input.NormalizedParcel.pin
+        - eq:
+            - get: output.pin
+            - get: input.TownshipLookup.pin
+  - name: combined provenance is never stronger than either input
+    description: >-
+      The lattice meet, asserted. This is the property blue-ribbon's
+      combineProvenance has a unit test for; here it is a contract obligation
+      on every implementation instead.
+
+      FRICTION (#12): I cannot actually write this, because expressing "rank of
+      X <= rank of Y" needs an ordering over an enum and the property language
+      has eq/gt/and/not over paths and literals. What I want is either an
+      `ordinal` field kind whose enumValues are ordered, or the ability to call
+      a declared pure function from a property. Written out as prose so you can
+      see the shape of what is missing.
+    expr:
+      eq:
+        - get: output.provenance
+        - get: output.provenance
