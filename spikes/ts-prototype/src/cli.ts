@@ -36,6 +36,7 @@ import { FileLog } from "./file-log.js";
 import { FileTrace } from "./file-trace.js";
 import { replayInvocation } from "./replay.js";
 import { verifyRun } from "./verify.js";
+import { bindResolvable, planFork } from "./fork.js";
 
 export interface CliResult {
   code: number;
@@ -51,6 +52,12 @@ usage
   weir run [dir] --impl <dir> --payload <file.json> [--effects <file.ts>]
                  [--log <file>] [--run <id>]
                                 elaborate, resolve implementations, and execute
+  weir fork [dir] --impl <dir> --from <run-id> [--trace <file>] [--log <file>]
+                 [--run <new-id>]
+                                re-execute a recorded run under the CURRENT
+                                declarations, into a new run. Effects are
+                                answered from the parent's trace, so no
+                                --effects and no credentials are needed.
   weir replay [dir] --impl <dir> --run <id> [--trace <file>]
                                 re-run each recorded invocation against its pinned implementation
   weir verify [dir] --impl <dir> --run <id> [--trace <file>]
@@ -686,6 +693,98 @@ async function replay(dir: string, flags: Map<string, string>): Promise<CliResul
 }
 
 /** Replays and compares. A mismatch is evidence the node read something its contract does not declare. */
+/**
+ * Re-execute a recorded run under the **current** declarations, into a new run
+ * (docs/superpowers/specs/2026-09-29-drift-and-fork.md).
+ *
+ * Takes no `--effects`: every effect is answered from the parent's trace, which
+ * is what makes a fork deterministic and runnable with no credentials.
+ */
+async function fork(dir: string, flags: Map<string, string>, parent: string): Promise<CliResult> {
+  const implRoot = flags.get("impl");
+  if (implRoot === undefined) return { code: 1, out: `✗ fork needs --impl.\n\n${USAGE}` };
+
+  let elaborated;
+  try {
+    elaborated = await elaborate(dir);
+  } catch (error) {
+    return failure(error, dir);
+  }
+
+  const tracePath = resolve(flags.get("trace") ?? "weir-trace.jsonl");
+  const entries = FileTrace.open(tracePath).entries(parent);
+  if (entries.length === 0) {
+    return { code: 1, out: `✗ no recorded invocations for run "${parent}" in ${tracePath}.` };
+  }
+
+  const plan = await planFork(elaborated, entries, resolve(implRoot));
+
+  // Reported before anything is written. Widening an edge moves the contract
+  // hash of every node naming it, and an implementation resolves *by* contract
+  // hash — so immediately after a widening those nodes have no accepted
+  // implementation. That is the acceptance gate working, and a fork that failed
+  // opaquely here would look like a bug in the fork rather than work still to
+  // do (spec §6).
+  if (plan.blocked.length > 0) {
+    return {
+      code: 1,
+      out: [
+        `✗ cannot fork "${parent}" yet — ${plan.blocked.length} node(s) need an accepted implementation`,
+        "",
+        ...plan.blocked.map((b) => `  blocked   ${b.node.padEnd(24)} contract ${b.contractHash}`),
+        "",
+        `  A changed declaration is a changed contract, and nothing has been`,
+        `  accepted against the new one. Draft and \`weir accept\` each, then fork.`,
+        ...(plan.divergesAt === undefined ? [] : ["", `  diverges at  ${plan.divergesAt}`]),
+      ].join("\n"),
+    };
+  }
+
+  const program = {
+    ...elaborated,
+    nodes: await bindResolvable(elaborated, resolve(implRoot)),
+  } as unknown as Parameters<typeof runNetlist>[0];
+
+  // The parent's own trigger, replayed: a fork re-asks the same question of a
+  // changed program, so inventing a new payload would change two things at once.
+  const originPayloads: Record<string, unknown> = {};
+  for (const entry of entries) {
+    if (program.wiring.origins.includes(entry.envelope.node) && !(entry.envelope.node in originPayloads)) {
+      originPayloads[entry.envelope.node] = entry.input;
+    }
+  }
+
+  const correlationId = flags.get("run") ?? `${parent}-fork-${crypto.randomUUID().slice(0, 8)}`;
+  const logPath = resolve(flags.get("log") ?? "weir.jsonl");
+  const log = FileLog.open(logPath);
+  const trace = FileTrace.open(tracePath);
+
+  const result = await runNetlist(
+    program,
+    { correlationId, originPayloads, forkedFrom: parent },
+    { log, trace, effects: plan.effects },
+  );
+
+  return {
+    code: result.unmet.length > 0 || (result.residue.length > 0 && result.stopped === "quiescence") ? 1 : 0,
+    out: [
+      result.unmet.length > 0 ? `✗ forked, but did not reach its declared end` : `✓ ${result.stopped}`,
+      "",
+      `  run       ${correlationId}`,
+      `  forked    ${parent}`,
+      ...(plan.divergesAt === undefined
+        ? [`  diverges  nothing — every contract matches the recording`]
+        : [`  diverges  ${plan.divergesAt}`]),
+      `  effects   ${plan.recordedEffects} answered from the recording, 0 performed`,
+      `  firings   ${result.firings}`,
+      `  log       ${logPath}`,
+      ...(result.unmet.length > 0
+        ? ["", ...result.unmet.map((u) => `  missing   ${u.missing.join(", ")} from ${u.terminals.join(", ")}`)]
+        : []),
+    ].join("\n"),
+  };
+}
+
 async function verify(dir: string, flags: Map<string, string>): Promise<CliResult> {
   const implRoot = flags.get("impl");
   const runId = flags.get("run");
@@ -796,6 +895,11 @@ export async function runCli(argv: string[], cwd: string): Promise<CliResult> {
       return run(rest[0] ?? cwd, flags);
     case "replay":
       return replay(rest[0] ?? cwd, flags);
+    case "fork": {
+      const parent = flags.get("from");
+      if (parent === undefined) return { code: 1, out: `✗ fork needs --from <run-id>.\n\n${USAGE}` };
+      return fork(rest[0] ?? cwd, flags, parent);
+    }
     case "verify":
       return verify(rest[0] ?? cwd, flags);
     case "plan": {

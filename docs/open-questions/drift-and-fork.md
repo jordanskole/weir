@@ -1,6 +1,6 @@
 # Drift at a boundary, and forking a run to act on it
 
-Status: specced, not built — `2026-09-29-drift-and-fork.md`, status draft.
+Status: resolved (2026-09-29). Two sub-questions inside it stay open.
 Last grounded: 2026-09-29.
 
 ## Where it came from
@@ -14,7 +14,12 @@ of what crosses a wire", and making
 [classification unsound](serialization-erases-classification.md) on every typed
 edge rather than only opaque ones.
 
-## What the spec proposes
+## Built 2026-09-29
+
+All of it: stripping in `logOutput`, `undeclared` on the envelope, the raw
+result kept in the trace on the failing path, and `weir fork`.
+
+## What the spec proposed
 
 Strip undeclared fields from the log, record their names on the envelope (values
 already reach the trace), and add `weir fork` — re-execute a recorded run under

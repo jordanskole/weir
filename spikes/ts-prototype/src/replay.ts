@@ -55,15 +55,16 @@ export async function replayInvocation(
   node: NodeDecl,
   implRoot: string,
 ): Promise<unknown> {
-  // An effect is where nondeterminism entered the run. Replaying it means
-  // feeding back what was recorded, never performing it again: a replay that
-  // re-fetches is not a replay
-  // (docs/superpowers/specs/2026-09-27-effects-are-data.md §3). The recorded
-  // result *is* the answer, so there is nothing to resolve and nothing to
-  // call — which is also why `verify` must not treat the comparison that
-  // follows as a check, since it can only ever agree with itself.
-  if (node.effect !== undefined) return entry.result;
-
+  // **The drift check comes first, for effects too.** It used to sit below the
+  // effect short-circuit, which made it unreachable for an effect node: a
+  // replay of one under a *changed* contract succeeded silently, handing back
+  // a recording of something the current declaration no longer describes.
+  // Found while building fork, whose whole subject is a changed contract
+  // (docs/superpowers/specs/2026-09-29-drift-and-fork.md §6) — and the two
+  // commands take opposite stances on exactly this, which is why they are two
+  // commands: replay asks "does the pinned implementation still produce this",
+  // where a changed contract is a reason to refuse; fork asks "does the current
+  // declaration accept what we recorded", where it is the point.
   const current = (await hashNode(node)).hash;
   if (current !== entry.envelope.contractHash) {
     throw new Error(
@@ -74,6 +75,15 @@ export async function replayInvocation(
         `migration story for contracts.`,
     );
   }
+
+  // An effect is where nondeterminism entered the run. Replaying it means
+  // feeding back what was recorded, never performing it again: a replay that
+  // re-fetches is not a replay
+  // (docs/superpowers/specs/2026-09-27-effects-are-data.md §3). The recorded
+  // result *is* the answer, so there is nothing to resolve and nothing to
+  // call — which is also why `verify` must not treat the comparison that
+  // follows as a check, since it can only ever agree with itself.
+  if (node.effect !== undefined) return entry.result;
 
   const nodeDef = await resolveImplementationAt(node, implRoot, entry.envelope.contractHash);
 

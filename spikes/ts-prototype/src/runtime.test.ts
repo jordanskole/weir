@@ -692,7 +692,19 @@ describe("runNetlist", () => {
 
       const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { birthday: { age: 41, nickname: null } } }, { log });
 
-      expect(log.latest("Person", "thread-1")).toEqual({ age: 42, nickname: null });
+      // **`nickname` is stripped, and it was never declared.** `Person` declares
+      // `age` and nothing else; this fixture's trigger payload and its
+      // implementation both carry a `nickname`, which until 2026-09-29 rode
+      // through into the durable log and this assertion pinned it there
+      // (`{ age: 42, nickname: null }`) without anyone intending to.
+      //
+      // That is the whole of the drift bug in one line: an edge was a lower
+      // bound, so the log held fields the declarations never mentioned
+      // (docs/superpowers/specs/2026-09-29-drift-and-fork.md).
+      expect(log.latest("Person", "thread-1")).toEqual({ age: 42 });
+      // Stripped, not silently dropped: the instance says what was removed.
+      const person = log.instances("Person", "thread-1").at(-1)!;
+      expect(person.envelope?.undeclared).toEqual(["Person.nickname"]);
       expect(log.latest("Pass", "thread-1")).toEqual({});
       expect(log.latest("Fail", "thread-1")).toBeUndefined();
       expect(result.residue).toEqual([]);

@@ -81,7 +81,7 @@
  *   still one past the longest path feeding it.
  */
 
-import { assertOutput, membrane } from "./membrane.js";
+import { assertOutput, assertPayload, membrane } from "./membrane.js";
 import type { InstanceEnvelope, InvocationContext, Log, LoggedInstance } from "./membrane.js";
 import { outputEdgeNames } from "./elaborate.js";
 import { gatherGroups, joinRows, selfAndAncestorIds } from "./lineage.js";
@@ -260,6 +260,45 @@ async function instanceEnvelope(
  * envelope (same `id` for every instance an `allOf`-output node emits;
  * different `schemaHash` per instance, see `instanceEnvelope`).
  */
+/**
+ * Strips a payload to its declared fields on the way into the log, and reports
+ * what it removed (docs/superpowers/specs/2026-09-29-drift-and-fork.md §2-§3).
+ *
+ * **Here rather than at the assertion sites**, which is a correction to the
+ * spec's own framing. It put the strip on `assertPayload`'s callers — but a
+ * *pure* node's output is never asserted at all (the acceptance gate covers it,
+ * per 2026-09-27-effects-are-data.md), and stripping a node's *input* does not
+ * clean the log, because the instance was written when it was produced. The one
+ * place every instance of every output kind reaches the log is this function,
+ * so this is the only place that makes the log's contents match the
+ * declarations.
+ *
+ * A payload that fails assertion is logged **unchanged**. Asserting is not this
+ * function's job — the membrane and the effect wrapper do it, and throwing here
+ * would turn a reporting step into a second, later gate with worse messages.
+ */
+function stripForLog(
+  edge: AnyEdgeDef | undefined,
+  payload: unknown,
+): { payload: unknown; undeclared: string[] } {
+  if (edge === undefined) return { payload, undeclared: [] };
+  const undeclared: string[] = [];
+  try {
+    return { payload: assertPayload(edge, payload, undeclared), undeclared };
+  } catch {
+    return { payload, undeclared: [] };
+  }
+}
+
+/** The instance envelope, carrying whatever the strip removed. */
+function withDrift(
+  envelope: InstanceEnvelope | undefined,
+  undeclared: string[],
+): InstanceEnvelope | undefined {
+  if (envelope === undefined || undeclared.length === 0) return envelope;
+  return { ...envelope, undeclared };
+}
+
 async function logOutput(
   log: Log,
   output: OutputSpec,
@@ -268,7 +307,13 @@ async function logOutput(
   envelope: Envelope | undefined,
 ): Promise<void> {
   if (output.kind === "single") {
-    log.append(output.edge.name, correlationId, result, await instanceEnvelope(envelope, output.edge));
+    const clean = stripForLog(output.edge, result);
+    log.append(
+      output.edge.name,
+      correlationId,
+      clean.payload,
+      withDrift(await instanceEnvelope(envelope, output.edge), clean.undeclared),
+    );
     return;
   }
 
@@ -295,11 +340,14 @@ async function logOutput(
     const collectionId = log.append(manyEdgeName(output.edge.name), correlationId, result, schemaHash);
     if (typeof result !== "object" || result === null || Array.isArray(result)) return;
     for (const entry of Object.values(result as Record<string, unknown>)) {
+      const clean = stripForLog(output.edge, entry);
       log.append(
         output.edge.name,
         correlationId,
-        entry,
-        schemaHash === undefined ? undefined : { ...schemaHash, causationIds: [collectionId] },
+        clean.payload,
+        schemaHash === undefined
+          ? undefined
+          : withDrift({ ...schemaHash, causationIds: [collectionId] }, clean.undeclared),
       );
     }
     return;
@@ -314,14 +362,26 @@ async function logOutput(
     // `LoggedInstance` doc comment). Accepted rather than thrown — failing
     // an entire run over one node's bad tag would be the wrong trade.
     const edge = output.edges.find((e) => e.name === tagged.edge);
-    log.append(tagged.edge, correlationId, tagged.payload, await instanceEnvelope(envelope, edge));
+    const clean = stripForLog(edge, tagged.payload);
+    log.append(
+      tagged.edge,
+      correlationId,
+      clean.payload,
+      withDrift(await instanceEnvelope(envelope, edge), clean.undeclared),
+    );
     return;
   }
   const tags = result as { edge: string; payload: unknown }[];
   for (const tagged of tags) {
     // Same tradeoff as the oneOf lookup above.
     const edge = output.edges.find((e) => e.name === tagged.edge);
-    log.append(tagged.edge, correlationId, tagged.payload, await instanceEnvelope(envelope, edge));
+    const clean = stripForLog(edge, tagged.payload);
+    log.append(
+      tagged.edge,
+      correlationId,
+      clean.payload,
+      withDrift(await instanceEnvelope(envelope, edge), clean.undeclared),
+    );
   }
 }
 
@@ -334,6 +394,15 @@ export interface Run {
   correlationId: string;
   originPayloads: Record<string, unknown>;
   identity?: PayloadOf<typeof Identity>;
+  /**
+   * The run this one was forked from, recorded on the `Run` root.
+   *
+   * Present only on a fork. The parent is never modified — the log is
+   * append-only and the recorded run is the historical record of what actually
+   * crossed the wire — so a fork is a second traversal, which is a second run
+   * (docs/superpowers/specs/2026-09-29-drift-and-fork.md §4).
+   */
+  forkedFrom?: string;
 }
 
 /**
@@ -540,7 +609,7 @@ export function resolveTrigger(
 }
 
 export async function runNetlist(program: Program, run: Run, host: Host): Promise<RunResult> {
-  const { correlationId, originPayloads, identity } = run;
+  const { correlationId, originPayloads, identity, forkedFrom } = run;
   const { log, trace, budget, maxPulses = DEFAULT_MAX_PULSES, effects = {} } = host;
 
   // Before anything is appended, including the run root: a program whose
@@ -568,6 +637,11 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
   const rootId = log.append(RUN_ROOT_EDGE, correlationId, {
     correlationId,
     triggeredAt: new Date().toISOString(),
+    // Present only on a fork. Cross-run ancestry, explicit and queryable,
+    // without disturbing `log.instances(edge, correlationId)` — which every
+    // reader in the system uses, and which a shared-run representation would
+    // have broken (docs/superpowers/specs/2026-09-29-drift-and-fork.md §4).
+    ...(forkedFrom !== undefined && { forkedFrom }),
   });
 
   const consumed = new Map<string, Set<number>>();
@@ -606,6 +680,13 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
     let result: unknown;
     let envelope: Envelope | undefined;
     let input: unknown;
+    /**
+     * What an effect handler returned, before its result was asserted.
+     *
+     * Only ever set on the effect path, and only read when the invocation
+     * failed — a successful one's `result` already *is* the raw value.
+     */
+    let rawEffectResult: unknown;
     if (nodeDef.input.kind === "single") {
       let payload: unknown;
       if (origins.has(nodeName)) {
@@ -643,6 +724,14 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
                 // around it.
                 fn: async (input: unknown) => {
                   const produced = await effects[nodeDef.effect!]!(input);
+                  // Captured **before** asserting, so a rejected result is not
+                  // erased by its own rejection. Without this the trace records
+                  // the `Failed_X` payload and the shape the handler actually
+                  // returned is recorded nowhere — not the log, not the trace —
+                  // so there is nothing to re-validate against a widened
+                  // declaration, which is exactly the run most worth forking
+                  // (docs/superpowers/specs/2026-09-29-drift-and-fork.md §3).
+                  rawEffectResult = produced;
                   assertOutput(nodeDef.output, produced);
                   return produced;
                 },
@@ -763,7 +852,13 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
     // trace instead of being cleanly excluded from it. Covered by
     // `runtime.test.ts`'s "a bad scope declaration" tests.
     if (envelope !== undefined) {
-      trace?.record({ envelope, input, result });
+      // A failed effect records what the handler *returned*, not the failure
+      // built from it. `fork` re-validates a recorded result against the
+      // current declarations, and a run that failed assertion is the one whose
+      // recorded result most needs to be the observed shape (spec §3, §5b).
+      const recorded =
+        rawEffectResult !== undefined && looksLikeFailed(result) ? rawEffectResult : result;
+      trace?.record({ envelope, input, result: recorded });
     }
     if (looksLikeFailed(result)) {
       // The synthesized Failed_* edge is a real emitted instance too — hash

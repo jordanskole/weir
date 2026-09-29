@@ -18,7 +18,7 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-## Open (26)
+## Open (27)
 
 Live. Ordered alphabetically, not by priority.
 
@@ -43,6 +43,7 @@ Live. Ordered alphabetically, not by priority.
 - [Pagination cannot be gathered, because a cycle is not a spread](open-questions/pagination-cannot-be-gathered.md)
 - [A property cannot quantify over a gathered collection](open-questions/properties-over-collections.md)
 - [Prose blocks on node declarations](open-questions/prose-on-node-declarations.md)
+- [`weir replay` exits zero even when every invocation refused](open-questions/replay-exit-code.md)
 - [Run granularity: a batch job's output has nowhere to live](open-questions/run-granularity.md)
 - [Is the sealed contract's length a cost nobody is accounting for?](open-questions/sealed-contract-length.md)
 - [Serialization erases classification at exactly the crossing it describes](open-questions/serialization-erases-classification.md)
@@ -55,16 +56,13 @@ Cannot be built as stated — the reason is in the file.
 
 - [Positional identity: `birthday.then.birthday` should run twice](open-questions/positional-identity.md) — **blocked** — two shipped things use the same syntax with opposite
 
-## Specced, not built (1)
-
-- [Drift at a boundary, and forking a run to act on it](open-questions/drift-and-fork.md) — specced, not built — `2026-09-29-drift-and-fork.md`, status draft
-
-## Resolved (15)
+## Resolved (16)
 
 Kept because the reasoning is worth more than the answer, and because several specs and code comments cite them.
 
 - [The idiomatic way to branch makes every such run red](open-questions/branching-makes-every-run-red.md) — resolved (2026-09-29)
 - [No way to say "these N things vary only in configuration"](open-questions/configuration-versus-ontology.md) — resolved (2026-09-29) for the configuration half. The arithmetic half is open by design
+- [Drift at a boundary, and forking a run to act on it](open-questions/drift-and-fork.md) — resolved (2026-09-29). Two sub-questions inside it stay open
 - [Should `membrane()` build the envelope before asserting input?](open-questions/envelope-before-assert.md) — resolved (2026-09-24 — build it first)
 - [YAML examples are tagged, TypeScript examples are bare, and the gate only knew the bare form](open-questions/examples-reach-the-gate.md) — resolved (2026-09-28)
 - [A fan-in fed by two independent origin nodes never fires](open-questions/fan-in-fed-by-two-independent-origins.md) — resolved (2026-09-25, the run root)

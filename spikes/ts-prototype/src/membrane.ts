@@ -135,13 +135,31 @@ function validationErrors(key: string, field: FieldDef, value: string | number |
  * referenced edge declares no `index` at all — that's a declaration bug,
  * not bad input data.
  */
-export function assertPayload<E extends AnyEdgeDef>(edge: E, payload: unknown): PayloadOf<E> {
+export function assertPayload<E extends AnyEdgeDef>(
+  edge: E,
+  payload: unknown,
+  undeclared?: string[],
+  path = edge.name,
+): PayloadOf<E> {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     throw new Error(`${edge.name}: expected an object, got ${describeType(payload)}.`);
   }
 
   const record = payload as Record<string, unknown>;
   const errors: string[] = [];
+  /**
+   * Only the declared fields, which is what this returns
+   * (docs/superpowers/specs/2026-09-29-drift-and-fork.md §2).
+   *
+   * Until then this returned `record` untouched, so an edge was a **lower
+   * bound** — declared fields must be present and well-typed, and anything else
+   * rode along into the durable log — while `design.md` §1 called it "the
+   * complete description of what crosses a wire". The gap made classification
+   * unsound on every typed edge, not only opaque ones: `weir sys` reads
+   * declared fields' labels, so an owner name arriving as a field nobody
+   * declared crossed a zone boundary reported as carrying nothing.
+   */
+  const stripped: Record<string, unknown> = {};
 
   for (const [key, fieldDef] of Object.entries(edge.fields)) {
     const value = record[key];
@@ -159,9 +177,16 @@ export function assertPayload<E extends AnyEdgeDef>(edge: E, payload: unknown): 
         );
         continue;
       }
+      const strippedCollection: Record<string, unknown> = {};
       for (const [entryKey, entryValue] of Object.entries(value)) {
         try {
-          const validated = assertPayload(collectionEdge, entryValue) as Record<string, unknown>;
+          const validated = assertPayload(
+            collectionEdge,
+            entryValue,
+            undeclared,
+            `${path}.${key}["${entryKey}"]`,
+          ) as Record<string, unknown>;
+          strippedCollection[entryKey] = validated;
           const actualKey = validated[collectionEdge.index];
           // Object keys are always strings, even when the index field's own type isn't
           // (a uint8 index like 8 stores under the key "8") — compare by string form.
@@ -174,12 +199,17 @@ export function assertPayload<E extends AnyEdgeDef>(edge: E, payload: unknown): 
           errors.push(`${key}["${entryKey}"]: ${(cause as Error).message}`);
         }
       }
+      stripped[key] = strippedCollection;
       continue;
     }
 
     if ("fields" in fieldDef) {
       try {
-        assertPayload(fieldDef, value);
+        // The return is *used*, which is what makes stripping reach a nested
+        // edge. Discarding it here would leave an undeclared field one level
+        // down in the payload while the top level looked clean — the quiet
+        // half of the bug this fixes.
+        stripped[key] = assertPayload(fieldDef, value, undeclared, `${path}.${key}`);
       } catch (cause) {
         errors.push(`${key}: ${(cause as Error).message}`);
       }
@@ -191,6 +221,7 @@ export function assertPayload<E extends AnyEdgeDef>(edge: E, payload: unknown): 
       if (value !== literalField.literal) {
         errors.push(`${key} is pinned to ${literalField.literal}, got ${describeType(value)}`);
       }
+      stripped[key] = value;
       continue;
     }
 
@@ -200,6 +231,7 @@ export function assertPayload<E extends AnyEdgeDef>(edge: E, payload: unknown): 
       if (!("nullable" in field && field.nullable === true)) {
         errors.push(`${key} is null, but this field isn't nullable`);
       }
+      stripped[key] = null;
       continue;
     }
 
@@ -209,13 +241,25 @@ export function assertPayload<E extends AnyEdgeDef>(edge: E, payload: unknown): 
     } else {
       errors.push(...validationErrors(key, field, value as string | number | boolean));
     }
+    stripped[key] = value;
+  }
+
+  // Collected, never an error. An additive upstream change is the benign,
+  // common case, and rejecting halts a pipeline on every one of them; a
+  // *renamed* or *retyped* field leaves its declared name missing or wrong,
+  // which is already caught above. So stripping only ever silences the additive
+  // case — and §3 is what stops it being silent (spec §2).
+  if (undeclared !== undefined) {
+    for (const key of Object.keys(record)) {
+      if (!(key in edge.fields)) undeclared.push(`${path}.${key}`);
+    }
   }
 
   if (errors.length > 0) {
     throw new Error(`${edge.name}: ${errors.join("; ")}.`);
   }
 
-  return record as PayloadOf<E>;
+  return stripped as PayloadOf<E>;
 }
 
 /**
@@ -230,6 +274,21 @@ export function assertPayload<E extends AnyEdgeDef>(edge: E, payload: unknown): 
  */
 export interface InstanceEnvelope extends Envelope {
   schemaHash: string;
+  /**
+   * Field names present in the emitted payload that the declared edge does not
+   * declare — stripped before this instance reached the log
+   * (docs/superpowers/specs/2026-09-29-drift-and-fork.md §3).
+   *
+   * **Names here, values in the trace.** The trace already records the raw
+   * result, so the values survive without being copied anywhere new, and the
+   * sensitive half stays in one place rather than two. This carries only what
+   * an agent needs to *trigger* on.
+   *
+   * Absent when nothing drifted, so its presence is the signal. Not
+   * fingerprinted and not part of `schemaHash`: an observation about one
+   * invocation, not a declaration.
+   */
+  undeclared?: string[];
 }
 
 /**

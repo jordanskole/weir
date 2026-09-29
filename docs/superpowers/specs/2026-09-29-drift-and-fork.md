@@ -1,6 +1,6 @@
 # Drift is data, and a fork is how you act on it
 
-Status: draft.
+Status: implemented.
 
 ## Motivation
 
@@ -270,3 +270,53 @@ break-proof showed — including breaks that do **not** redden.
 15. The `Failed_X` reason names the observed keys.
 16. Every existing example still elaborates and runs, and no logged payload
     anywhere gains or loses a field.
+
+## What the build found
+
+**The strip does not belong at the assertion sites, which is where §2 put it.**
+Two reasons, both discovered by trying it:
+
+- A **pure node's output is never asserted at all.** `assertOutput` is called
+  only by the effect wrapper and by `fuzz`; a drafted implementation's output is
+  guaranteed by the acceptance gate instead
+  (2026-09-27-effects-are-data.md). So stripping at assertion time would have
+  cleaned effect outputs and left every pure node's alone.
+- **Stripping a node's *input* does not clean the log**, because the instance
+  was written when it was *produced*, long before anything consumed it.
+
+The one place every instance of every output kind reaches the log is
+`logOutput`, so that is where the strip lives. §2's hazard — "a strip whose
+return value the caller discards is a silent no-op" — was real and was hit
+exactly once, on `assertOutput`, which is `void`.
+
+**An existing test was pinning the old behaviour, without meaning to.**
+`runtime.test.ts`'s person-birthday run used an implementation returning
+`{ age, nickname: null }` against a `Person` edge declaring only `age`, and
+asserted the logged payload was `{ age: 42, nickname: null }`. No comment, no
+intent — an undeclared field flowed from the trigger payload through the whole
+run and into an assertion. That is the entire bug in one line of a test nobody
+was suspicious of.
+
+**Recorded effects are matched by input, not by position or causation.** A fork
+mints new instance ids, so recorded `causationIds` cannot match; and firing
+*order* may legitimately diverge from the parent's the moment a widened edge
+changes what a downstream node produces, which is the point of forking. The
+request itself is the one key that survives both. The cost, taken deliberately:
+a fork that asks something the parent never asked has no recorded answer and
+fails, rather than reaching the network — which is correct, since a fork that
+could silently make a live call would be neither reproducible nor credential-free.
+
+**The blocked case needs a node that *was* implemented.** A first test built a
+program whose pure node had no implementation at all and got "no recorded
+invocations" instead: an unimplemented node stops `weir run` before anything
+executes, so there is no trace to fork from. The blocked case arises only for a
+node whose contract *moved* after it was accepted — which is the real sequence,
+and makes the loop detect → widen → **re-accept downstream** → fork.
+
+**§6's unreachable refusal is fixed, and it exposed a second one.** `replay`'s
+contract-drift check now runs before the effect short-circuit, so replaying an
+effect node under a changed contract refuses instead of silently handing back a
+recording. Writing that test found that `weir replay` catches each refusal and
+still **exits zero** — pinned by a test and recorded in
+`docs/open-questions/replay-exit-code.md` rather than changed, since it alters
+what `replay` means to anything scripting it.
