@@ -23,6 +23,50 @@ export interface Crossing {
   edge: string;
   fromZone: string;
   toZone: string;
+  /**
+   * The classifications the crossing edge carries, from its fields — `design.md`
+   * §7's other half. Sorted and deduplicated; empty when the edge carries
+   * nothing labelled.
+   *
+   * This is what turns "where are the network hops" into §7's actual claim:
+   * *"no edge carrying an unredacted PII field may cross into a non-client
+   * zone"* is a question about exactly this list.
+   */
+  carries: string[];
+}
+
+type FieldLike = { classification?: string; fields?: Record<string, unknown>; many?: unknown };
+
+/**
+ * Every classification an edge carries, walking compound and `many` fields to
+ * any depth.
+ *
+ * Nested, because an edge's sensitivity is not only in its own scalar fields: a
+ * `Person` embedded in an `Order` takes its labels with it, and a leakage query
+ * that only read the top level would pass an edge whose PII is one level down.
+ * That is the same recursive shape `assertPayload` and `fingerprint` already
+ * walk — plus a cycle guard those two do not carry. They assume acyclic
+ * definitions, which `elaborate` enforces; this runs on a query path over
+ * author-supplied shapes, and without the guard a self-reference throws
+ * `RangeError: Maximum call stack size exceeded`.
+ */
+export function classificationsOf(edge: { fields?: Record<string, unknown> }): string[] {
+  const found = new Set<string>();
+  const walk = (fields: Record<string, unknown>, seen: Set<unknown>): void => {
+    for (const raw of Object.values(fields)) {
+      if (raw === null || typeof raw !== "object") continue;
+      const field = raw as FieldLike;
+      if (typeof field.classification === "string") found.add(field.classification);
+      const nested = (field.many ?? field) as FieldLike;
+      // Guard against a self-referential edge definition rather than assuming
+      // acyclicity: `fingerprint` assumes it, but this walks author-supplied
+      // shapes on a query path where a hang would be the whole command.
+      if (nested.fields === undefined || seen.has(nested)) continue;
+      walk(nested.fields, new Set(seen).add(nested));
+    }
+  };
+  walk(edge.fields ?? {}, new Set());
+  return [...found].sort();
 }
 
 type Zoned = {
@@ -30,6 +74,8 @@ type Zoned = {
   wiring: Wiring;
   topologies: CompositeDecl[];
   declaredIn: Record<string, string>;
+  /** Optional so a hand-built fixture need not carry a whole edge table to ask about placement; a crossing then carries no classifications. */
+  edges?: Record<string, { fields?: Record<string, unknown> }>;
 };
 
 /**
@@ -75,7 +121,9 @@ export function crossings(program: Zoned): Crossing[] {
       const toZone = zones[to];
       if (toZone === undefined || toZone === fromZone) continue;
       for (const edge of inputEdgeNames(program.nodes[to]!.input)) {
-        if (produced.has(edge)) found.push({ from, to, edge, fromZone, toZone });
+        if (!produced.has(edge)) continue;
+        const def = (program.edges ?? {})[edge];
+        found.push({ from, to, edge, fromZone, toZone, carries: def === undefined ? [] : classificationsOf(def) });
       }
     }
   }

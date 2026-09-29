@@ -19,6 +19,10 @@ fields:
       minLength: 1
       maxLength: 50
   value:
+    # The actual identifier — a principal's account name or an asset's hostname.
+    # Labelled because this is what leaves for the third-party enrichment zone,
+    # which is exactly the question design.md §7 wants answerable.
+    classification: pii
     type: utf8
     label: Value
     description: The entity's concrete value — the account name, the hostname

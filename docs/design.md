@@ -427,6 +427,23 @@ crossing, since nothing was claimed about where they run. `weir sys` reports the
 classification labels (PII, financial) combine with zones to make leakage a static
 query: *no edge carrying an unredacted PII field may cross into a non-client zone.*
 
+**Built as the query, not the policy**
+([spec](superpowers/specs/2026-09-28-field-level-classification.md)). A field declares
+`classification:`, an open string like `zone:` — PII and financial are examples here, not
+an enum — and it is part of the contract hash, on the precedent `relation` sets: metadata
+describing what the data *means* is contract, and a classification additionally decides
+whether a topology is legal. `weir sys` reports what each zone crossing carries, walking
+compound and `many` fields so a label one level down is not missed.
+
+What is *not* built is enforcement, because the rule has nowhere to live: it is
+parameterised by a label and a set of zones, and neither is declared anywhere. A
+candidate is recorded — a zone declaring what it `admits:` — rather than invented to make
+the feature feel finished.
+
+Note "unredacted" needs no flag. The tokenization pattern below is a fission/join pair, so
+a `RedactedPerson` is simply an edge whose fields carry no classification, and the query
+then reports no PII crossing because there is none.
+
 Client-side tokenization is a fission/join pair, not an inverse:
 
 ```

@@ -3,7 +3,11 @@
  *
  * Produces a deterministic SHA-256 fingerprint of an EdgeDef's structural
  * shape. Only structural fields are included — changes to description, unit,
- * or sourceKey do not affect the hash. `validations` (min/max/minLength/
+ * or sourceKey do not affect the hash. `classification` (design.md §7) is
+ * structural for the same reason `relation` is: metadata describing what the
+ * data *means* is contract, and a classification additionally decides whether a
+ * topology is legal, so a silent change to one could make an already-accepted
+ * program illegal with nothing noticing. `validations` (min/max/minLength/
  * maxLength/pattern) is structural: it changes what values are valid, same
  * as enumValues. A compound (nested-edge) field fingerprints as that edge's own
  * fingerprint, recursively — a change anywhere in a nested edge's shape changes
@@ -34,6 +38,7 @@ import type {
 } from "./types.js";
 
 interface ScalarFieldFingerprint {
+  classification?: string;
   type: string;
   measure?: string;
   format?: string;
@@ -92,6 +97,11 @@ function fingerprint(edge: AnyEdgeDef): EdgeFingerprint {
     if (f.measure !== undefined) entry.measure = f.measure;
     if (f.format !== undefined) entry.format = f.format;
     if (f.enumValues !== undefined) entry.enumValues = [...f.enumValues].sort();
+    // Hashed for the same reason `relation` is: metadata describing what the
+    // data means is contract, not cosmetics. A classification also decides
+    // whether a topology is legal, so a silent change to one would let an
+    // already-accepted program become illegal without anything noticing.
+    if (f.classification !== undefined) entry.classification = f.classification;
     if (f.relation !== undefined) {
       entry.relation = {
         edge: f.relation.edge,

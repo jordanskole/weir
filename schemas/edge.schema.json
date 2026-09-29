@@ -81,6 +81,10 @@
               "unit": {
                 "type": "string"
               },
+              "classification": {
+                "type": "string",
+                "minLength": 1
+              },
               "enumValues": {
                 "type": "array",
                 "items": {

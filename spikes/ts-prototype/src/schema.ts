@@ -121,6 +121,12 @@ function fieldPropertiesSchema(): { properties: Record<string, object>; allOf: o
       enum: ["id", "enum", "text", "date", "datetime", "count", "percentage"],
     },
     unit: { type: "string" },
+    // What kind of sensitive thing this field carries (design.md §7).
+    // Deliberately an open string, like a topology's `zone`: §7 names PII and
+    // financial as examples, and a closed enum is easy to add later and
+    // impossible to remove once an ontology depends on a label this repo did
+    // not think of.
+    classification: { type: "string", minLength: 1 },
     enumValues: { type: "array", items: { type: "string" } },
     sourceKey: { type: "string" },
     relation: {

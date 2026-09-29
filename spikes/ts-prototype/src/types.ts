@@ -59,6 +59,22 @@ interface FieldDefBase<T extends ScalarType> {
   unit?: string;
   enumValues?: string[];
   relation?: Relation;
+  /**
+   * What kind of sensitive thing this field carries — `design.md` §7's
+   * field-level classification, the half that combines with zones to make
+   * leakage a static query rather than a review comment.
+   *
+   * **Deliberately an open string, like `zone`.** §7 names PII and financial as
+   * *examples*; a closed enum is easy to add later and impossible to remove once
+   * somebody's ontology depends on a label this repo did not think of.
+   *
+   * **Fingerprinted** (hash.ts), on the precedent `relation` sets: metadata that
+   * describes what the data *means* is part of the contract, even when it does
+   * not change what `Fn` receives. A classification decides whether a topology
+   * is legal, which is a stronger claim to contract-membership than `relation`
+   * has.
+   */
+  classification?: string;
   validations?: Validation<T>;
   /** Original field name in an upstream source, where this edge is derived from one. */
   sourceKey?: string;

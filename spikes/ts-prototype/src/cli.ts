@@ -407,7 +407,10 @@ async function sys(dir: string, flags: Map<string, string>, json: boolean): Prom
     for (const [zone, nodes] of [...byZone].sort()) lines.push(`    ${zone.padEnd(14)} ${nodes.sort().join(", ")}`);
     lines.push("", `  crossings`);
     if (hops.length === 0) lines.push(`    none — no edge crosses a declared zone boundary`);
-    for (const h of hops) lines.push(`    ${h.edge.padEnd(20)} ${h.from} (${h.fromZone}) -> ${h.to} (${h.toZone})`);
+    for (const h of hops) {
+      const carries = h.carries.length === 0 ? "" : `  carries ${h.carries.join(", ")}`;
+      lines.push(`    ${h.edge.padEnd(20)} ${h.from} (${h.fromZone}) -> ${h.to} (${h.toZone})${carries}`);
+    }
   }
   if (report.unroutedFailureEdges > 0) {
     lines.push(`    ${String(report.unroutedFailureEdges).padStart(2)} synthesized Failed_* edge(s), none routed`);
