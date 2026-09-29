@@ -306,6 +306,64 @@ export function parseEdgeFile(yamlText: string, name: string, resolveField: Fiel
   });
 }
 
+/**
+ * Parses a `.envelope` file — **through the edge parser**
+ * (docs/superpowers/specs/2026-09-29-the-declared-envelope.md §2).
+ *
+ * Reusing `parseEdgeFile` is the point rather than a convenience. An envelope
+ * gets field types, validations, `enumValues`, nested edges and
+ * `classification` for free, and nothing new has to be invented for any of it —
+ * so a classification on an envelope field is the *same* one `weir sys` already
+ * queries, and metadata crossing a zone boundary is visible to the leakage
+ * query with no second mechanism.
+ *
+ * What it adds is the two rules that cannot be defaulted.
+ */
+export function parseEnvelopeFile(
+  yamlText: string,
+  name: string,
+  resolveField: FieldResolver,
+): AnyEdgeDef {
+  const envelope = parseEdgeFile(yamlText, name, resolveField);
+
+  for (const [key, fieldDef] of Object.entries(envelope.fields)) {
+    // Nested and collection fields are edges, and an edge has no combine rule
+    // of its own — merging one would need a rule per leaf, which is a question
+    // nothing has asked yet.
+    if ("many" in fieldDef || "fields" in fieldDef || "literal" in fieldDef) {
+      throw new Error(
+        `envelope field "${key}": an envelope carries scalar fields only — a nested or collection field has no combine rule of its own.`,
+      );
+    }
+    const field = fieldDef as FieldDef;
+
+    // **No default**, deliberately (spec §3). Every wrong guess here is silent:
+    // `meet` where `same` was meant merges two tokens about different things
+    // without complaining, which is precisely the cross-item join the lineage
+    // work exists to prevent.
+    if (field.combine === undefined) {
+      throw new Error(
+        `envelope field "${key}": declare "combine" — meet (weakest wins), join (strongest wins), ` +
+          `or same (all inputs must agree). There is no default, because guessing wrong here fails silently.`,
+      );
+    }
+    if (field.combine !== "same") {
+      if (field.ordinal !== true) {
+        throw new Error(
+          `envelope field "${key}": "combine: ${field.combine}" needs "ordinal: true" — ` +
+            `${field.combine} compares values, and nothing says what order they are in.`,
+        );
+      }
+      if (field.enumValues === undefined || field.enumValues.length === 0) {
+        throw new Error(
+          `envelope field "${key}": "ordinal: true" orders "enumValues", and this field declares none.`,
+        );
+      }
+    }
+  }
+  return envelope;
+}
+
 /** Resolves a bare edge name (as used by a `.node` file's `input`/`output`) to its declared EdgeDef. */
 export type EdgeResolver = (name: string) => AnyEdgeDef;
 
@@ -477,7 +535,7 @@ function parseNodeDecl(raw: Record<string, unknown>, name: string, resolveEdge: 
   if ("fn" in raw) {
     throw new Error(`.node files declare the contract only (docs/design.md §10) — "fn" belongs in the implementation tree, not here.`);
   }
-  const { label, description, input, output, examples, closure, properties, effect } = raw as {
+  const { label, description, input, output, examples, closure, properties, effect, contributes, scope } = raw as {
     label?: unknown;
     description?: unknown;
     input?: unknown;
@@ -486,6 +544,8 @@ function parseNodeDecl(raw: Record<string, unknown>, name: string, resolveEdge: 
     effect?: unknown;
     closure?: unknown;
     properties?: unknown;
+    contributes?: unknown;
+    scope?: unknown;
   };
 
   const inputSpec = resolveInputSpec(input, resolveEdge);
@@ -498,6 +558,8 @@ function parseNodeDecl(raw: Record<string, unknown>, name: string, resolveEdge: 
     output: outputSpec,
     ...(examples !== undefined && { examples: untagExamples(examples, inputSpec, outputSpec) }),
     ...(closure !== undefined && { closure: closure as NodeDecl["closure"] }),
+    ...(contributes !== undefined && { contributes: contributes as NodeDecl["contributes"] }),
+    ...(Array.isArray(scope) && { scope: scope as string[] }),
     ...(properties !== undefined && { properties: properties as NodeDecl["properties"] }),
     ...(typeof effect === "string" && { effect }),
   };
@@ -1340,6 +1402,17 @@ function assertTriggerCoverage(
 export interface Elaborated {
   fields: Record<string, FieldDef>;
   edges: Record<string, AnyEdgeDef>;
+  /**
+   * Author-declared envelopes — metadata that rides **with a token** rather
+   * than over a wire, and flows along lineage
+   * (docs/superpowers/specs/2026-09-29-the-declared-envelope.md).
+   *
+   * Kept apart from `edges` deliberately, even though both are `AnyEdgeDef`:
+   * an envelope is never wired, never an input or output, and never appears in
+   * the netlist. Folding the two tables would make every query that means "what
+   * crosses a wire" have to exclude them.
+   */
+  envelopes: Record<string, AnyEdgeDef>;
   nodes: Record<string, NodeDecl>;
   wiring: Wiring;
   /**
@@ -1402,6 +1475,15 @@ export async function elaborate(root: string): Promise<Elaborated> {
       throw new Error(`Duplicate edge name "${name}" (already declared elsewhere).`);
     }
     rawEdgeTextByName.set(name, { text: await readFile(`${root}/${file}`, "utf8"), file });
+  }
+
+  const rawEnvelopeTextByName = new Map<string, { text: string; file: string }>();
+  for await (const file of glob("**/*.envelope", { cwd: root })) {
+    const name = basename(file, ".envelope");
+    if (rawEnvelopeTextByName.has(name) || rawEdgeTextByName.has(name)) {
+      throw new Error(`Duplicate declaration name "${name}" (already declared as an edge or envelope).`);
+    }
+    rawEnvelopeTextByName.set(name, { text: await readFile(`${root}/${file}`, "utf8"), file });
   }
 
   const edges: Record<string, AnyEdgeDef> = {};
@@ -1473,6 +1555,43 @@ export async function elaborate(root: string): Promise<Elaborated> {
   synthesizeAllOfFailedEdges(edges, [...allOfCombosByKey.values()]);
   synthesizeGatherFailedEdges(edges, [...gatheredByName.values()]);
 
+  // After edges, because an envelope's fields resolve through the same table.
+  const envelopes: Record<string, AnyEdgeDef> = {};
+  for (const [name, { text, file }] of rawEnvelopeTextByName) {
+    envelopes[name] = inFile(file, () => parseEnvelopeFile(text, name, resolve));
+  }
+
+  /**
+   * Every `scope:` names something that exists.
+   *
+   * Checked here rather than in the membrane, and that is an *improvement* on
+   * where it used to live. `narrowIdentity` could only ever validate
+   * `read:Identity:…`, because it has no access to the program's declared
+   * envelopes — so generalizing `scope` to envelopes would have made a typo
+   * (`read:Provenanc:trust`) silently resolve to nothing at runtime. Elaboration
+   * has the whole table, so the same typo is now a `weir check` failure naming
+   * the file (docs/superpowers/specs/2026-09-29-the-declared-envelope.md §5).
+   */
+  const assertScopeResolves = (node: NodeDecl): void => {
+    for (const declaration of node.scope ?? []) {
+      const [verb, target, field] = declaration.split(":");
+      if (verb !== "read") {
+        throw new Error(`scope "${declaration}": only "read:<Identity|Envelope>:<field>" is a verb today.`);
+      }
+      if (target === "Identity") continue;
+      const envelope = target === undefined ? undefined : envelopes[target];
+      if (envelope === undefined) {
+        const known = ["Identity", ...Object.keys(envelopes)].join(", ");
+        throw new Error(`scope "${declaration}": nothing named "${target}" is declared — known: ${known}.`);
+      }
+      if (field === undefined || !(field in envelope.fields)) {
+        throw new Error(
+          `scope "${declaration}": envelope "${target}" has no field "${field}" — it declares ${Object.keys(envelope.fields).join(", ")}.`,
+        );
+      }
+    }
+  };
+
   const nodes: Record<string, NodeDecl> = {};
   const anyOfAliases = new Map<string, string[]>();
   for (const [name, { text, file }] of nodeTextByName) {
@@ -1493,6 +1612,8 @@ export async function elaborate(root: string): Promise<Elaborated> {
       nodes[name] = inFile(file, () => parseNodeFile(text, name, resolveEdge));
     }
   }
+
+  for (const node of Object.values(nodes)) assertScopeResolves(node);
 
   // A composite is referenced by name where a node would be, so the resolver
   // has to know them before any wiring is parsed — including a composite's
@@ -1600,5 +1721,5 @@ export async function elaborate(root: string): Promise<Elaborated> {
     }
   }
 
-  return { fields, edges, nodes, wiring, entries: expanded, topologies: [...declared.values()], declaredIn };
+  return { fields, edges, envelopes, nodes, wiring, entries: expanded, topologies: [...declared.values()], declaredIn };
 }

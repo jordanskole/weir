@@ -75,6 +75,27 @@ interface FieldDefBase<T extends ScalarType> {
    * has.
    */
   classification?: string;
+  /**
+   * How several inputs' values for this field merge at a fan-in
+   * (docs/superpowers/specs/2026-09-29-the-declared-envelope.md §3).
+   *
+   * Envelope fields only, and **required** on them — there is no default,
+   * because every wrong guess is silent: `meet` where `same` was meant merges
+   * two tokens about different things without complaining.
+   *
+   * - `meet` — the weakest wins. A combined trust is no stronger than its
+   *   weakest source.
+   * - `join` — the strongest wins. Integrity joins where confidentiality meets,
+   *   which is why one walk cannot produce both.
+   * - `same` — all inputs must agree or the firing fails; the right rule for an
+   *   identifier, and what catches a cross-item join.
+   */
+  combine?: "meet" | "join" | "same";
+  /**
+   * This enum's declared `enumValues` order is a total order, weakest first.
+   * Required by `meet` and `join`, which otherwise have nothing to compare.
+   */
+  ordinal?: boolean;
   validations?: Validation<T>;
   /** Original field name in an upstream source, where this edge is derived from one. */
   sourceKey?: string;
@@ -271,6 +292,14 @@ export const Identity: EdgeDef<{ sub: FieldDef<"utf8">; iss: FieldDef<"utf8"> }>
  * rather than `PayloadOf<typeof Identity>`'s full shape.
  */
 export interface Envelope {
+  /**
+   * Declared-envelope values this invocation may read, narrowed by its `scope`
+   * (docs/superpowers/specs/2026-09-29-the-declared-envelope.md).
+   *
+   * The *read* view, deliberately narrower than what the token carries: a token
+   * keeps every envelope field through a node that can read none of them.
+   */
+  meta?: Record<string, unknown>;
   id: string;
   correlationId: string;
   /**
@@ -629,6 +658,21 @@ export interface NodeDef<In extends InputSpec = InputSpec, O extends OutputSpec 
    * monomorphizes"; examples/person-birthday/README.md decision 4).
    */
   closure?: ExpectClosure<In> | LiteralClosure<O>;
+  /**
+   * Envelope field values this node stamps onto everything it produces
+   * (docs/superpowers/specs/2026-09-29-the-declared-envelope.md §4).
+   *
+   * **Static**, and that is the whole of what this covers: trust is decided by
+   * *which node ran* — a direct county fetch versus one through a commercial
+   * proxy — not by what the node computed. A contribution derived from the
+   * payload would mean `Fn` returning an envelope delta beside its result,
+   * changing every implementation's signature for a case nothing has needed.
+   *
+   * Merged **after** propagation, so a node overrides what reached it.
+   * Fingerprinted, because it changes what downstream sees — the same argument
+   * that put `scope` in the hash.
+   */
+  contributes?: Record<string, unknown>;
   /**
    * `verb:edge:field` declarations (docs/design-history.md, "Identity is a
    * verified-once JWT; `scope` becomes a per-node declaration") — e.g.

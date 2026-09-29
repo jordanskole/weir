@@ -127,6 +127,11 @@ function fieldPropertiesSchema(): { properties: Record<string, object>; allOf: o
     // impossible to remove once an ontology depends on a label this repo did
     // not think of.
     classification: { type: "string", minLength: 1 },
+    // Envelope-only, and validated as *present* by `parseEnvelopeFile` rather
+    // than here: an ordinary edge's field must not carry them, and the schema
+    // is shared between the two.
+    combine: { enum: ["meet", "join", "same"] },
+    ordinal: { type: "boolean" },
     enumValues: { type: "array", items: { type: "string" } },
     sourceKey: { type: "string" },
     relation: {
@@ -508,6 +513,23 @@ export function nodeSchema(): object {
       // conventions are mutually exclusive, so a closure declaring **both** is
       // contradictory whatever else it carries. An arbitrary parameter named
       // neither of them is unaffected.
+      // Envelope field values this node stamps on what it produces. An open
+      // object for the same reason `closure` is: the field names are the
+      // author's envelope's, which this schema cannot know.
+      contributes: { type: "object", minProperties: 1 },
+      /**
+       * `read:<Identity|Envelope>:<field>` declarations.
+       *
+       * Absent from this schema until 2026-09-29, so `scope` existed on the
+       * type, was fingerprinted, and was documented in `design.md` §6 while
+       * being **undeclarable in a `.node` file** — reachable only from a
+       * programmatically constructed `NodeDef`, which in this repo meant tests.
+       * Found building the declared envelope, which needs it from a file.
+       *
+       * Shape only here; that each entry *resolves* is checked at elaboration,
+       * where the envelope table exists.
+       */
+      scope: { type: "array", items: { type: "string", minLength: 1 } },
       closure: {
         type: "object",
         minProperties: 1,

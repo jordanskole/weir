@@ -137,6 +137,8 @@ export async function resolveImplementation<In extends InputSpec, O extends Outp
 export interface Program {
   fields: Record<string, FieldDef>;
   edges: Record<string, AnyEdgeDef>;
+  /** Declared envelopes — metadata that rides with a token (see `elaborate.ts`). */
+  envelopes?: Record<string, AnyEdgeDef>;
   nodes: Record<string, NodeDef>;
   wiring: Wiring;
   /**

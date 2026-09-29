@@ -586,17 +586,39 @@ describe("membrane — scope", () => {
     expect(invocation.envelope).toBeUndefined();
   });
 
-  it("resolves to Failed<In> when scope names an edge other than Identity — no envelope, buildEnvelope threw", async () => {
-    const node = defineNode({ ...birthday, scope: ["read:Person:age"] });
+  /**
+   * **This used to fail here, and now fails earlier and better.**
+   *
+   * `scope: ["read:Person:age"]` was a runtime `Failed<In>`, because
+   * `narrowIdentity` rejected anything not named `Identity`. Since declared
+   * envelopes exist, a non-`Identity` target may be perfectly legitimate — and
+   * the membrane cannot tell, because it has no access to the program's
+   * envelope table (docs/superpowers/specs/2026-09-29-the-declared-envelope.md
+   * §5).
+   *
+   * So the check moved to **elaboration**, which does have the table: a scope
+   * naming something undeclared is now a `weir check` failure naming the file,
+   * rather than a failure on the one firing that happened to reach it. That is
+   * strictly better — a typo'd scope used to need a *run* to surface.
+   *
+   * What the membrane still owns is the part it can decide alone: the verb, and
+   * a field `Identity` does not have. Both are tested above and below.
+   *
+   * Break-proof: the elaboration-time check is covered in `elaborate.test.ts`;
+   * deleting it there makes a typo'd envelope scope resolve to nothing at
+   * runtime, silently, which is the regression this pair of tests exists to
+   * prevent between them.
+   */
+  it("no longer rejects a non-Identity scope target — elaboration owns that now", async () => {
+    const node = defineNode({ ...birthday, scope: ["read:Provenance:trust"] });
     const invocation = await membrane(node, { age: 41, nickname: null }, {
       correlationId: "thread-1",
       identity: { sub: "user-1", iss: "issuer" },
     });
-    expect(invocation.result).toEqual({
-      input: { age: 41, nickname: null },
-      reason: expect.stringMatching(/Person/),
-    });
-    expect(invocation.envelope).toBeUndefined();
+
+    // The firing succeeds; `Provenance` is simply not this function's business.
+    expect(invocation.result).toEqual({ age: 42, nickname: null });
+    expect(invocation.envelope).toBeDefined();
   });
 
   it("resolves to Failed<In> for an unsupported verb — no envelope, buildEnvelope threw", async () => {

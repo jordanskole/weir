@@ -275,6 +275,15 @@ export function assertPayload<E extends AnyEdgeDef>(
 export interface InstanceEnvelope extends Envelope {
   schemaHash: string;
   /**
+   * Envelope values riding on this token
+   * (docs/superpowers/specs/2026-09-29-the-declared-envelope.md).
+   *
+   * Absent when the program declares no envelope, which is every program in the
+   * corpus. Carried by every instance regardless of whether the node that
+   * produced it could read any of it — carrying is not reading.
+   */
+  meta?: Record<string, unknown>;
+  /**
    * Field names present in the emitted payload that the declared edge does not
    * declare — stripped before this instance reached the log
    * (docs/superpowers/specs/2026-09-29-drift-and-fork.md §3).
@@ -591,6 +600,15 @@ export interface Invocation<In extends InputSpec, O extends OutputSpec> {
 export interface InvocationContext {
   correlationId: string;
   identity?: Partial<PayloadOf<typeof Identity>>;
+  /**
+   * The declared-envelope values this node may read, **already narrowed** by
+   * its `scope`.
+   *
+   * Narrowed by the caller rather than here, because narrowing needs the
+   * program's envelope table and the membrane deliberately has no access to it
+   * (docs/superpowers/specs/2026-09-29-the-declared-envelope.md §5).
+   */
+  ambientMeta?: Record<string, unknown>;
   step?: number;
   /** See `Envelope.causationIds`. Defaults to `[]` — a caller with no notion of a consumed instance records nothing. */
   causationIds?: string[];
@@ -662,9 +680,15 @@ function narrowIdentity(
   const narrowed: Partial<PayloadOf<typeof Identity>> = {};
   for (const declaration of scope) {
     const [verb, edgeName, field] = declaration.split(":");
-    if (verb !== "read" || edgeName !== "Identity") {
-      throw new Error(`scope "${declaration}": only "read:Identity:<field>" resolves to anything today.`);
+    // `read:<Envelope>:<field>` is resolved by `envelope.ts`'s `narrowMeta`
+    // against the program's declared envelopes, which this function has no
+    // access to — so anything not naming `Identity` is simply not *this*
+    // function's business rather than an error
+    // (docs/superpowers/specs/2026-09-29-the-declared-envelope.md §5).
+    if (verb !== "read") {
+      throw new Error(`scope "${declaration}": only "read:..." is a verb today.`);
     }
+    if (edgeName !== "Identity") continue;
     if (!IDENTITY_FIELDS.includes(field as keyof PayloadOf<typeof Identity>)) {
       throw new Error(`scope "${declaration}": Identity has no field "${field}".`);
     }
@@ -695,6 +719,8 @@ async function buildEnvelope(nodeDef: NodeDecl, context: InvocationContext): Pro
     timestamp: new Date().toISOString(),
     step: context.step ?? 0,
     identity: narrowIdentity(nodeDef.scope, context.identity ?? SYSTEM_IDENTITY),
+    ...(context.ambientMeta !== undefined &&
+      Object.keys(context.ambientMeta).length > 0 && { meta: context.ambientMeta }),
     node: context.nodeName ?? nodeDef.name,
     ...(nodeDef.implementationHash !== undefined && { implementationHash: nodeDef.implementationHash }),
     contractHash: (await hashNode(nodeDef)).hash,

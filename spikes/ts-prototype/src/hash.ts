@@ -300,6 +300,10 @@ function fingerprintNode(node: NodeDecl): NodeFingerprint {
     input: fingerprintInput(node.input),
     output: fingerprintOutput(node.output),
     ...(node.closure !== undefined && { closure: node.closure }),
+    // Behavioural: it changes what every downstream node sees on the envelope.
+    // Same argument that put `scope` in the hash — an accepted implementation
+    // must not stay valid against a changed contribution.
+    ...(node.contributes !== undefined && { contributes: node.contributes }),
     ...(node.scope !== undefined &&
       node.scope.length > 0 && { scope: fingerprintScope(node.scope) }),
     ...(node.properties !== undefined &&

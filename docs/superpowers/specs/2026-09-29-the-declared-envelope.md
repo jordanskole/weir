@@ -1,6 +1,6 @@
 # The declared envelope
 
-Status: draft.
+Status: implemented.
 
 ## Motivation
 
@@ -228,3 +228,39 @@ break-proof showed — including breaks that do **not** redden.
     crossings, like any other labelled field.
 14. Every existing example still elaborates and runs, and no contract hash moves
     — nothing in the corpus declares an envelope.
+
+## What the build found
+
+**`scope` was not declarable in a `.node` file.** It existed on `NodeDecl`, was
+fingerprinted, and is documented in `design.md` §6 — and `nodeSchema` had no
+`scope` key at all, so writing one produced *"has unknown key"*. It was reachable
+only from a programmatically constructed `NodeDef`, which in this repo meant
+tests. The whole §5 argument rests on `scope` being writable, so this feature
+could not have worked without finding it.
+
+That is the third of this shape in two days — `closure` parsed and hashed but
+read by nothing, `undeclared` values recorded nowhere on the failing path, and
+now `scope` typed and hashed but unwritable. The common cause is that a
+declaration key is added to the *type* and the *hash* together, and the parser
+and schema are a separate edit nobody is forced to make.
+
+**Moving the scope check to elaboration is an improvement, not a compromise.**
+`narrowIdentity` could only ever validate `read:Identity:…`, because the membrane
+has no access to the program's envelope table — so generalizing `scope` would
+have made a typo (`read:Provenanc:trust`) silently resolve to nothing at runtime.
+Elaboration has the whole table, so the same typo is now a `weir check` failure
+naming the file, where it used to need a *run* to surface. One membrane test was
+rewritten to say so rather than deleted.
+
+**The `same` conflict fires through the membrane**, by wrapping `fn` to throw —
+the same trick the dead-gather and effect branches use. The envelope is built,
+the throw becomes `Failed<In>` carrying the bag that conflicted, and the trace
+records the attempt. Hand-assembling the failure would have made it the one
+failure in the system with no invocation behind it.
+
+**Where the read view and the carried view diverge, and it matters.** A token's
+instance carries the **full** metadata; the `Envelope` handed to `Fn` carries
+only what `scope` names. Threading one value through both would have meant
+either a node reading fields it never declared, or an envelope that stops
+propagating the moment it passes through a node that cannot read it — which is
+the original problem, restored.

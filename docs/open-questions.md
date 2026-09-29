@@ -55,11 +55,7 @@ Cannot be built as stated — the reason is in the file.
 
 - [Positional identity: `birthday.then.birthday` should run twice](open-questions/positional-identity.md) — **blocked** — two shipped things use the same syntax with opposite
 
-## Specced, not built (1)
-
-- [No extensible envelope, so cross-cutting metadata is an edit to every edge](open-questions/extensible-envelope.md) — specced, not built — `2026-09-29-the-declared-envelope.md`, status draft
-
-## Resolved (16)
+## Resolved (17)
 
 Kept because the reasoning is worth more than the answer, and because several specs and code comments cite them.
 
@@ -68,6 +64,7 @@ Kept because the reasoning is worth more than the answer, and because several sp
 - [Drift at a boundary, and forking a run to act on it](open-questions/drift-and-fork.md) — resolved (2026-09-29). Two sub-questions inside it stay open
 - [Should `membrane()` build the envelope before asserting input?](open-questions/envelope-before-assert.md) — resolved (2026-09-24 — build it first)
 - [YAML examples are tagged, TypeScript examples are bare, and the gate only knew the bare form](open-questions/examples-reach-the-gate.md) — resolved (2026-09-28)
+- [No extensible envelope, so cross-cutting metadata is an edit to every edge](open-questions/extensible-envelope.md) — resolved (2026-09-29). Dynamic contribution stays out by design
 - [A fan-in fed by two independent origin nodes never fires](open-questions/fan-in-fed-by-two-independent-origins.md) — resolved (2026-09-25, the run root)
 - [Is `many` a compositional type, or only a one-way fan-out?](open-questions/gather-and-the-vectorized-consumer.md) — resolved (2026-09-27, `gather`). One half deliberately still unbuilt
 - [Which host language elaborates](open-questions/host-language.md) — resolved (2026-09-28 — TypeScript for v1)

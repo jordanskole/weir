@@ -1,6 +1,6 @@
 # No extensible envelope, so cross-cutting metadata is an edit to every edge
 
-Status: specced, not built — `2026-09-29-the-declared-envelope.md`, status draft.
+Status: resolved (2026-09-29). Dynamic contribution stays out by design.
 Last grounded: 2026-09-29.
 
 ## The question

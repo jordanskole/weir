@@ -85,6 +85,8 @@ import { assertOutput, assertPayload, membrane } from "./membrane.js";
 import type { InstanceEnvelope, InvocationContext, Log, LoggedInstance } from "./membrane.js";
 import { outputEdgeNames } from "./elaborate.js";
 import { gatherGroups, joinRows, selfAndAncestorIds } from "./lineage.js";
+import { combineMeta, envelopeFields, narrowMeta } from "./envelope.js";
+import type { Meta } from "./envelope.js";
 import type { GatherGroup } from "./lineage.js";
 import type { Program } from "./implementation.js";
 import type { AnyEdgeDef, Envelope, Failed, InputSpec, NodeDef, OutputSpec, PayloadOf } from "./types.js";
@@ -290,6 +292,15 @@ function stripForLog(
   }
 }
 
+/** The instance envelope, carrying the token's declared envelope values. */
+function withMeta(
+  envelope: InstanceEnvelope | undefined,
+  meta: Meta | undefined,
+): InstanceEnvelope | undefined {
+  if (envelope === undefined || meta === undefined || Object.keys(meta).length === 0) return envelope;
+  return { ...envelope, meta };
+}
+
 /** The instance envelope, carrying whatever the strip removed. */
 function withDrift(
   envelope: InstanceEnvelope | undefined,
@@ -305,6 +316,14 @@ async function logOutput(
   result: unknown,
   correlationId: string,
   envelope: Envelope | undefined,
+  /**
+   * The **full** envelope metadata this token carries, not the narrowed view
+   * the node was allowed to read. Carrying is not reading: a token keeps every
+   * declared envelope field through a node that can read none of them, which is
+   * what stops intermediate edges having to declare the field again
+   * (docs/superpowers/specs/2026-09-29-the-declared-envelope.md §5).
+   */
+  meta?: Meta,
 ): Promise<void> {
   if (output.kind === "single") {
     const clean = stripForLog(output.edge, result);
@@ -312,7 +331,7 @@ async function logOutput(
       output.edge.name,
       correlationId,
       clean.payload,
-      withDrift(await instanceEnvelope(envelope, output.edge), clean.undeclared),
+      withMeta(withDrift(await instanceEnvelope(envelope, output.edge), clean.undeclared), meta),
     );
     return;
   }
@@ -337,7 +356,7 @@ async function logOutput(
     // element a sibling at the same depth, which is the tighter of the two
     // ancestors and the one that makes element lineage nest.
     const schemaHash = await instanceEnvelope(envelope, output.edge);
-    const collectionId = log.append(manyEdgeName(output.edge.name), correlationId, result, schemaHash);
+    const collectionId = log.append(manyEdgeName(output.edge.name), correlationId, result, withMeta(schemaHash, meta));
     if (typeof result !== "object" || result === null || Array.isArray(result)) return;
     for (const entry of Object.values(result as Record<string, unknown>)) {
       const clean = stripForLog(output.edge, entry);
@@ -347,7 +366,7 @@ async function logOutput(
         clean.payload,
         schemaHash === undefined
           ? undefined
-          : withDrift({ ...schemaHash, causationIds: [collectionId] }, clean.undeclared),
+          : withMeta(withDrift({ ...schemaHash, causationIds: [collectionId] }, clean.undeclared), meta),
       );
     }
     return;
@@ -367,7 +386,7 @@ async function logOutput(
       tagged.edge,
       correlationId,
       clean.payload,
-      withDrift(await instanceEnvelope(envelope, edge), clean.undeclared),
+      withMeta(withDrift(await instanceEnvelope(envelope, edge), clean.undeclared), meta),
     );
     return;
   }
@@ -380,7 +399,7 @@ async function logOutput(
       tagged.edge,
       correlationId,
       clean.payload,
-      withDrift(await instanceEnvelope(envelope, edge), clean.undeclared),
+      withMeta(withDrift(await instanceEnvelope(envelope, edge), clean.undeclared), meta),
     );
   }
 }
@@ -403,6 +422,12 @@ export interface Run {
    * (docs/superpowers/specs/2026-09-29-drift-and-fork.md §4).
    */
   forkedFrom?: string;
+  /**
+   * Declared-envelope values this run starts with — the PIN case: set once at
+   * the trigger, reaching a node eleven hops downstream with no intermediate
+   * edge naming it (docs/superpowers/specs/2026-09-29-the-declared-envelope.md §4).
+   */
+  meta?: Record<string, unknown>;
 }
 
 /**
@@ -609,7 +634,7 @@ export function resolveTrigger(
 }
 
 export async function runNetlist(program: Program, run: Run, host: Host): Promise<RunResult> {
-  const { correlationId, originPayloads, identity, forkedFrom } = run;
+  const { correlationId, originPayloads, identity, forkedFrom, meta: triggerMeta = {} } = run;
   const { log, trace, budget, maxPulses = DEFAULT_MAX_PULSES, effects = {} } = host;
 
   // Before anything is appended, including the run root: a program whose
@@ -687,21 +712,41 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
      * failed — a successful one's `result` already *is* the raw value.
      */
     let rawEffectResult: unknown;
+    /**
+     * What this firing's output tokens will carry.
+     *
+     * Propagated from what it consumed, then the node's own `contributes`
+     * merged **after** — the ordering that lets `fetchProxied` consume a query
+     * carrying `verified` from the trigger and emit a feature carrying
+     * `aggregator` (spec §6).
+     */
+    let outgoingMeta: Meta = {};
+    /** Set when a `combine: same` field's inputs disagreed — data, so `Failed<In>`. */
+    let metaConflict: string | undefined;
     if (nodeDef.input.kind === "single") {
       let payload: unknown;
       if (origins.has(nodeName)) {
         if (!(nodeName in originPayloads)) return false;
         payload = originPayloads[nodeName];
+        outgoingMeta = { ...triggerMeta };
       } else {
         if (instance === undefined) return false;
         payload = instance.payload;
+        outgoingMeta = { ...(instance.envelope?.meta ?? {}) };
       }
       input = payload;
       // `instance === undefined` means an origin node, whose payload came
       // from `originPayloads` rather than from the log. It cites the run
       // root: the trigger is what produced it.
       const causationIds = instance === undefined ? [rootId] : [instance.id];
-      const context = { correlationId, identity, step: pulse, causationIds, nodeName };
+      const context = {
+        correlationId,
+        identity,
+        step: pulse,
+        causationIds,
+        nodeName,
+        ambientMeta: narrowMeta(nodeDef.scope, outgoingMeta, program.envelopes ?? {}),
+      };
       // An effect node's behaviour is the host's handler. It still goes
       // through the membrane — the input is asserted, the output is asserted
       // against the declared edge, a throw becomes `Failed<In>`, and an
@@ -766,6 +811,15 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         causationIds.push(member.id);
       }
       input = collection;
+      // **Across the members**, which is where `meet` earns itself: a summary
+      // over N items is as trustworthy as its worst item, which is an answer a
+      // reader wants and nobody computes by hand (spec §6).
+      const combinedGather = combineMeta(
+        declaredEnvelopeFields,
+        group.members.map((member) => member.envelope?.meta ?? {}),
+      );
+      metaConflict = combinedGather.conflict;
+      outgoingMeta = combinedGather.meta;
       const invocation = await (membrane as AnyGatherInvoke)(
         // A dead group fires a *failure*, and it fires it through the
         // membrane rather than around it: wrapping `fn` so it throws reuses
@@ -811,13 +865,39 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         causationIds.push(instance.id);
       }
       input = bag;
-      const invocation = await (membrane as AnyAllOfInvoke)(nodeDef, bag, {
-        correlationId,
-        identity,
-        step: pulse,
-        causationIds,
-        nodeName,
-      });
+      // Per field, by that field's declared `combine` — a trust takes its
+      // weakest source, an identifier must simply agree (spec §6).
+      const combined = combineMeta(
+        declaredEnvelopeFields,
+        nodeDef.input.edges.map((edge) => row.get(edge.name)!.envelope?.meta ?? {}),
+      );
+      metaConflict = combined.conflict;
+      outgoingMeta = combined.meta;
+      const invocation = await (membrane as AnyAllOfInvoke)(
+        // A `combine: same` conflict fires a **failure**, through the membrane
+        // rather than around it — the same wrapping trick the dead-gather and
+        // effect branches use, and for the same reason: the envelope is built,
+        // the throw becomes `Failed<In>` carrying the bag that conflicted, and
+        // the trace records the attempt. Hand-assembling a failure here would
+        // be the one failure in the system with no invocation behind it.
+        metaConflict === undefined
+          ? nodeDef
+          : ({
+              ...nodeDef,
+              fn: () => {
+                throw new Error(metaConflict);
+              },
+            } as NodeDef),
+        bag,
+        {
+          correlationId,
+          identity,
+          step: pulse,
+          causationIds,
+          ambientMeta: narrowMeta(nodeDef.scope, outgoingMeta, program.envelopes ?? {}),
+          nodeName,
+        },
+      );
       result = invocation.result;
       envelope = invocation.envelope;
     }
@@ -888,7 +968,10 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         log.append(failedName, correlationId, { ...bag, reason: result.reason }, failedEnvelope);
       }
     } else {
-      await logOutput(log, nodeDef.output, result, correlationId, envelope);
+      // A node overrides what reached it — the ordering that lets a proxied
+      // fetch stamp `aggregator` onto a query that arrived `verified`.
+      if (nodeDef.contributes !== undefined) outgoingMeta = { ...outgoingMeta, ...nodeDef.contributes };
+      await logOutput(log, nodeDef.output, result, correlationId, envelope, outgoingMeta);
     }
     return true;
   }
@@ -955,6 +1038,9 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
    * with `Failed_`".
    */
   const failedEdgeNames = Object.keys(program.edges).filter((name) => name.startsWith(failedEdgeName("")));
+
+  /** Every declared envelope field, by name — the combine rules, resolved once. */
+  const declaredEnvelopeFields = envelopeFields(program.envelopes ?? {});
 
   /**
    * Which nodes are still waiting, right now

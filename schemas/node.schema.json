@@ -142,6 +142,17 @@
         "additionalProperties": false
       }
     },
+    "contributes": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "scope": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "closure": {
       "type": "object",
       "minProperties": 1,

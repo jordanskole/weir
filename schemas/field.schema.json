@@ -75,6 +75,16 @@
           "type": "string",
           "minLength": 1
         },
+        "combine": {
+          "enum": [
+            "meet",
+            "join",
+            "same"
+          ]
+        },
+        "ordinal": {
+          "type": "boolean"
+        },
         "enumValues": {
           "type": "array",
           "items": {
