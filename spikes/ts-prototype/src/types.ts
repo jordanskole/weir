@@ -373,7 +373,25 @@ export type InputSpec =
    * which is why readiness cannot come from the contract and comes from
    * the collection token's own size instead.
    */
-  | { kind: "gather"; edge: AnyEdgeDef };
+  | {
+      kind: "gather";
+      edge: AnyEdgeDef;
+      /**
+       * The edge whose arrival closes the barrier, for a gather over a **cycle**
+       * rather than a spread
+       * (docs/superpowers/specs/2026-09-29-gather-until.md).
+       *
+       * A spread's barrier is a *count* — the collection token records it. A
+       * cycle has neither collection nor count, and needs neither: a cycle is
+       * **sequential**, so by the time its terminating branch appears, every
+       * element already exists and is an ancestor of it. The barrier is "the
+       * terminator exists", and membership is "every instance of `edge` among
+       * the terminator's ancestors".
+       *
+       * Absent for an ordinary gather, which keeps the count-based barrier.
+       */
+      until?: AnyEdgeDef;
+    };
 
 /**
  * The edge names an input declares needing, whatever multiplicity it needs them

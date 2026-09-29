@@ -58,6 +58,46 @@ export interface GatherGroup {
  * makes a staged bag work at all, here it would be a second readiness rule
  * whose only users are tests.
  */
+/**
+ * Groups for a gather over a **cycle** rather than a spread
+ * (docs/superpowers/specs/2026-09-29-gather-until.md).
+ *
+ * The barrier is not a count. A cycle is **sequential** — each iteration's input
+ * descends from the previous iteration's output — so by the time its terminating
+ * branch appears, every element already exists *and is an ancestor of it*.
+ * Nothing can still be in flight, because a cycle has one thread of descent.
+ *
+ * So membership is exactly "every instance of the gathered edge among the
+ * terminator's ancestors", and completeness is "a terminator exists". Both
+ * halves already existed: `selfAndAncestorIds` walks lineage, and the
+ * terminating branch is a token the cycle must produce or it would not stop.
+ *
+ * A spread's elements are **not** ancestors of one another, which is the same
+ * fact from the other side and why this rule cannot replace the count-based one.
+ */
+export function gatherUntilGroups(
+  log: Log,
+  terminators: LoggedInstance[],
+  candidates: LoggedInstance[],
+  failures: LoggedInstance[],
+): GatherGroup[] {
+  return terminators.map((terminator) => {
+    const lineage = selfAndAncestorIds(log, terminator.id);
+    const members = candidates.filter((candidate) => lineage.has(candidate.id));
+    return {
+      // The terminator plays the collection's role: it is what the firing cites
+      // as the barrier, so "which cycle was this the gather of" stays a
+      // directly recorded answer rather than an inference.
+      collection: terminator,
+      members,
+      size: members.length,
+      // `sequence`'s signature is unchanged by the barrier being different: one
+      // element's failure is the whole result's.
+      dead: failures.some((failure) => lineage.has(failure.id)),
+    };
+  });
+}
+
 export function gatherGroups(
   log: Log,
   collections: LoggedInstance[],

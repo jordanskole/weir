@@ -393,7 +393,12 @@ function resolveInputSpec(input: unknown, resolveEdge: EdgeResolver): InputSpec 
     // to the membrane so a gather of an index-less edge fails at `weir check`
     // instead of three pulses into a run.
     requireIndex(edge, `"input.gather"`);
-    return { kind: "gather", edge };
+    const untilRef = (input as { until?: unknown }).until;
+    if (untilRef === undefined) return { kind: "gather", edge };
+    if (typeof untilRef !== "string" || untilRef.length === 0) {
+      throw new Error(`"input.until" must be a bare edge-name reference.`);
+    }
+    return { kind: "gather", edge, until: resolveEdge(untilRef) };
   }
   throw new Error(`Unrecognized "input" shape: ${JSON.stringify(input)}.`);
 }
@@ -1135,6 +1140,34 @@ function assertWiringTypes(
   // Rule C, per gather node.
   for (const [name, node] of Object.entries(nodes)) {
     if (node.input.kind !== "gather" || !wired.has(name)) continue;
+
+    // **A gather over a cycle has no spread above it, by construction**
+    // (docs/superpowers/specs/2026-09-29-gather-until.md). Its barrier is the
+    // terminator's arrival rather than a collection's count, so the rule below
+    // asks the wrong question of it — and would reject every paging loop.
+    // Checked instead: something upstream actually produces the terminator, or
+    // the barrier can never close and the gather would never fire, which is the
+    // same failure Rule C exists to catch stated for the other shape.
+    const until = node.input.until;
+    if (until !== undefined) {
+      const seenUntil = new Set<string>([name]);
+      const frontierUntil = [...(parentsOf.get(name) ?? [])];
+      let producer: string | undefined;
+      while (frontierUntil.length > 0 && producer === undefined) {
+        const ancestor = frontierUntil.pop()!;
+        if (seenUntil.has(ancestor)) continue;
+        seenUntil.add(ancestor);
+        if (outputEdgeNames(nodes[ancestor]!.output).includes(until.name)) producer = ancestor;
+        else frontierUntil.push(...(parentsOf.get(ancestor) ?? []));
+      }
+      if (producer === undefined) {
+        throw new Error(
+          `Wiring: "${name}" gathers until "${until.name}", but nothing upstream of it produces one — a cycle's barrier is its terminating branch, so with no producer the barrier never closes and it would never fire.`,
+        );
+      }
+      continue;
+    }
+
     const seen = new Set<string>([name]);
     const frontier = [...(parentsOf.get(name) ?? [])];
     let spread: string | undefined;

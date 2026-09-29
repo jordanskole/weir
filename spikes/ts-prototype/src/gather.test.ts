@@ -471,3 +471,221 @@ describe("gather — a failed element", () => {
     expect(summaries[0]!.payload).toEqual({ combined: "a+b", count: 2 });
   });
 });
+
+describe("gather … until — a barrier for a set discovered by running", () => {
+  const f = (l: string) => defineField({ type: "utf8", label: l, description: "d", nullable: false });
+  const Seed = defineEdge({ name: "Seed", label: "S", description: "d", fields: { cursor: f("C") } });
+  const Req = defineEdge({ name: "Req", label: "R", description: "d", fields: { cursor: f("C") } });
+  const Page = defineEdge({ name: "Page", label: "P", description: "d", index: "n", fields: { n: f("N") } });
+  const Done = defineEdge({ name: "Done", label: "D", description: "d", fields: { cursor: f("C") } });
+  const All = defineEdge({ name: "All", label: "A", description: "d", fields: { pages: f("P") } });
+
+  /** A paging loop: fetch until the server stops handing back a cursor. */
+  const pagingProgram = (lastPage: number) => {
+    const start = defineNode({ name: "start", input: single(Seed), output: single(Req), fn: (s: any) => ({ cursor: s.cursor }) });
+    const fetchPage = defineNode({
+      name: "fetchPage",
+      input: single(Req),
+      output: oneOf(Page, Done),
+      fn: (r: any) =>
+        Number(r.cursor) < lastPage
+          ? { edge: "Page", payload: { n: r.cursor } }
+          : { edge: "Done", payload: { cursor: r.cursor } },
+    });
+    // The cycle: each page's request descends from the previous page, which is
+    // the sequentiality the whole barrier rests on.
+    const nextReq = defineNode({
+      name: "nextReq",
+      input: single(Page),
+      output: single(Req),
+      fn: (p: any) => ({ cursor: String(Number(p.n) + 1) }),
+    });
+    const collect = {
+      name: "collect",
+      input: { kind: "gather" as const, edge: Page, until: Done },
+      output: single(All),
+      fn: (c: Record<string, unknown>) => ({ pages: String(Object.keys(c).length) }),
+    };
+    return {
+      fields: {},
+      edges: { Seed, Req, Page, Done, All },
+      nodes: { start, fetchPage, nextReq, collect },
+      wiring: {
+        origins: ["start"],
+        feeds: { start: ["fetchPage"], fetchPage: ["nextReq", "collect"], nextReq: ["fetchPage"] },
+      },
+    } as never;
+  };
+
+  /**
+   * **Spec Testing #1 — the motivating case.** An ETL that cannot rejoin its
+   * pages has not done anything, and a cycle has no collection token and no
+   * count to close a barrier with.
+   *
+   * Break-proof: routing a gather with `until:` through `gatherGroups` instead
+   * of `gatherUntilGroups` collects nothing at all — there is no collection
+   * token anywhere in a cycle, so no group ever forms.
+   */
+  it("gathers every page of a cycle once the terminator arrives", async () => {
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      pagingProgram(4),
+      { correlationId: "c", originPayloads: { start: { cursor: "0" } } },
+      { log, maxPulses: 40 },
+    );
+
+    expect(log.instances("Page", "c")).toHaveLength(4);
+    expect(log.instances("All", "c").map((i) => i.payload)).toEqual([{ pages: "4" }]);
+    expect(result.stopped).toBe("quiescence");
+    expect(result.residue).toEqual([]);
+  });
+
+  /**
+   * **Spec Testing #2 — the assertion the whole barrier rests on.**
+   *
+   * Stopped part-way, with pages produced and no terminator, the gather must
+   * not fire. A barrier that closes on "some elements exist" is not a barrier;
+   * it is a race.
+   *
+   * Break-proof: making `gatherUntilGroups` return a group per *candidate*
+   * rather than per terminator fires here with a partial collection, which is
+   * the silent wrong answer — an ETL that quietly processed two pages of four.
+   */
+  it("does not fire while the cycle is still running", async () => {
+    for (const [pulses, expectedPages] of [
+      [4, 2],
+      [6, 3],
+    ] as const) {
+      const log = new InMemoryLog();
+      const result = await runNetlist(
+        pagingProgram(4),
+        { correlationId: `p${pulses}`, originPayloads: { start: { cursor: "0" } } },
+        { log, maxPulses: pulses },
+      );
+
+      expect(result.stopped).toBe("budget");
+      expect(log.instances("Page", `p${pulses}`)).toHaveLength(expectedPages);
+      expect(log.instances("Done", `p${pulses}`)).toHaveLength(0);
+      // Pages exist, no terminator: nothing collected.
+      expect(log.instances("All", `p${pulses}`)).toHaveLength(0);
+    }
+  });
+
+  /**
+   * Spec Testing #3. A cycle that terminates immediately gathers the empty
+   * collection — which falls out of "every instance among the terminator's
+   * ancestors" rather than needing a case of its own, exactly as the empty
+   * spread does out of the count.
+   */
+  it("gathers an empty collection when the cycle terminates immediately", async () => {
+    const log = new InMemoryLog();
+
+    await runNetlist(
+      pagingProgram(0),
+      { correlationId: "e", originPayloads: { start: { cursor: "0" } } },
+      { log, maxPulses: 20 },
+    );
+
+    expect(log.instances("Page", "e")).toHaveLength(0);
+    expect(log.instances("All", "e").map((i) => i.payload)).toEqual([{ pages: "0" }]);
+  });
+
+  /**
+   * **Spec Testing #7 — the guard against this quietly replacing the other
+   * rule.** There are two barriers because there are two shapes, and a gather
+   * with no `until:` must still use the spread's count.
+   *
+   * Break-proof: making `gatherUntilGroups` the only path leaves an ordinary
+   * spread-fed gather with no terminator to key on, so it never fires and every
+   * existing gather test reddens.
+   */
+  it("leaves an ordinary spread-fed gather on the count-based barrier", async () => {
+    const Item = defineEdge({ name: "Item", label: "I", description: "d", index: "id", fields: { id: f("ID") } });
+    const Sum = defineEdge({ name: "Sum", label: "S", description: "d", fields: { pages: f("P") } });
+    const spread = defineNode({
+      name: "spread",
+      input: single(Seed),
+      output: many(Item),
+      fn: () => ({ a: { id: "a" }, b: { id: "b" } }),
+    });
+    const sum = defineNode({
+      name: "sum",
+      input: gather(Item),
+      output: single(Sum),
+      fn: (c: Record<string, unknown>) => ({ pages: String(Object.keys(c).length) }),
+    });
+    const log = new InMemoryLog();
+
+    await runNetlist(
+      {
+        fields: {},
+        edges: { Seed, Item, Sum },
+        nodes: { spread, sum },
+        wiring: { origins: ["spread"], feeds: { spread: ["sum"] } },
+      } as never,
+      { correlationId: "s", originPayloads: { spread: { cursor: "0" } } },
+      { log, maxPulses: 20 },
+    );
+
+    expect(log.instances("Sum", "s").map((i) => i.payload)).toEqual([{ pages: "2" }]);
+  });
+
+  /**
+   * **The bug this test exists because I nearly shipped.** Every test above
+   * builds its program directly, so none of them goes through `elaborate` — and
+   * `assertWiringTypes`' Rule C requires a spread above *every* gather, which a
+   * cycle-gather by construction does not have. Rule C would have rejected
+   * every paging loop, and nothing in a hand-built fixture could have noticed.
+   *
+   * So this one elaborates real declarations, and asserts the counterpart rule:
+   * a terminator nothing produces is refused for the same reason Rule C refuses
+   * a gather with no spread — the barrier can never close, so the node would
+   * never fire.
+   */
+  it("elaborates a cycle-gather, and refuses one whose terminator nothing produces", async () => {
+    const { mkdtemp, mkdir, rm, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { elaborate } = await import("./elaborate.js");
+
+    const write = async (until: string) => {
+      const dir = await mkdtemp(join(tmpdir(), "weir-until-"));
+      const scalar = (name: string, field: string) =>
+        `label: ${name}\ndescription: d\nfields:\n  ${field}: { type: utf8, label: X, description: d, nullable: false }\n`;
+      const files: Record<string, string> = {
+        "edges/Seed.edge": scalar("Seed", "cursor"),
+        "edges/Req.edge": scalar("Req", "cursor"),
+        "edges/Done.edge": scalar("Done", "cursor"),
+        "edges/All.edge": scalar("All", "pages"),
+        "edges/Page.edge": `label: Page\ndescription: d\nindex: n\nfields:\n  n: { type: utf8, label: N, description: d, nullable: false }\n`,
+        "nodes/start.node": `label: Start\ndescription: d\ninput: Seed\noutput: Req\nexamples:\n  - given: { Seed: { cursor: "0" } }\n    expect: { Req: { cursor: "0" } }\n`,
+        "nodes/fetchPage.node": `label: Fetch\ndescription: d\neffect: http\ninput: Req\noutput:\n  oneOf:\n    - Page\n    - Done\n`,
+        "nodes/nextReq.node": `label: Next\ndescription: d\ninput: Page\noutput: Req\nexamples:\n  - given: { Page: { n: "0" } }\n    expect: { Req: { cursor: "1" } }\n`,
+        "nodes/collect.node": `label: Collect\ndescription: d\ninput:\n  gather: Page\n  until: ${until}\noutput: All\nexamples:\n  - given:\n      Page:\n        "0": { n: "0" }\n    expect: { All: { pages: "1" } }\n`,
+        "topology/main.topology": `input: Seed\noutput: All\nterminals:\n  - collect\nwiring:\n  start:\n    then:\n      fetchPage:\n        then:\n          nextReq:\n            then:\n              fetchPage: {}\n          collect: {}\n`,
+      };
+      for (const [rel, content] of Object.entries(files)) {
+        const full = join(dir, rel);
+        await mkdir(join(full, ".."), { recursive: true });
+        await writeFile(full, content, "utf8");
+      }
+      return dir;
+    };
+
+    const good = await write("Done");
+    try {
+      const program = await elaborate(good);
+      expect((program.nodes.collect!.input as { until?: { name: string } }).until?.name).toBe("Done");
+    } finally {
+      await rm(good, { recursive: true, force: true });
+    }
+
+    const bad = await write("Seed");
+    try {
+      await expect(elaborate(bad)).rejects.toThrow(/gathers until "Seed", but nothing upstream of it produces one/);
+    } finally {
+      await rm(bad, { recursive: true, force: true });
+    }
+  });
+});

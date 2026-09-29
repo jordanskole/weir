@@ -18,7 +18,7 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-## Open (26)
+## Open (25)
 
 Live. Ordered alphabetically, not by priority.
 
@@ -39,7 +39,6 @@ Live. Ordered alphabetically, not by priority.
 - [A collection is keyed, and streamed data is ordered](open-questions/keyed-versus-ordered-collections.md)
 - [The membrane bounds behaviour, not control — `fn` is still directly reachable](open-questions/membrane-bounds-behaviour-not-control.md)
 - [Nodes as compiled, distributable units](open-questions/nodes-as-distributable-units.md)
-- [Pagination cannot be gathered, because a cycle is not a spread](open-questions/pagination-cannot-be-gathered.md)
 - [A property cannot quantify over a gathered collection](open-questions/properties-over-collections.md)
 - [Prose blocks on node declarations](open-questions/prose-on-node-declarations.md)
 - [`weir replay` exits zero even when every invocation refused](open-questions/replay-exit-code.md)
@@ -55,7 +54,7 @@ Cannot be built as stated — the reason is in the file.
 
 - [Positional identity: `birthday.then.birthday` should run twice](open-questions/positional-identity.md) — **blocked** — two shipped things use the same syntax with opposite
 
-## Resolved (17)
+## Resolved (18)
 
 Kept because the reasoning is worth more than the answer, and because several specs and code comments cite them.
 
@@ -71,6 +70,7 @@ Kept because the reasoning is worth more than the answer, and because several sp
 - [Iteration, and the "no loop construct" claim](open-questions/iteration-and-the-loop-construct.md) — resolved (2026-09-26, in four specs)
 - [`Log` is doing two jobs under one interface](open-questions/log-does-two-jobs.md) — resolved (2026-09-28)
 - [There is no fan-out primitive: a `many` output is one token, not N](open-questions/no-fan-out-primitive.md) — resolved (2026-09-26)
+- [Pagination cannot be gathered, because a cycle is not a spread](open-questions/pagination-cannot-be-gathered.md) — resolved (2026-09-29)
 - [Quiescence is not success, and a root topology declares no end](open-questions/quiescence-and-declared-ends.md) — resolved (2026-09-28, both halves)
 - [Does `scope` subsume `allOf:`, or stay a separate declaration?](open-questions/scope-subsumes-allof.md) — resolved (2026-09-24)
 - ["System nodes": nodes whose contract determines their implementation](open-questions/system-nodes.md) — resolved (2026-09-26, all three built)

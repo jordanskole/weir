@@ -447,7 +447,11 @@ export function nodeSchema(): object {
           },
           {
             type: "object",
-            properties: { gather: edgeName },
+            // `until` names the edge whose arrival closes the barrier, for a
+            // gather over a **cycle** rather than a spread
+            // (docs/superpowers/specs/2026-09-29-gather-until.md). Optional:
+            // without it a gather keeps the spread's count-based barrier.
+            properties: { gather: edgeName, until: edgeName },
             required: ["gather"],
             additionalProperties: false,
           },

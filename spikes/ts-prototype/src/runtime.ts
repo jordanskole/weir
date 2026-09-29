@@ -84,7 +84,7 @@
 import { assertOutput, assertPayload, membrane } from "./membrane.js";
 import type { InstanceEnvelope, InvocationContext, Log, LoggedInstance } from "./membrane.js";
 import { outputEdgeNames } from "./elaborate.js";
-import { gatherGroups, joinRows, selfAndAncestorIds } from "./lineage.js";
+import { gatherGroups, gatherUntilGroups, joinRows, selfAndAncestorIds } from "./lineage.js";
 import { combineMeta, envelopeFields, narrowMeta } from "./envelope.js";
 import type { Meta } from "./envelope.js";
 import type { GatherGroup } from "./lineage.js";
@@ -1216,16 +1216,32 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         // than an arc one. `consumedBy` still filters it, which is what stops
         // a fired barrier re-forming.
         const eaten = consumedBy(nodeName);
-        candidates.push(
-          ...gatherGroups(
-            log,
-            collectionEdgeNames.flatMap((edgeName) =>
-              log.instances(edgeName, correlationId).filter((collection) => !eaten.has(collection.seq)),
-            ),
-            eligibleForEdge(program, log, eaten, nodeName, nodeDef.input.edge.name, correlationId),
-            failedEdgeNames.flatMap((edgeName) => log.instances(edgeName, correlationId)),
-          ).map((group) => ({ nodeName, group })),
-        );
+        const members = eligibleForEdge(program, log, eaten, nodeName, nodeDef.input.edge.name, correlationId);
+        const failed = failedEdgeNames.flatMap((edgeName) => log.instances(edgeName, correlationId));
+        // **Two barriers, because there are two shapes**
+        // (docs/superpowers/specs/2026-09-29-gather-until.md). A spread's is a
+        // count the collection token records; a cycle's is the arrival of its
+        // terminating branch, which is sound because a cycle is sequential —
+        // every element is an ancestor of the terminator by the time it exists.
+        const groups =
+          nodeDef.input.until === undefined
+            ? gatherGroups(
+                log,
+                collectionEdgeNames.flatMap((edgeName) =>
+                  log.instances(edgeName, correlationId).filter((collection) => !eaten.has(collection.seq)),
+                ),
+                members,
+                failed,
+              )
+            : gatherUntilGroups(
+                log,
+                log
+                  .instances(nodeDef.input.until.name, correlationId)
+                  .filter((terminator) => !eaten.has(terminator.seq)),
+                members,
+                failed,
+              );
+        candidates.push(...groups.map((group) => ({ nodeName, group })));
         continue;
       }
       if (nodeDef.input.kind === "allOf") {
