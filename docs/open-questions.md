@@ -18,8 +18,7 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-
-## Open (27)
+## Open (26)
 
 Live. Ordered alphabetically, not by priority.
 
@@ -27,7 +26,6 @@ Live. Ordered alphabetically, not by priority.
 - [The idiomatic way to branch makes every such run red](open-questions/branching-makes-every-run-red.md)
 - [Cardinality is invisible to a static crossing query](open-questions/cardinality-is-invisible.md)
 - [Where do client/server and PII obfuscation map onto nodes and edges?](open-questions/client-zones-and-obfuscation.md)
-- [No way to say "these N things vary only in configuration"](open-questions/configuration-versus-ontology.md)
 - [`correlation_id` origin and lifetime for multi-invocation threads](open-questions/correlation-id-lifetime.md)
 - [Declarations acceptance gate — required sign-off, loosening undecided](open-questions/declarations-acceptance-gate.md)
 - [Should a node ever be invoked directly, or is that just a one-node topology?](open-questions/direct-invocation.md)
@@ -57,8 +55,9 @@ Cannot be built as stated — the reason is in the file.
 
 - [Positional identity: `birthday.then.birthday` should run twice](open-questions/positional-identity.md) — **blocked** — two shipped things use the same syntax with opposite
 
-## Specced, not built (1)
+## Specced, not built (2)
 
+- [No way to say "these N things vary only in configuration"](open-questions/configuration-versus-ontology.md) — specced, not built — `2026-09-29-instantiation.md`, status draft
 - [Drift at a boundary, and forking a run to act on it](open-questions/drift-and-fork.md) — specced, not built — `2026-09-29-drift-and-fork.md`, status draft
 
 ## Resolved (13)
