@@ -40,7 +40,7 @@
  */
 
 import { readdir, readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -54,6 +54,14 @@ const ENTRY_DOCS = [
   "docs/design-history.md",
   "docs/open-questions.md",
   "docs/getting-started.md",
+  // One file per open question since 2026-09-29. They are entry docs in every
+  // sense that matters here — a reader lands on one directly, and several are
+  // the only place a spec is linked from — so both the link check and the
+  // findability check have to see them.
+  ...readdirSync(join(REPO, "docs/open-questions"))
+    .filter((name) => name.endsWith(".md"))
+    .sort()
+    .map((name) => `docs/open-questions/${name}`),
 ];
 
 /**
@@ -145,5 +153,61 @@ describe("docs — an implemented spec is findable", () => {
     }
 
     expect(implemented.filter((name) => !linked.has(name))).toEqual([]);
+  });
+});
+
+/**
+ * The open-questions directory's own discipline
+ * (docs/open-questions.md, split 2026-09-29).
+ *
+ * The split exists because one 15,000-word document let a question sit with a
+ * premise that had been false since it was written — weir already validated the
+ * boundary that entry claimed was unchecked — and nothing ever prompted
+ * re-reading it. A per-file `Last grounded:` date is the mechanism meant to stop
+ * that, and a mechanism nothing checks is the thing this repo keeps finding.
+ */
+describe("docs — every open question declares a status and a grounding date", () => {
+  it("every file in docs/open-questions carries both, in a parseable form", async () => {
+    const dir = join(REPO, "docs/open-questions");
+    const files = (await readdir(dir)).filter((name) => name.endsWith(".md")).sort();
+    // Guard against the check examining nothing if the layout moves.
+    expect(files.length).toBeGreaterThan(20);
+
+    const bad: string[] = [];
+    for (const name of files) {
+      const text = await readFile(join(dir, name), "utf8");
+      // A `# Title` first, so the index can be generated from the files rather
+      // than maintained beside them.
+      if (!/^# \S/m.test(text)) bad.push(`${name}: no title`);
+      // The same vocabulary the specs use, plus the two states only a question
+      // has.
+      if (!/^Status:.*\b(open|blocked|resolved|specced|partly)\b/im.test(text)) {
+        bad.push(`${name}: no recognized Status`);
+      }
+      if (!/^Last grounded: \d{4}-\d{2}-\d{2}/m.test(text)) {
+        bad.push(`${name}: no Last grounded date`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  /**
+   * The index is generated from the files, so a file that exists and is not
+   * listed is a file nobody will find. Checked rather than regenerated on the
+   * fly, because the point is that the two agree.
+   */
+  it("lists every question file in the index, and nothing that does not exist", async () => {
+    const dir = join(REPO, "docs/open-questions");
+    const files = new Set((await readdir(dir)).filter((n) => n.endsWith(".md")));
+    const index = await readFile(join(REPO, "docs/open-questions.md"), "utf8");
+
+    const listed = new Set(
+      relativeLinks(index)
+        .filter((t) => t.startsWith("open-questions/"))
+        .map((t) => t.slice("open-questions/".length)),
+    );
+
+    expect([...files].filter((f) => !listed.has(f)).sort()).toEqual([]);
+    expect([...listed].filter((f) => !files.has(f)).sort()).toEqual([]);
   });
 });
