@@ -1,6 +1,6 @@
 # Instantiation: one declaration, N contracts
 
-Status: draft.
+Status: implemented.
 
 ## Motivation
 
@@ -124,8 +124,12 @@ Three constraints this inherits rather than invents:
   elaboration and is gone.
 - **Instantiations are invariant.** `normalizeParcel_Osceola` is not assignable
   where `normalizeParcel_Iosco` is expected. They are different nodes.
-- **The closure is in the hash**, so two rows are two contracts. This already
-  holds and needs no change.
+- **The closure is in the hash**, so *editing* a row's parameters moves that
+  contract. Two rows are two contracts for a simpler reason, corrected during
+  the build: each is named `<template>_<key>` and the **name** is fingerprinted.
+  The closure's contribution is to the edit case, which is the same argument
+  `scope` was fingerprinted for — an accepted implementation must not stay valid
+  against a parameter it was never checked against.
 
 ## 4. Examples are per-row, because a template's examples cannot be honest
 
@@ -192,8 +196,11 @@ break-proof showed — including breaks that do **not** redden.
    and `examples/person-birthday`'s `expect_Person_age_42` passes the gate with
    a body that reads `closure.expected.Person.age` rather than hardcoding 42.
 2. A node with no closure resolves a plain `Fn`, unchanged.
-3. Two rows of one template produce two nodes with **different contract hashes**,
-   and the difference is the closure — the property instantiation rests on.
+3. Two rows of one template produce two nodes with **different contract hashes**.
+   Separately, and this is the one that needed care: a node whose **closure
+   changes with its name held constant** gets a new hash. The first draft of
+   this conflated them and passed with `closure` removed from the fingerprint
+   entirely, because it was measuring the names.
 4. One implementation body accepted for two rows lives at two paths and passes
    the gate twice, once per row's examples.
 5. `$var` substitution reaches `input`, `output` and `closure`, and an
@@ -206,3 +213,29 @@ break-proof showed — including breaks that do **not** redden.
 9. A duplicate `key` in the table is refused, since it would collide two nodes.
 10. Every existing example still elaborates, and no contract hash moves — nothing
     in the corpus declares `for:`, and `closure`'s hashing is unchanged.
+
+## What the build found
+
+**`closure` was schema-constrained to two shapes, and `design.md`'s description
+of it was not.** `nodeSchema` admitted only `{ expected }` or `{ literal }` —
+`expect`'s value and an origin's literal, the two uses that happened to exist —
+while `design.md` called the field "parameters baked in at elaboration time". A
+`for:` row's parameters are neither, so the schema had to widen to an open
+object.
+
+The cost, taken rather than hidden: schema-level typo detection on `expected` is
+gone, because a schema cannot both admit arbitrary objects and constrain
+specific shapes. One check survives generalization and was kept — the two
+conventions are mutually exclusive, so a closure declaring **both** is
+contradictory whatever else it carries.
+
+An attempt to keep both with a three-branch `oneOf` is worth recording because
+it failed in an instructive way: `{ expected }` matched the named branch *and*
+the open one, which `oneOf` forbids, so `examples/person-birthday` was rejected
+outright — and reported as a missing `literal`.
+
+**A test that measured the wrong thing.** See Testing #3. The draft asserted two
+rows differing only in closure get different hashes; it passed with `closure`
+removed from the fingerprint, because the row names differ and names are
+fingerprinted. Replaced with the edit case, which is what the property is
+actually about.

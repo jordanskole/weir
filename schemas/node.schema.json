@@ -143,39 +143,14 @@
       }
     },
     "closure": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "expected": {
-              "type": "object",
-              "minProperties": 1,
-              "additionalProperties": {
-                "type": "object"
-              },
-              "maxProperties": 1
-            }
-          },
-          "required": [
-            "expected"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "literal": {
-              "type": "object",
-              "minProperties": 1,
-              "additionalProperties": {}
-            }
-          },
-          "required": [
-            "literal"
-          ],
-          "additionalProperties": false
-        }
-      ]
+      "type": "object",
+      "minProperties": 1,
+      "not": {
+        "required": [
+          "expected",
+          "literal"
+        ]
+      }
     },
     "properties": {
       "type": "array",

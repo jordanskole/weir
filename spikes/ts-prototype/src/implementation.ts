@@ -86,6 +86,36 @@ export async function resolveImplementationAt<In extends InputSpec, O extends Ou
     throw new Error(`"${path}" must default-export the node's Fn.`);
   }
 
+  // **A closure is closed over, which is what the name says.** A node declaring
+  // `closure:` — "parameters baked in at elaboration time" — exports a function
+  // *of* those parameters, and resolution applies it once, here. The runtime
+  // then holds an ordinary `Fn` and never learns the node was parameterized
+  // (docs/superpowers/specs/2026-09-29-instantiation.md §2).
+  //
+  // Chosen over passing the closure as a second argument or hanging it on the
+  // envelope. The envelope is *per-invocation* runtime data and a closure is
+  // *per-contract* static data already in the hash, so putting it there would
+  // make the trace record it once per firing and make replay look as though it
+  // were re-supplying something that could have differed.
+  //
+  // The property that earns it: the accepted artifact stays **un-applied**, so
+  // one body can serve N contracts (§3's `for:` table) while each keeps its own
+  // hash, its own path, and its own gate run.
+  //
+  // Before this, `closure` was parsed, fingerprinted and exported in the sealed
+  // contract while being read by nothing — the parameter reached the drafting
+  // agent and never reached the function.
+  if (node.closure !== undefined) {
+    const applied = (mod.default as (closure: unknown) => unknown)(node.closure);
+    if (typeof applied !== "function") {
+      throw new Error(
+        `"${path}" declares a closure, so it must default-export a function OF the closure ` +
+          `— \`(closure) => (payload) => …\` — and applying it returned ${typeof applied}.`,
+      );
+    }
+    return { ...node, fn: applied as NodeDef<In, O>["fn"], implementationHash };
+  }
+
   return { ...node, fn: mod.default as NodeDef<In, O>["fn"], implementationHash };
 }
 

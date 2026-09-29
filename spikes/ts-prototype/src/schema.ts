@@ -484,21 +484,34 @@ export function nodeSchema(): object {
           additionalProperties: false,
         },
       },
+      // **An open object, since 2026-09-29.** `design.md` calls a closure
+      // "parameters baked in at elaboration time", and until instantiation it
+      // was a closed union of the two uses that happened to exist — `expect`'s
+      // `{ expected }` and an origin's `{ literal }`. A `for:` row's parameters
+      // are neither, and an author's are whatever their node's body needs.
+      //
+      // Those two remain the **conventions** and are what `contract.ts` and the
+      // synthesized nodes emit; they are no longer schema-enforced, because a
+      // schema cannot both admit arbitrary objects and constrain specific
+      // shapes. Stated rather than discovered: this gives up typo detection on
+      // `expected`, which used to be caught here. Attempting to keep both with
+      // a three-branch `oneOf` is what a first version did, and it rejected
+      // `examples/person-birthday` outright — `{ expected }` matched two
+      // branches, which `oneOf` forbids, and reported it as a missing
+      // `literal`.
+      //
+      // Not unguarded: an implementation reads `closure.expected`, so a typo
+      // fails that node's own examples at the acceptance gate. It fails later
+      // and with a worse message than it did.
+      //
+      // The one check kept, because it survives generalization: the two
+      // conventions are mutually exclusive, so a closure declaring **both** is
+      // contradictory whatever else it carries. An arbitrary parameter named
+      // neither of them is unaffected.
       closure: {
-        oneOf: [
-          {
-            type: "object",
-            properties: { expected: taggedOne(objectPayload) },
-            required: ["expected"],
-            additionalProperties: false,
-          },
-          {
-            type: "object",
-            properties: { literal: tagged({}) },
-            required: ["literal"],
-            additionalProperties: false,
-          },
-        ],
+        type: "object",
+        minProperties: 1,
+        not: { required: ["expected", "literal"] },
       },
       // JSON Schema's `properties` keyword, containing our field also named
       // `properties` — see this task's header note. Optional, unlike

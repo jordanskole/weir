@@ -55,15 +55,15 @@ Cannot be built as stated — the reason is in the file.
 
 - [Positional identity: `birthday.then.birthday` should run twice](open-questions/positional-identity.md) — **blocked** — two shipped things use the same syntax with opposite
 
-## Specced, not built (2)
+## Specced, not built (1)
 
-- [No way to say "these N things vary only in configuration"](open-questions/configuration-versus-ontology.md) — specced, not built — `2026-09-29-instantiation.md`, status draft
 - [Drift at a boundary, and forking a run to act on it](open-questions/drift-and-fork.md) — specced, not built — `2026-09-29-drift-and-fork.md`, status draft
 
-## Resolved (13)
+## Resolved (14)
 
 Kept because the reasoning is worth more than the answer, and because several specs and code comments cite them.
 
+- [No way to say "these N things vary only in configuration"](open-questions/configuration-versus-ontology.md) — resolved (2026-09-29) for the configuration half. The arithmetic half is open by design
 - [Should `membrane()` build the envelope before asserting input?](open-questions/envelope-before-assert.md) — resolved (2026-09-24 — build it first)
 - [YAML examples are tagged, TypeScript examples are bare, and the gate only knew the bare form](open-questions/examples-reach-the-gate.md) — resolved (2026-09-28)
 - [A fan-in fed by two independent origin nodes never fires](open-questions/fan-in-fed-by-two-independent-origins.md) — resolved (2026-09-25, the run root)

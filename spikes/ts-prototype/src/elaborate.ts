@@ -450,7 +450,18 @@ function resolveEdgeNameList(names: unknown, path: string, resolveEdge: EdgeReso
 
 /** Parse a `.node` file's YAML text (and its filename-derived name) into a validated NodeDecl. */
 export function parseNodeFile(yamlText: string, name: string, resolveEdge: EdgeResolver): NodeDecl {
-  const raw = parse(yamlText) as Record<string, unknown>;
+  return parseNodeDecl(parse(yamlText) as Record<string, unknown>, name, resolveEdge);
+}
+
+/**
+ * The body of `parseNodeFile`, taking an already-parsed object.
+ *
+ * Split out so an instantiated row (`for:`, below) goes through **the same**
+ * parser and the same schema check as a hand-written node, rather than a second
+ * path that would drift. A row is a node; nothing about it should be checked
+ * more loosely.
+ */
+function parseNodeDecl(raw: Record<string, unknown>, name: string, resolveEdge: EdgeResolver): NodeDecl {
   // Ahead of the schema, for the same reason as `.field`/`.edge`: "unknown
   // key" is true but does not say why the key cannot exist.
   if ("name" in raw) {
@@ -490,6 +501,110 @@ export function parseNodeFile(yamlText: string, name: string, resolveEdge: EdgeR
     ...(properties !== undefined && { properties: properties as NodeDecl["properties"] }),
     ...(typeof effect === "string" && { effect }),
   };
+}
+
+/** Matches a whole-string `$name` substitution in a `for:` template. */
+const SUBSTITUTION = /^\$([A-Za-z_][A-Za-z0-9_]*)$/;
+
+/**
+ * Substitutes a `for:` row's values into a template, recursively.
+ *
+ * **Whole-string only.** `$edge` is a substitution; `prefix$edge` is the literal
+ * string `prefix$edge`. Interpolation would make the grammar ambiguous the
+ * moment an author wants a literal `$`, and nothing in the motivating use case
+ * needs it — a row supplies an edge name, a field name, a separator, each of
+ * which is a whole value.
+ */
+function substitute(value: unknown, row: Record<string, unknown>, where: string): unknown {
+  if (typeof value === "string") {
+    const match = SUBSTITUTION.exec(value);
+    if (match === null) return value;
+    const key = match[1]!;
+    if (!(key in row)) {
+      throw new Error(
+        `${where}: "$${key}" is not a column of this row — the row declares ${Object.keys(row).join(", ") || "(nothing)"}.`,
+      );
+    }
+    return row[key];
+  }
+  if (Array.isArray(value)) return value.map((entry, i) => substitute(entry, row, `${where}[${i}]`));
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, substitute(v, row, `${where}.${k}`)]),
+    );
+  }
+  return value;
+}
+
+/**
+ * Parses a `.node` file declaring `for:` into N separate `NodeDecl`s, one per
+ * row (docs/superpowers/specs/2026-09-29-instantiation.md §3).
+ *
+ * **The table is the point, not the syntax.** 83 near-identical files assert
+ * that 83 different things exist; one table with 83 rows asserts that one thing
+ * exists in 83 configurations, which is the true claim — and it is reviewable as
+ * a unit. `design-history.md`'s "Generics: elaboration monomorphizes" named this
+ * exact failure as its own second cost: *"if the elaborator isn't pleasant to
+ * use, the forty declarations get hand-written instead."*
+ *
+ * Named `<template>_<key>`, single underscore — deliberately unlike
+ * `parseAnyOfNodeFile`'s `__`, which needs two because it joins an *edge* name
+ * that may already contain one. A row key is author-chosen, and the convention
+ * this replaces is `expect_Person_age_42`, a hand-written monomorphization with
+ * single underscores.
+ *
+ * Each row goes through `parseNodeDecl` — the same parser and the same schema
+ * check a hand-written node gets — after substitution, so nothing about a row is
+ * checked more loosely than the file it replaces.
+ */
+function parseInstantiatedNodeFile(
+  yamlText: string,
+  name: string,
+  resolveEdge: EdgeResolver,
+): Record<string, NodeDecl> {
+  const raw = parse(yamlText) as Record<string, unknown>;
+  const { for: rows, ...template } = raw as { for?: unknown } & Record<string, unknown>;
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error(`"for" must be a non-empty list of rows, each declaring a "key".`);
+  }
+  // Examples cannot live on the template: `given` is tagged by edge name, and
+  // the edge is exactly what varies per row, so a shared example would be wrong
+  // for every row but one (spec §4).
+  if ("examples" in template) {
+    throw new Error(
+      `a "for" template declares no "examples" — they belong on each row, because an example names ` +
+        `concrete edges and values and those are what a row varies. Move them under the row.`,
+    );
+  }
+
+  const declarations: Record<string, NodeDecl> = {};
+  const seen = new Set<string>();
+  for (const [index, entry] of rows.entries()) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`for[${index}] must be a row object.`);
+    }
+    const row = entry as Record<string, unknown>;
+    const key = row.key;
+    if (typeof key !== "string" || key.length === 0) {
+      throw new Error(`for[${index}] declares no "key" — a row's key names the node it elaborates to.`);
+    }
+    // Two rows with one key would collide into a single node, silently keeping
+    // whichever was parsed last.
+    if (seen.has(key)) throw new Error(`for[${index}]: duplicate key "${key}" — each row names a distinct node.`);
+    seen.add(key);
+
+    const { key: _key, examples, ...vars } = row;
+    const instantiated = {
+      ...(substitute(template, vars, `for[${index}]`) as Record<string, unknown>),
+      ...(examples !== undefined && { examples }),
+    };
+    const instanceName = `${name}_${key}`;
+    declarations[instanceName] = inFile(`${name}.node (for[${index}], key "${key}")`, () =>
+      parseNodeDecl(instantiated, instanceName, resolveEdge),
+    );
+  }
+  return declarations;
 }
 
 /**
@@ -1361,10 +1476,16 @@ export async function elaborate(root: string): Promise<Elaborated> {
   const nodes: Record<string, NodeDecl> = {};
   const anyOfAliases = new Map<string, string[]>();
   for (const [name, { text, file }] of nodeTextByName) {
-    const raw = parse(text) as { input?: unknown };
+    const raw = parse(text) as { input?: unknown; for?: unknown };
     const isAnyOf =
       raw.input !== null && typeof raw.input === "object" && !Array.isArray(raw.input) && "anyOf" in raw.input;
-    if (isAnyOf) {
+    if ("for" in raw) {
+      // One file, N nodes — the same shape `anyOf` already produces, for a
+      // different reason: `anyOf` desugars one declaration over several input
+      // edges, `for` instantiates one template over several configurations
+      // (docs/superpowers/specs/2026-09-29-instantiation.md §3).
+      Object.assign(nodes, inFile(file, () => parseInstantiatedNodeFile(text, name, resolveEdge)));
+    } else if (isAnyOf) {
       const shadows = inFile(file, () => parseAnyOfNodeFile(text, name, resolveEdge));
       Object.assign(nodes, shadows);
       anyOfAliases.set(name, Object.keys(shadows));

@@ -678,8 +678,10 @@ describe("runNetlist", () => {
       await mkdir(join(dir, "expect_Person_age_42"), { recursive: true });
       await writeFile(
         join(dir, "expect_Person_age_42", `${expectHash}.ts`),
-        `export default function expect_Person_age_42(payload) {
-  return payload.age === 42 ? { edge: "Pass", payload: {} } : { edge: "Fail", payload: {} };
+        `export default (closure) => function expect_Person_age_42(payload) {
+  return payload.age === closure.expected.Person.age
+    ? { edge: "Pass", payload: {} }
+    : { edge: "Fail", payload: {} };
 }
 `,
         "utf8",

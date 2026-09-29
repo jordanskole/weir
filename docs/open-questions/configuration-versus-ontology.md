@@ -1,6 +1,6 @@
 # No way to say "these N things vary only in configuration"
 
-Status: specced, not built — `2026-09-29-instantiation.md`, status draft.
+Status: resolved (2026-09-29) for the configuration half. The arithmetic half is open by design.
 Last grounded: 2026-09-29.
 
 ## The question
@@ -65,9 +65,10 @@ hashed and exported in the sealed contract, and appears nowhere in `membrane.ts`
 agent and never reaches the function — a declared parameter no implementation can
 read.
 
-[The instantiation spec](../superpowers/specs/2026-09-29-instantiation.md)
-covers both: delivering the closure by partial application at resolution, and a
-`for:` table that elaborates one declaration into N contracts.
+[Instantiation](../superpowers/specs/2026-09-29-instantiation.md) is built:
+the closure is applied by partial application at resolution, so an
+implementation can finally read it, and a `for:` table elaborates one
+declaration into N contracts, one per row.
 
 ## What stays open under it
 

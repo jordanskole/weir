@@ -153,7 +153,25 @@ export async function acceptImplementation(
       if (typeof mod.default !== "function") {
         return { accepted: false, reason: "load-failed", error: "the candidate must default-export the node's Fn." };
       }
-      fn = mod.default as NodeDef["fn"];
+      // Same partial application `resolveImplementationAt` performs, for the
+      // same reason: a node declaring `closure:` exports a function *of* it
+      // (docs/superpowers/specs/2026-09-29-instantiation.md §2). Applied here
+      // too, or a parameterized node could never be accepted — the gate would
+      // invoke the un-applied function and every example would fail against a
+      // returned function rather than a payload.
+      if (nodeDecl.closure !== undefined) {
+        const applied = (mod.default as (closure: unknown) => unknown)(nodeDecl.closure);
+        if (typeof applied !== "function") {
+          return {
+            accepted: false,
+            reason: "load-failed",
+            error: `this node declares a closure, so the candidate must default-export a function OF the closure — \`(closure) => (payload) => …\` — and applying it returned ${typeof applied}.`,
+          };
+        }
+        fn = applied as NodeDef["fn"];
+      } else {
+        fn = mod.default as NodeDef["fn"];
+      }
     } catch (cause) {
       return { accepted: false, reason: "load-failed", error: (cause as Error).message };
     }

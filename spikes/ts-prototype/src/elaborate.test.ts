@@ -2270,3 +2270,155 @@ describe("elaborate — gather", () => {
     await expect(elaborate(root)).resolves.toBeDefined();
   });
 });
+
+describe("elaborate — `for:` instantiates one declaration into N contracts", () => {
+  const EDGE = (name: string, field: string) =>
+    `label: ${name}\ndescription: d\nfields:\n  ${field}:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`;
+
+  /** Two counties' raw shapes, one normalized shape, and a template over them. */
+  const parcelFixture = (template: string) => ({
+    "edges/OsceolaRaw.edge": EDGE("OsceolaRaw", "PIN"),
+    "edges/IoscoRaw.edge": EDGE("IoscoRaw", "TaxID"),
+    "edges/NormalizedParcel.edge": EDGE("NormalizedParcel", "pin"),
+    "nodes/normalize.node": template,
+    "topology/main.topology": rootTopology("OsceolaRaw", "NormalizedParcel", ["normalize_Osceola"], "normalize_Osceola: {}\n"),
+  });
+
+  const TWO_COUNTIES = `description: d
+for:
+  - key: Osceola
+    edge: OsceolaRaw
+    pinField: PIN
+    examples:
+      - given: { OsceolaRaw: { PIN: "10 003" } }
+        expect: { NormalizedParcel: { pin: "10-003" } }
+  - key: Iosco
+    edge: IoscoRaw
+    pinField: TaxID
+    examples:
+      - given: { IoscoRaw: { TaxID: "062 026" } }
+        expect: { NormalizedParcel: { pin: "062-026" } }
+input: $edge
+output: NormalizedParcel
+closure:
+  pinField: $pinField
+`;
+
+  /**
+   * **Spec Testing #3 and #5 together — the property the whole feature rests
+   * on.** Two rows are two *contracts*, not one contract used twice. If their
+   * hashes collided, one accepted implementation would serve both and the gate
+   * would have checked only one of them.
+   *
+   * Break-proof, and it does **not** redden: dropping `closure` from
+   * `fingerprintNode` leaves these two hashes different, because each row is
+   * named `<template>_<key>` and the name is fingerprinted. Recorded rather
+   * than left looking like proof — this asserts that instantiation *produces*
+   * two contracts, which the names already guarantee. The closure's own
+   * contribution is asserted below, with the name held constant.
+   */
+  it("elaborates one template into two nodes with different contract hashes", async () => {
+    const { hashNode } = await import("./hash.js");
+    const program = await elaborate(await writeFixture(parcelFixture(TWO_COUNTIES)));
+
+    expect(Object.keys(program.nodes).sort()).toEqual(["normalize_Iosco", "normalize_Osceola"]);
+    // $edge reached `input`, $pinField reached `closure`.
+    expect(program.nodes.normalize_Osceola!.input.edge.name).toBe("OsceolaRaw");
+    expect(program.nodes.normalize_Iosco!.input.edge.name).toBe("IoscoRaw");
+    expect(program.nodes.normalize_Osceola!.closure).toEqual({ pinField: "PIN" });
+    expect(program.nodes.normalize_Iosco!.closure).toEqual({ pinField: "TaxID" });
+
+    const a = await hashNode(program.nodes.normalize_Osceola!);
+    const b = await hashNode(program.nodes.normalize_Iosco!);
+    expect(a.hash).not.toBe(b.hash);
+  });
+
+  /**
+   * **Spec Testing #3, and the version that says something.** A first draft of
+   * this asserted that two rows differing only in closure get different hashes
+   * — and it passed with `closure` removed from `fingerprintNode` entirely,
+   * because each row is named `<template>_<key>` and **the name is
+   * fingerprinted**. It was measuring the names.
+   *
+   * The property that actually needs holding is about *editing*: a node whose
+   * closure changes must get a new contract hash, or its accepted
+   * implementation stays valid against a parameter it was never checked
+   * against. That is the same argument `scope` was fingerprinted for.
+   *
+   * Break-proof: removing the `closure` line from `fingerprintNode` makes these
+   * two equal and reddens this. The name is held constant precisely so it
+   * cannot do the work.
+   */
+  it("moves a node's contract hash when its closure changes, name held constant", async () => {
+    const { hashNode } = await import("./hash.js");
+    const base = {
+      name: "normalize",
+      input: { kind: "single" as const, edge: { name: "A", label: "A", description: "d", fields: {} } },
+      output: { kind: "single" as const, edge: { name: "A", label: "A", description: "d", fields: {} } },
+    };
+
+    const loose = await hashNode({ ...base, closure: { separator: " " } } as never);
+    const tight = await hashNode({ ...base, closure: { separator: "-" } } as never);
+
+    expect(loose.hash).not.toBe(tight.hash);
+  });
+
+  /** Spec Testing #5: an unsubstituted `$var` is an error, never a literal. */
+  it("refuses a `$var` the row does not supply, rather than passing it through", async () => {
+    await expect(
+      elaborate(
+        await writeFixture(
+          parcelFixture(TWO_COUNTIES.replace("closure:\n  pinField: $pinField", "closure:\n  pinField: $missingColumn")),
+        ),
+      ),
+    ).rejects.toThrow(/"\$missingColumn" is not a column of this row/);
+  });
+
+  /** Spec Testing #9: two rows with one key would collide into a single node. */
+  it("refuses a duplicate key", async () => {
+    await expect(
+      elaborate(await writeFixture(parcelFixture(TWO_COUNTIES.replace("key: Iosco", "key: Osceola")))),
+    ).rejects.toThrow(/duplicate key "Osceola"/);
+  });
+
+  /**
+   * Spec Testing #6, via the schema rather than a rule of its own: a row's
+   * declaration is parsed by `parseNodeDecl` like any node, and `nodeSchema`
+   * already requires non-empty examples. The point of the assertion is that a
+   * `for:` table cannot smuggle in N unexercised nodes — every row pays what a
+   * hand-written node pays.
+   */
+  it("refuses a row with no examples, for the same reason a node with none is refused", async () => {
+    const noExamples = TWO_COUNTIES.replace(
+      `    examples:
+      - given: { IoscoRaw: { TaxID: "062 026" } }
+        expect: { NormalizedParcel: { pin: "062-026" } }
+`,
+      "",
+    );
+    await expect(elaborate(await writeFixture(parcelFixture(noExamples)))).rejects.toThrow(/examples/);
+  });
+
+  /** Spec §4: examples on the template would be wrong for every row but one. */
+  it("refuses examples on the template, naming where they belong", async () => {
+    const onTemplate = `${TWO_COUNTIES}examples:
+  - given: { OsceolaRaw: { PIN: "x" } }
+    expect: { NormalizedParcel: { pin: "x" } }
+`;
+    await expect(elaborate(await writeFixture(parcelFixture(onTemplate)))).rejects.toThrow(
+      /they belong on each row/,
+    );
+  });
+
+  /**
+   * Spec Testing #8: the netlist names instances, never the template — the
+   * monomorphization rule's "no type variable in the emitted netlist", applied
+   * to `for:`. `normalize` itself must not exist as a node.
+   */
+  it("puts instances in the program and never the template", async () => {
+    const program = await elaborate(await writeFixture(parcelFixture(TWO_COUNTIES)));
+
+    expect(program.nodes.normalize).toBeUndefined();
+    expect(Object.keys(program.nodes)).toHaveLength(2);
+  });
+});
