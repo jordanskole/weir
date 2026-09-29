@@ -87,11 +87,25 @@ one that reaches the log, and that is the thing to break-proof.
 `Envelope` gains `undeclared?: string[]` — the key names, sorted, present only
 when non-empty.
 
-**Names on the envelope, values in the trace.** The trace already records the
-invocation's raw `result` before anything downstream sees it, so the values
-survive without being copied anywhere new. The envelope carries only what an
-agent needs to *trigger* on, which also keeps the sensitive half in exactly one
-place rather than two.
+**Names on the envelope, values in the trace.** The envelope carries only what an
+agent needs to *trigger* on, which keeps the sensitive half in one place rather
+than two.
+
+**The trace only holds the raw result on the path where it passed, and that is
+not good enough.** Checked rather than assumed, after this section first claimed
+the values "survive without being copied anywhere new". On a *failed* assertion
+the trace's `result` is the `Failed_X` payload — `{input, reason}` — and the
+shape the handler actually returned is recorded **nowhere**:
+
+```
+handler returns { pin: "x", acres: "three point five", surprise: "..." }
+trace result:   { input: {pin:"x"}, reason: "Parcel: acres should be number, got string." }
+```
+
+So this spec must also **record the raw result in the trace when an assertion
+fails**, not only when it passes. Without it §5's fork has nothing to re-validate
+for exactly the run that most needs re-validating, and the discovery loop below
+is impossible.
 
 Not fingerprinted, and not part of `schemaHash`: this is an observation about one
 invocation, not a declaration.
@@ -125,7 +139,9 @@ Cross-run ancestry is then explicit and queryable without disturbing
 declarations, into a new `correlationId`. The execution rule is a hybrid, and
 it is the heart of this spec:
 
-- **Effect nodes return the parent's recorded result**, read from the trace.
+- **Effect nodes return the parent's recorded result**, read from the trace —
+  including a result that *failed* assertion in the parent, which is the whole
+  point of recording it (§3).
   `replay.ts:65` already does exactly this for the same reason: an effect is
   where nondeterminism entered, and letting it re-enter would make the fork
   incomparable to its parent. It is also the only option that works — a drifted
@@ -142,6 +158,26 @@ varies only the declarations. The comparison is sound.
 **A fork needs no effect handlers, and no credentials.** `--effects` is not a
 parameter. Every effect comes from the trace, so a production run can be forked
 on a laptop with no access to the systems it touched.
+
+## 5b. Discovery, not just drift — the larger claim this buys
+
+With §3's failed-path recording, the loop covers a case the spec did not
+originally reach. **Additive drift** (a server starts sending a field) passes
+assertion, so `undeclared` is populated and the values are in the trace.
+**Discovery** — not knowing the field names yet — and **truncation** — a
+shapefile-derived `c_Parcel_I` where `Parcel_ID` was expected — both make a
+*declared* field missing, so assertion **fails** and `undeclared` is never
+reached.
+
+Those are the cases a real integration starts in. The sibling project's field
+names were *"discovered by querying live servers and corrected months later"*;
+you cannot declare a schema you do not have. Recording the raw result on the
+failing path turns that into: **run once against the live server, then fork
+offline against candidate schemas until one validates.** No credentials, no
+second request, and the server's actual bytes as the fixture.
+
+The `Failed_X` reason should also name the observed keys, so the first failure
+is itself the beginning of the schema rather than only a complaint about it.
 
 ## 6. The fork point is derived, and the blocked nodes are the answer
 
@@ -210,5 +246,12 @@ break-proof showed — including breaks that do **not** redden.
     case, and the one that shows fork and `verify` are the same machinery.
 12. `replay` refuses a contract-drifted **effect** node, closing the
     unreachable-refusal hole in §6.
-13. Every existing example still elaborates and runs, and no logged payload
+13. **The raw result reaches the trace when the assertion *fails*** — the case
+    §3 originally got wrong, and the one §5b depends on. The break-proof is the
+    before-state: the trace records `{input, reason}` and the observed shape is
+    unrecoverable.
+14. A run that failed assertion can be forked against a widened declaration and
+    succeed — schema discovery end to end, with no handler supplied.
+15. The `Failed_X` reason names the observed keys.
+16. Every existing example still elaborates and runs, and no logged payload
     anywhere gains or loses a field.
