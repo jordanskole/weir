@@ -94,6 +94,20 @@ ship, crossings arrive here, `lossy` cannot exist yet (2026-09-28-the-planner.md
   §7's leakage rule is a *static query*, and this is the half that makes it
   expressible.
 
+## Corroboration from a real codebase
+
+Asked after the fact what its boundaries actually look like, the sibling
+pressure-test project supplied an argument for declaring a zone that this spec
+had only asserted: two of its county adapters route their queries through a
+**commercial third-party proxy** rather than to the county directly, behind an
+interface identical to the direct adapters. Nothing in the types distinguishes
+them — same signature, same shape, different trust boundary.
+
+So a zone genuinely cannot be inferred from the data or the contract. It has to
+be declared, by somebody who knows where the code runs. That is the case for
+§1's design rather than a nice-to-have, and it arrived from outside rather than
+from reasoning about the examples in this repo.
+
 ## What the build found
 
 **`declaredIn` had to be recorded rather than derived.** §2 says a node's zone is

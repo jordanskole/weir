@@ -14,6 +14,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { defineEdge, defineField } from "./define.js";
 import { elaborate } from "./elaborate.js";
+import { exportContract } from "./contract.js";
 import { hashEdge, hashNode } from "./hash.js";
 import { fieldSchema } from "./schema.js";
 import { classificationsOf, crossings } from "./zones.js";
@@ -131,6 +132,29 @@ describe("classification — what a crossing carries", () => {
     loop.fields = { self: loop, tag: utf8({ classification: "internal" }) };
 
     expect(classificationsOf(loop as never)).toEqual(["internal"]);
+  });
+
+  /**
+   * Not in the spec — prompted by the sibling project weir's docs name as its
+   * pressure-test, whose own schema hash covers column *names* only. Change a
+   * column's type without touching a name and its hash is identical, so the
+   * gate passes on a snapshot the reader will silently misread.
+   *
+   * The analogous hole here would be: hash the field path but not the label, so
+   * relabelling `pii` to `public` leaves the hash unchanged and the gate passes.
+   * weir does not have it — `classification` is fingerprinted (above) *and*
+   * reaches the sealed contract, so an agent drafting an implementation can see
+   * what it is handling. Pinned here because both halves are easy to lose and
+   * neither would announce itself.
+   */
+  it("reaches the sealed contract an isolated agent drafts against", async () => {
+    const { nodes } = await elaborate(join(EXAMPLES, "soc-triage/src"));
+
+    const contract = exportContract(nodes.investigateIdentity!);
+    const fields = (contract.input as { fields: Record<string, { classification?: string }> }).fields;
+
+    expect(fields.value!.classification).toBe("pii");
+    expect(fields.id!.classification).toBeUndefined();
   });
 
   /** Spec Testing #8. */
