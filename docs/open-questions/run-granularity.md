@@ -1,7 +1,7 @@
 # Run granularity: a batch job's output has nowhere to live
 
 Status: open.
-Last grounded: 2026-09-29.
+Last grounded: 2026-09-29 — re-grounded after the residue fix; one of its two blockers is gone.
 
 The pressure-test's real job is **17,839 parcels producing one artifact**. Two
 framings, neither of which works:
@@ -22,9 +22,16 @@ gather that tolerates holes.
 
 - [Pagination cannot be gathered](pagination-cannot-be-gathered.md) — a barrier
   for a set whose size is discovered by running.
-- [Branching makes every run red](branching-makes-every-run-red.md) — the holes
-  half. Real semantics are "that parcel gets a null with a note; the other 3,264
-  still produce cards", and weir has no way to say that is a finished run.
+- ~~[Branching makes every run red](branching-makes-every-run-red.md) — the
+  holes half.~~ **Resolved 2026-09-29.** The shape the reporter actually
+  modelled for "a null is data" — `oneOf: [Found, Unavailable]` with a handler
+  each — no longer reports a stall, so a corridor run where some parcels take
+  the unavailable branch now finishes clean. What is *not* covered is a genuine
+  `Failed_*` among 3,265 elements, which `gather`'s all-or-nothing deadness rule
+  still kills: `sequence`'s signature says one element's failure is the whole
+  result's. Whether a batch wants a `traverse` that tolerates failures — a
+  partial collection plus a failure list — is the remaining half, and it is a
+  question about `gather`, not about run granularity.
 
 The residue concept is close to what is wanted. The ask was to report it **into
 the payload** rather than only to the exit code.
