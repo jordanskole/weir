@@ -18,7 +18,7 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-## Open (27)
+## Open (26)
 
 Live. Ordered alphabetically, not by priority.
 
@@ -30,7 +30,6 @@ Live. Ordered alphabetically, not by priority.
 - [Declarations acceptance gate — required sign-off, loosening undecided](open-questions/declarations-acceptance-gate.md)
 - [Should a node ever be invoked directly, or is that just a one-node topology?](open-questions/direct-invocation.md)
 - [Which parts of a node declaration are contract, and which are commentary?](open-questions/examples-in-the-contract-hash.md)
-- [No extensible envelope, so cross-cutting metadata is an edit to every edge](open-questions/extensible-envelope.md)
 - [`Failed<In>.input` is typed as validated data it never was](open-questions/failed-input-is-typed-as-valid.md)
 - [Should `Failed<In>` be tagged like `oneOf`'s other branches?](open-questions/failed-tagging.md)
 - [A gather composes with nothing](open-questions/gather-composes-with-nothing.md)
@@ -55,6 +54,10 @@ Live. Ordered alphabetically, not by priority.
 Cannot be built as stated — the reason is in the file.
 
 - [Positional identity: `birthday.then.birthday` should run twice](open-questions/positional-identity.md) — **blocked** — two shipped things use the same syntax with opposite
+
+## Specced, not built (1)
+
+- [No extensible envelope, so cross-cutting metadata is an edit to every edge](open-questions/extensible-envelope.md) — specced, not built — `2026-09-29-the-declared-envelope.md`, status draft
 
 ## Resolved (16)
 

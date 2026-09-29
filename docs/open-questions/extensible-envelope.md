@@ -1,6 +1,6 @@
 # No extensible envelope, so cross-cutting metadata is an edit to every edge
 
-Status: open. Recurred independently in two unrelated subgraphs.
+Status: specced, not built — `2026-09-29-the-declared-envelope.md`, status draft.
 Last grounded: 2026-09-29.
 
 ## The question
@@ -36,9 +36,24 @@ answered — are the same algebra with different lifetimes, and weir supports on
 one lifetime. A declared envelope propagating along lineage is the natural home
 for the second.
 
-## A precedent to set deliberately
+## A precedent that was set, then decided
 
 `undeclared?: string[]` from [the drift spec](../superpowers/specs/2026-09-29-drift-and-fork.md)
-§3 would be the **first extensible field on the envelope**. Whether that
-generalizes into an author-declared envelope is this question, and it is better
-decided than discovered.
+§3 shipped on 2026-09-29 and **is** the first extensible field on the envelope —
+so the precedent this entry warned about being set by accident was set that
+morning. Deciding the general shape the same day was cheap; after three more
+ad-hoc fields it would have been a migration. That timing is the whole argument
+for having picked this next.
+
+[The declared envelope](../superpowers/specs/2026-09-29-the-declared-envelope.md)
+is the answer, and the shape it took was not the one this entry assumed. It is
+**not a new mechanism**: `scope` already governs who may read envelope-delivered
+metadata (`read:Identity:<field>`, whose error message says *"resolves to
+anything today"*), and reusing it is what keeps adding an envelope field from
+moving every contract hash in the program — only nodes that name the new field
+are re-accepted.
+
+What genuinely differs from `Identity` is propagation, not reading: `identity` is
+run-global, supplied once at the trigger and identical for every token, while
+this is per-token and flows along lineage. That distinction is the spec's §1 and
+was not obvious from this entry.
