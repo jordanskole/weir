@@ -185,7 +185,11 @@ The consumer's input type *is* the proof the decision was made, so it is never r
 
 **Some things become unreachable rather than merely discouraged.** If only `authorize` emits `AuthorizedPayment`, and `charge_card` takes `AuthorizedPayment` as input, then charging an unauthorized card is not a code review finding. There is no wiring that expresses it.
 
-**Failure is an edge, not a mechanism.** Every node's real output signature includes `Failed<In>`, carrying the original payload so a retry node has something to re-emit. Retry is a node consuming `Failed<In>`. Dead-letter is a node with no output. Unhandled failure is a type error rather than a 3am surprise. Authors don't write the catch — an uncaught exception becomes `Failed<In>` automatically.
+**Failure is an edge, not a mechanism.** Every node's real output signature includes `Failed<In>`, carrying the original payload so a retry node has something to re-emit. Retry is a node consuming `Failed<In>`. Dead-letter is a node with no output. Unhandled failure is a type error rather than a 3am surprise. Authors don't write the catch — an uncaught exception becomes `Failed<In>` automatically. The synthesized edge is named after the input it carries, so the `Failed<In>` of a node taking `ParcelRequest` is the edge `Failed_ParcelRequest`, and that is the name it has in the log, in `weir sys`, and anywhere you wire it.
+
+**Every boundary is asserted, including the ones the host controls.** A node's input is asserted against its declared edge at the membrane. An *effect* node's result is asserted too, against its declared output edge, before it can reach the log — a host handler is host code and no more trusted than a drafted `Fn`, and unlike a drafted one it never passed through the acceptance gate, so runtime is where the equivalent check has to live. A handler returning the wrong shape produces `Failed_X` carrying the reason (`acres should be number, got string`) exactly as a thrown exception would, and the run stops without reaching its declared end.
+
+One limit worth knowing, because it is the difference between a floor and a description: an edge currently checks that every *declared* field is present and well-typed, not that every *present* field is declared, so an undeclared field rides along. Closing that — and forking a run to re-validate against a widened schema — is specced in [drift and fork](docs/superpowers/specs/2026-09-29-drift-and-fork.md).
 
 ## Why the boxes are small
 
@@ -214,6 +218,17 @@ And a cycle in the wiring is not a loop — it is recursion. What a `while` loop
 **Tests live in the contract.** You have already seen them: the `examples` block in `bake.node` is part of the node's declaration, not a separate test file, and the acceptance gate runs them before a drafted implementation is allowed to persist at all.
 
 The intended end state goes further — `expect` as an ordinary node with `oneOf: [Pass, Fail]`, so a test run is a graph execution on production machinery and a production log entry can be promoted to a test case directly. That part is design, not built: today an example is a declared `given`/`expect` pair the gate invokes directly.
+
+Properties are written as expressions over the invocation's `input` and `output`, not as prose. The whole operator set is `lit` and `get` for values and paths, `eq` `ne` `lt` `lte` `gt` `gte` for comparison, `add` and `sub` for arithmetic, `and` `or` `not` `implies` for logic — and nothing else, which is what keeps a property decidable and hashable into the contract. A path is `input.title` for a `single` input and `input.Dough.title` for an `allOf` bag, naming the edge:
+
+```yaml
+properties:
+  - name: mix never changes a recipe's title
+    expr:
+      eq:
+        - get: input.title
+        - get: output.title
+```
 
 Examples are the weaker half. Because a node's input is fully typed, that type doubles as a generator — `age: uint8` supplies a domain, `validations.min`/`max` narrow it, `enumValues` enumerates it — so a property like *mix never changes a recipe's title or serving count* costs about as much to write as one example and rules out far more. There is nothing to mock, because there are no impure dependencies to isolate.
 

@@ -1,0 +1,37 @@
+label: Rate
+description: >-
+  One exchange rate, and where it came from. `provenance` is the reason this
+  example is worth reading: the two nodes that can produce a Rate produce
+  visibly different ones, so a consumer can tell a live answer from a fallback
+  without inspecting how it was obtained.
+fields:
+  base:
+    type: utf8
+    label: Base
+    description: ISO 4217 code of the currency being priced
+    nullable: false
+  quote:
+    type: utf8
+    label: Quote
+    description: ISO 4217 code of the currency it is priced in
+    nullable: false
+  rate:
+    type: f64
+    label: Rate
+    description: Units of quote currency per one unit of base
+    nullable: false
+    validations:
+      min: 0
+      max: 1000000
+  provenance:
+    # The only `enumValues` in the example corpus, which is why it is here as
+    # much as for what it says: a reader looking for the syntax had nowhere to
+    # find it. `enumValues` is a sibling of `type`, NOT a member of
+    # `validations` — the mistake the first outside reader made.
+    type: utf8
+    label: Provenance
+    description: Whether this rate came from the upstream service or a local fallback
+    nullable: false
+    enumValues:
+      - live
+      - fallback

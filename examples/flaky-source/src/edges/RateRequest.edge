@@ -1,0 +1,21 @@
+label: Rate Request
+description: >-
+  A request for one currency pair's exchange rate. The trigger for this
+  example's only run.
+fields:
+  base:
+    type: utf8
+    label: Base
+    description: ISO 4217 code of the currency being priced
+    nullable: false
+    validations:
+      minLength: 3
+      maxLength: 3
+  quote:
+    type: utf8
+    label: Quote
+    description: ISO 4217 code of the currency it is priced in
+    nullable: false
+    validations:
+      minLength: 3
+      maxLength: 3

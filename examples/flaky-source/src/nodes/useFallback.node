@@ -1,0 +1,29 @@
+label: Use Fallback
+description: >-
+  Consume the failure and answer anyway. This is the first node in the corpus
+  to declare a synthesized failure edge as its input, and it is what
+  `design.md` §3 means by *"retry is a node consuming Failed<In>"* — the
+  recovery path is a node on the graph, wired in the topology, visible in
+  `weir graph`, and checked by the acceptance gate like any other.
+
+  Nothing here catches an exception. `Failed_RateRequest` arrived as an
+  ordinary edge instance citing the request that produced it, so lineage,
+  joins and replay apply to it with no second mechanism.
+
+  It answers `provenance: fallback`, which is the whole reason `Rate` carries
+  that field: a caller can tell a degraded answer from a live one.
+input: Failed_RateRequest
+output: Rate
+examples:
+  - given:
+      Failed_RateRequest:
+        input:
+          base: EUR
+          quote: USD
+        reason: "Rate: rate should be number, got string."
+    expect:
+      Rate:
+        base: EUR
+        quote: USD
+        rate: 1
+        provenance: fallback

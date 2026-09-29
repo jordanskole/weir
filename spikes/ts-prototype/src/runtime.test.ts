@@ -40,6 +40,7 @@ const RECIPE_SRC = fileURLToPath(new URL("../../../examples/recipe/src", import.
 const ESCALATION_SRC = fileURLToPath(new URL("../../../examples/escalation/src", import.meta.url));
 const REVIEW_SRC = fileURLToPath(new URL("../../../examples/manuscript-review/src", import.meta.url));
 const SOC_SRC = fileURLToPath(new URL("../../../examples/soc-triage/src", import.meta.url));
+const FLAKY_SRC = fileURLToPath(new URL("../../../examples/flaky-source/src", import.meta.url));
 
 /**
  * `summarizeAlert`'s implementation, shared by the two soc-triage tests
@@ -3026,5 +3027,95 @@ describe("runNetlist — spread", () => {
     // proves nothing.
     const verdicts = log.instances("Verdict", "t").map((i) => (i.payload as { combined: string }).combined);
     expect(verdicts.sort()).toEqual(["L:a+C:a", "L:b+C:b"]);
+  });
+});
+
+describe("examples/flaky-source — a boundary that misbehaves", () => {
+  /**
+   * The example added because every other one is a clean fixture
+   * (examples/flaky-source/README.md). It is the only one declaring an
+   * `effect:`, the only one routing a `Failed_*` edge, and the only one with an
+   * `enumValues` field — each of which a reader previously had to learn from an
+   * error message.
+   *
+   * These two tests are the README's central claim: **both paths finish
+   * cleanly.** A recovery path that answers correctly but reports a stall would
+   * be worse than none, and the mutually-exclusive-join shape recorded in
+   * open-questions.md does exactly that — so this asserts the failure route is
+   * not that shape.
+   */
+  async function flakyProgram(handler: (p: unknown) => unknown) {
+    const dir = await mkdtemp(join(tmpdir(), "weir-flaky-"));
+    const raw = await elaborate(FLAKY_SRC);
+    // Only `useFallback` needs one: `fetchRate` is an effect, performed by the
+    // host and never resolved to a drafted implementation.
+    const hash = (await hashNode(raw.nodes.useFallback!)).short;
+    await mkdir(join(dir, "useFallback"), { recursive: true });
+    await writeFile(
+      join(dir, "useFallback", `${hash}.ts`),
+      `export default function useFallback(failed) {\n` +
+        `  return { base: failed.input.base, quote: failed.input.quote, rate: 1, provenance: "fallback" };\n` +
+        `}\n`,
+      "utf8",
+    );
+    const program = await elaborateWithImplementations(FLAKY_SRC, dir);
+    return { program, effects: { http: handler } };
+  }
+
+  it("answers live when the source behaves, leaving no residue", async () => {
+    const { program, effects } = await flakyProgram((p: any) => ({ ...p, rate: 1.09, provenance: "live" }));
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      program,
+      { correlationId: "ok", originPayloads: { fetchRate: { base: "EUR", quote: "USD" } } },
+      { log, effects },
+    );
+
+    expect(result.residue).toEqual([]);
+    expect(result.unmet).toEqual([]);
+    expect(log.instances("Rate", "ok").map((i) => i.payload)).toEqual([
+      { base: "EUR", quote: "USD", rate: 1.09, provenance: "live" },
+    ]);
+    expect(log.instances("Failed_RateRequest", "ok")).toHaveLength(0);
+  });
+
+  /**
+   * **The one that matters.** The handler returns `rate` as a string, which
+   * `Rate` does not permit. Nothing throws and nothing catches: the runtime
+   * asserts the host's result against the declared output edge, and the
+   * mismatch becomes an ordinary `Failed_RateRequest` instance that the
+   * recovery node consumes like any other input.
+   *
+   * Break-proof: removing `assertOutput` from the effect wrapper in
+   * `runtime.ts` makes the bad payload a `Rate` — the run then produces
+   * `rate: "one point oh nine"` with `provenance: "live"`, no failure edge is
+   * emitted, `useFallback` never fires, and the first two assertions redden.
+   * That is precisely the hole the example exists to make visible.
+   */
+  it("routes the failure to the fallback when the source misbehaves, and still finishes clean", async () => {
+    const { program, effects } = await flakyProgram((p: any) => ({
+      ...p,
+      rate: "one point oh nine",
+      provenance: "live",
+    }));
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      program,
+      { correlationId: "bad", originPayloads: { fetchRate: { base: "EUR", quote: "USD" } } },
+      { log, effects },
+    );
+
+    const failed = log.instances("Failed_RateRequest", "bad");
+    expect(failed).toHaveLength(1);
+    expect((failed[0]!.payload as { reason: string }).reason).toContain("rate should be number");
+    // The recovery path answered, and said how.
+    expect(log.instances("Rate", "bad").map((i) => i.payload)).toEqual([
+      { base: "EUR", quote: "USD", rate: 1, provenance: "fallback" },
+    ]);
+    // A degraded answer is still a finished run, not a stall.
+    expect(result.residue).toEqual([]);
+    expect(result.unmet).toEqual([]);
   });
 });

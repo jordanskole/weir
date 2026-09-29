@@ -1,0 +1,16 @@
+# One request in, one Rate out, by whichever of two routes the upstream
+# service permits.
+#
+# Both nodes are terminals, deliberately. A run answers through exactly one of
+# them, and `output: Rate` alone would not say that either is an ending -- the
+# terminal list is what makes "the fallback also finishes the job" a declared
+# fact rather than an accident of which node happened to emit last.
+input: RateRequest
+output: Rate
+terminals:
+  - fetchRate
+  - useFallback
+wiring:
+  fetchRate:
+    then:
+      useFallback: {}

@@ -1,0 +1,19 @@
+label: Fetch Rate
+description: >-
+  Ask the upstream service for a rate. The only node in the example corpus that
+  declares an `effect:`, and the only one whose output is not guaranteed by the
+  acceptance gate — a host handler never passes through it.
+
+  So this node's output is asserted at RUNTIME, against `Rate`, before it can
+  reach the log. That is not a special case for effects; it is where the
+  equivalent of the gate has to live for code the gate never saw. If the
+  handler returns a string where `rate` should be a number, or omits
+  `provenance`, or invents a `provenance` outside the declared enum, the result
+  never becomes a Rate: it becomes `Failed_RateRequest`, carrying the original
+  request and the reason.
+
+  `examples/flaky-source/effects.ts` misbehaves ON PURPOSE. That is the point
+  of the example.
+effect: http
+input: RateRequest
+output: Rate
