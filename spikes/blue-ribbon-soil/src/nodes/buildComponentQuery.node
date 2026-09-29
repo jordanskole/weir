@@ -1,0 +1,19 @@
+label: Build Component Query
+description: >-
+  Ask for the dominant component of every map unit found. blue-ribbon's
+  fetchComponents builds `WHERE c.mukey IN (...)` by string concatenation
+  (ssurgo.ts:59) from values that came out of a previous SDA response --
+  unescaped, which is the injection path flagged in the earlier review.
+input: SoilAreaTotals
+output: ComponentQuery
+examples:
+  - given:
+      SoilAreaTotals:
+        mukeyList: "162341,162355"
+        totalAcres: 6.608118
+        byMukey:
+          "162341": { mukey: "162341", acres: 2.202718 }
+          "162355": { mukey: "162355", acres: 4.4054 }
+    expect:
+      ComponentQuery:
+        mukeyList: "162341,162355"

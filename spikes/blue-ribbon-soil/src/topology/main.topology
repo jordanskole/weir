@@ -1,0 +1,67 @@
+# The A2 criterion: dry ground, wet ground, and what the dominant dry soil is
+# rated for building on. blue-ribbon's whole "dry ground adjacent to wet
+# amenity" thesis, which 01_VACANT_LAND_CRITERIA.md calls "the whole search".
+#
+# THE SHAPE, because the tree below hides it:
+#
+#   ParcelGeometry -> buildSoilQuery -> [zone: usda-sda] fetchClippedSoilPolygons
+#                                              |
+#                                        SPREAD: N soil segments
+#                                              |
+#                                     parseSoilPolygon (WKT -> structure)
+#                                              |
+#                                     measureSoilPolygon (the area formula)
+#                                              |
+#                                        GATHER: totalByMukey
+#                                            /        \
+#                            buildComponentQuery      |
+#                                   |                 |
+#                            fetchComponents [effect] |
+#                                   |                 |
+#                            SPREAD: N components     |
+#                                   |                 |
+#                            GATHER: collectComponents|
+#                                     \               /
+#                                      summarizeSoil  (FAN-IN 1)
+#                                        /         \
+#                             buildRatingQuery      |
+#                                   |               |
+#                         fetchDwellingRating       |
+#                              [effect]             |
+#                                     \             /
+#                                   assembleAdjacency (FAN-IN 2)
+#
+# Three chained effects where each request is computed from the previous
+# answers; a spread nested inside a gather's downstream; two fan-ins, both of
+# the ancestor-diamond shape.
+zone: server
+input: ParcelGeometry
+output: DryWetAdjacency
+terminals:
+  - assembleAdjacency
+wiring:
+  buildSoilQuery:
+    then:
+      clipSoilAtSda:
+        then:
+          parseSoilPolygon:
+            then:
+              measureSoilPolygon:
+                then:
+                  totalByMukey:
+                    then:
+                      buildComponentQuery:
+                        then:
+                          fetchComponents:
+                            then:
+                              collectComponents:
+                                then:
+                                  summarizeSoil:
+                                    then:
+                                      buildRatingQuery:
+                                        then:
+                                          fetchDwellingRating:
+                                            then:
+                                              assembleAdjacency: {}
+                                      assembleAdjacency: {}
+                      summarizeSoil: {}

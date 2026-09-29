@@ -1,0 +1,45 @@
+label: Parse Soil Polygon
+description: >-
+  Turn SDA's WKT into declared structure.
+
+  ##### WHERE THE REAL BOUNDARY TURNED OUT TO BE #####
+
+  I predicted weir would give me "a thin typed shell around several large
+  untyped nodes". This node is the counter-example, and it is the one I did
+  not expect.
+
+  In blue-ribbon the WKT that SDA returns is never parsed in TypeScript at
+  all. It is handed to DuckDB (`duckdb/load.ts`) as a string, and every
+  subsequent question about it is asked in SQL. So the moment a federal API's
+  text becomes geometry happens INSIDE a database, where no test reaches it
+  and no type describes it.
+
+  Modelling it here forces that moment to be a node with a contract, and the
+  contract is not vacuous: 2000 vertices, each range-checked, each labelled
+  `location`. A truncated WKT, a coordinate-order swap, a ring that does not
+  close -- all of them become Failed_SoilPolygonWkt here instead of a wrong
+  acreage six steps later.
+
+  That is not a thin shell. That is the type system reaching a place the
+  original architecture had no way to reach.
+input: SoilPolygonWkt
+output: SoilPolygonShape
+examples:
+  - given:
+      SoilPolygonWkt:
+        polygonId: "sp-1"
+        mukey: "162341"
+        wkt: "POLYGON((-85.3 44,-85.3 44.001,-85.299 44.001,-85.299 44,-85.3 44))"
+    expect:
+      SoilPolygonShape:
+        polygonId: "sp-1"
+        mukey: "162341"
+        rings:
+          "0":
+            seq: 0
+            vertices:
+              "0": { seq: 0, lng: -85.3, lat: 44 }
+              "1": { seq: 1, lng: -85.3, lat: 44.001 }
+              "2": { seq: 2, lng: -85.299, lat: 44.001 }
+              "3": { seq: 3, lng: -85.299, lat: 44 }
+              "4": { seq: 4, lng: -85.3, lat: 44 }

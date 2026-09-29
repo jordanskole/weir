@@ -1,0 +1,26 @@
+label: Soil Polygon Shape
+description: >-
+  The same clipped segment with its geometry PARSED into declared structure.
+  The node between this and SoilPolygonWkt is where an untrusted string from a
+  federal API becomes data the membrane has actually checked -- every vertex
+  range-validated, every coordinate labelled.
+index: polygonId
+fields:
+  polygonId:
+    type: utf8
+    label: Polygon ID
+    description: Stable key for this clipped segment
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 100
+  mukey:
+    type: utf8
+    label: Map Unit Key
+    description: SSURGO map unit this segment belongs to
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 30
+  rings:
+    many: Ring

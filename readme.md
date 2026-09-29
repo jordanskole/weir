@@ -76,6 +76,8 @@ Because `Ingredient` declares `index: name`, `many: Ingredient` materializes as 
 
 No node takes or returns a bare array. A node's input and output are always edges, and an edge is a named schema — an array has no schema-level identity for its elements, so there is nothing to wire, key, or address. Inside a payload, order is just data; at the boundary it would be structure the graph cannot see.
 
+**The rule is that elements need identity, not that data cannot be ordered**, and the difference matters for anything whose order genuinely *is* the datum — a polygon ring, where the last point repeats the first to close it, or a sequence of revisions. Declare the position as the key: a `Vertex` with `index: seq` holding `lat`/`lng`, a `Ring` with `index: seq` holding `many: Vertex`, a geometry holding `many: Ring`. Nested `many` is fine, the ordering survives exactly (a consumer sorts by `seq`), and every coordinate becomes range-validated and individually labellable — which a serialized blob is not. The first outside reader to model real geometry concluded a polygon was undeclarable here, then retracted it after trying; the encoding tax is real, and the ban is narrower than it reads.
+
 A node declares a contract and nothing else — no body:
 
 ```yaml

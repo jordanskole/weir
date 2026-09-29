@@ -1,0 +1,23 @@
+label: Build Soil Query
+description: >-
+  Render the parcel's exterior ring as WKT for SDA. blue-ribbon's `ringToWkt`
+  (ssurgo.ts:30), promoted from a helper to a gated node.
+input: ParcelGeometry
+output: SoilQuery
+examples:
+  - given:
+      ParcelGeometry:
+        pin: "10-003-013-20"
+        rings:
+          "0":
+            seq: 0
+            vertices:
+              "0": { seq: 0, lng: -85.300, lat: 44.000 }
+              "1": { seq: 1, lng: -85.300, lat: 44.002 }
+              "2": { seq: 2, lng: -85.298, lat: 44.002 }
+              "3": { seq: 3, lng: -85.298, lat: 44.000 }
+              "4": { seq: 4, lng: -85.300, lat: 44.000 }
+    expect:
+      SoilQuery:
+        pin: "10-003-013-20"
+        wkt: "POLYGON((-85.3 44,-85.3 44.002,-85.298 44.002,-85.298 44,-85.3 44))"

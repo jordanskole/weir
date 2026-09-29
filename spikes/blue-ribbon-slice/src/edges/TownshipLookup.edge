@@ -25,6 +25,29 @@ fields:
     description: >-
       The Minor Civil Division name containing the parcel's centroid.
 
+      CORRECTED 2026-09-29 -- read this before the paragraph under it.
+
+      I CLAIMED nested readiness conditions make the null case inexpressible
+      and force "an extra node whose only job is to flatten two branches".
+      Wrong. The idiomatic version IS expressible: `lookupTownship` outputs
+      `oneOf: [TownshipLookup, TownshipUnknown]`, and a SECOND join node
+      `resolveIdentityUnresolved: allOf [NormalizedParcel, TownshipUnknown]`
+      also produces ParcelIdentity, with both as terminals. I built it at
+      /tmp/nulltest: it elaborates (10 edges, 8 nodes) and RUNS, producing the
+      right answer with township "UNKNOWN" and the reason carried through.
+
+      IT IS WORSE THAN I SAID, NOT BETTER. That run reports:
+
+        residue [{ node: "resolveIdentity", edge: "NormalizedParcel", waiting: 1 }]
+
+      The single NormalizedParcel token is consumed by whichever join fires;
+      the other join waits forever for a token that no longer exists. So the
+      run produces correct output AND reports a stall, and `weir run` exits
+      non-zero. The idiomatic answer to "a null is data" makes every such run
+      red. That is now tracked as its own open question.
+
+      THE ORIGINAL CLAIM, PRESERVED AND WRONG:
+
       FRICTION (#3, the null-is-data problem): this is `nullable: false`, and
       it should not be. blue-ribbon's rule 2 says a null is data -- a parcel
       in a county with no digital layer legitimately has no township, and that

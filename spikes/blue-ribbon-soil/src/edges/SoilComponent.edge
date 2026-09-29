@@ -1,0 +1,61 @@
+label: Soil Component
+description: >-
+  The dominant soil component of one map unit. SDA can return several
+  majcompflag='Yes' rows per mukey; blue-ribbon's pickDominantComponent picks
+  highest comppct_r with a cokey tiebreak, and that selection happens BEFORE
+  this edge exists.
+index: mukey
+fields:
+  mukey:
+    type: utf8
+    label: Map Unit Key
+    description: SSURGO map unit this component belongs to
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 30
+  cokey:
+    type: utf8
+    label: Component Key
+    description: SSURGO component key -- the handle for the dwelling-rating lookup
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 30
+  compname:
+    type: utf8
+    label: Series
+    description: Soil series name, e.g. "Kalkaska"
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 100
+  comppctR:
+    type: uint8
+    label: Component Percent
+    description: Percent of the map unit this component represents
+    nullable: false
+    validations:
+      min: 0
+      max: 100
+  drainagecl:
+    type: utf8
+    label: Drainage Class
+    description: >-
+      SSURGO drainage class. NULL is data, not absence of data -- a component
+      with no drainage class is not dry, and blue-ribbon's isDryComponent
+      treats null as not-dry rather than as an error.
+    nullable: true
+    validations:
+      maxLength: 60
+  wtdepannmin:
+    type: f64
+    label: Water Table Depth
+    description: >-
+      Minimum annual water table depth, cm. NULL means no water table in the
+      profile, which is HALF THE DRY TEST -- so here a null is not merely data,
+      it is the positive signal. isDryComponent requires wtdepannmin === null.
+    nullable: true
+    validations:
+      min: 0
+      max: 1000

@@ -205,6 +205,21 @@ they are two commands:
 | `verify` / `replay` | does the pinned implementation still produce this? | a reason to refuse |
 | `fork` | does the current declaration accept what we recorded? | the whole point |
 
+## 6b. The example this makes possible
+
+`examples/flaky-source` shows a handler returning the **wrong type for a field
+that was declared**. It deliberately does not show one returning a field nobody
+declared, because until this spec that case is silently accepted and there is
+nothing to demonstrate.
+
+Closing that gap when this ships matters for a precise reason. The first outside
+reader's misdiagnosis was not *"declaring it won't help"* — it was *"I can't
+declare this."* An example of a wrong type cures the first and leaves the second
+untouched, which is exactly what that reader said when shown the fix: it would
+have stopped the misreading, not the design error underneath it. The example
+that reaches the second is a handler returning an undeclared field, the drift
+record that results, and a fork against the widened edge.
+
 ## 7. Explicitly out of scope
 
 - **Mutating the log.** Rejected outright (§4); re-validated data forks.

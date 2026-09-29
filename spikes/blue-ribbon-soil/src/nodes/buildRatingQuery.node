@@ -1,0 +1,18 @@
+label: Build Rating Query
+description: >-
+  Ask SDA how the dominant dry component rates for dwellings without basements.
+  Its input is the output of a reduction over the previous fetch -- the third
+  effect in a chain where each request is computed from the last one's answers.
+input: SoilSummary
+output: DwellingRatingQuery
+examples:
+  - given:
+      SoilSummary:
+        dryAcres: 2.202718
+        wetAcres: 4.4054
+        dominantMukey: "162341"
+        dominantCokey: "21012345"
+        dominantSeries: "Kalkaska"
+    expect:
+      DwellingRatingQuery:
+        cokey: "21012345"

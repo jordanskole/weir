@@ -1,0 +1,17 @@
+label: Parcel Geometry
+description: >-
+  A parcel's boundary as declared structure rather than an opaque JSON string.
+  Compare blue-ribbon-slice/src/edges/NormalizedParcel.edge's `boundaryJson`,
+  which is the same datum with the type system switched off.
+fields:
+  pin:
+    classification: linkable
+    type: utf8
+    label: PIN
+    description: The parcel this boundary belongs to
+    nullable: false
+    validations:
+      minLength: 8
+      maxLength: 40
+  rings:
+    many: Ring

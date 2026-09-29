@@ -1,0 +1,16 @@
+label: Ring
+description: >-
+  One closed ring of a polygon. Ring 0 is the exterior; any others are holes.
+  Nested `many` -- a Ring holds many Vertex, and a geometry holds many Ring.
+index: seq
+fields:
+  seq:
+    type: uint16
+    label: Sequence
+    description: Ring index. 0 is the exterior ring; 1+ are interior holes.
+    nullable: false
+    validations:
+      min: 0
+      max: 65535
+  vertices:
+    many: Vertex

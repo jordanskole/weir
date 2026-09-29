@@ -1,0 +1,53 @@
+label: Vertex
+description: >-
+  One point on a polygon ring, addressed by its position in the ring.
+
+  ##### THE #8 RETRACTION TEST #####
+
+  I told you a polygon was undeclarable because "a ring is genuinely
+  positional -- point 4 follows point 3, and the last repeats the first to
+  close the ring -- so 'order is just data' is false here; the order IS the
+  datum."
+
+  That argument is wrong, and it is wrong in exactly the way #1 was wrong. It
+  proves the ELEMENT needs a positional key. It does not prove the COLLECTION
+  is opaque. weir's actual rule is that a collection is addressed by key
+  rather than by position -- and `seq` IS the position, promoted to a key.
+  Once it is a key, the map's own ordering is irrelevant: a consumer sorts by
+  `seq` and gets the ring back exactly.
+
+  So the ban on bare arrays never applied. It bans arrays whose elements have
+  no identity. A vertex has one: where it sits in the ring.
+index: seq
+fields:
+  seq:
+    type: uint16
+    label: Sequence
+    description: >-
+      Position in the ring, from 0. The closing vertex repeats vertex 0's
+      coordinates under its own final seq, so the ring closure is explicit
+      data rather than an implied convention a reader has to know.
+    nullable: false
+    validations:
+      min: 0
+      max: 65535
+  lng:
+    # Now labellable, which it was NOT when the whole geometry was one JSON
+    # string. This is the concrete payoff of the retraction.
+    classification: location
+    type: f64
+    label: Longitude
+    description: WGS84 longitude
+    nullable: false
+    validations:
+      min: -180
+      max: 180
+  lat:
+    classification: location
+    type: f64
+    label: Latitude
+    description: WGS84 latitude
+    nullable: false
+    validations:
+      min: -90
+      max: 90

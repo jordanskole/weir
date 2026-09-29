@@ -108,12 +108,19 @@ properties:
       combineProvenance has a unit test for; here it is a contract obligation
       on every implementation instead.
 
-      FRICTION (#12): I cannot actually write this, because expressing "rank of
-      X <= rank of Y" needs an ordering over an enum and the property language
-      has eq/gt/and/not over paths and literals. What I want is either an
-      `ordinal` field kind whose enumValues are ordered, or the ability to call
-      a declared pure function from a property. Written out as prose so you can
-      see the shape of what is missing.
+      CORRECTED 2026-09-29. I wrote that "the property language has
+      eq/gt/and/not over paths and literals" and built friction #12 on it.
+      That was inferred from an Ajv error message, not from documentation,
+      and it understates the language. The real operator set is `lit` `get`
+      `eq` `ne` `lt` `lte` `gt` `gte` `add` `sub` `and` `or` `not` `implies`
+      -- readme.md now documents it.
+
+      So `lte` and `implies` both exist, and the gap is narrower than I
+      claimed: it is ONLY that there is no ordering over `enumValues`. Rank
+      the provenance enum as an ordinal and this property becomes a one-line
+      `lte`. What I want is an `ordinal: true` on an enumValues field, not a
+      general escape hatch into arbitrary functions -- which would break the
+      decidable-and-hashable property the current set is designed around.
     expr:
       eq:
         - get: output.provenance

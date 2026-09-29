@@ -1,0 +1,20 @@
+label: Mukey Acres
+description: Total clipped acreage for one soil map unit within the parcel
+index: mukey
+fields:
+  mukey:
+    type: utf8
+    label: Map Unit Key
+    description: SSURGO map unit
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 30
+  acres:
+    type: f64
+    label: Acres
+    description: Sum of every clipped segment of this map unit
+    nullable: false
+    validations:
+      min: 0
+      max: 1000000

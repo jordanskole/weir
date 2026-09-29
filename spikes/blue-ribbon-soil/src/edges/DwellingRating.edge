@@ -1,0 +1,21 @@
+label: Dwelling Rating
+description: SSURGO's suitability interpretation for dwellings without basements
+fields:
+  cokey:
+    type: utf8
+    label: Component Key
+    description: The component this rating is for
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 30
+  rating:
+    type: utf8
+    label: Rating
+    description: >-
+      e.g. "Not limited", "Somewhat limited", "Very limited". Null when SDA has
+      no top-level rating row for this component -- a real outcome, since the
+      query filters ruledepth = 0 to exclude sub-rule reason rows.
+    nullable: true
+    validations:
+      maxLength: 100

@@ -1,0 +1,8 @@
+label: Fetch Dwelling Rating
+description: >-
+  Third SDA call. blue-ribbon's fetchDwellingRating (ssurgo.ts:78), which
+  filters `ruledepth = 0` to get the top-level rating rather than the sub-rule
+  reason rows that share the same mrulename.
+effect: http
+input: DwellingRatingQuery
+output: DwellingRating

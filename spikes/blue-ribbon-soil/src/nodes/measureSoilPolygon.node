@@ -1,0 +1,78 @@
+label: Measure Soil Polygon
+description: >-
+  Area of one clipped segment, in acres.
+
+  ##### THE FINDING OF THIS WHOLE SLICE #####
+
+  In blue-ribbon this is not code. It is a SQL string constant:
+
+    const AREA_ACRES_SQL = `ST_Area(geom) * POWER(111320.0, 2)
+      * COS(RADIANS(ST_Y(ST_Centroid(geom)))) / 4046.8564224`;
+
+  interpolated into a query and executed by DuckDB's spatial extension
+  (duckdb/compute.ts:12). Its own comment says it is "NOT ST_Area_Spheroid or
+  an ST_Transform-based area, both proven wrong by ~8.4x at this latitude
+  during spec verification."
+
+  So: the single most error-prone number on the card, wrong by 8.4x twice,
+  has no unit test -- because you cannot unit-test a SQL fragment without
+  standing up a database and loading geometry into it. The nondeterminism
+  budget of this function is ZERO. It is shoelace area times two constants
+  times a cosine. It is the most testable thing in the entire repo and it is
+  the least tested.
+
+  Here it is a pure node over declared structure, with properties. That is a
+  real improvement and it is not the improvement I predicted -- I predicted
+  weir would be a shell describing the least interesting part. It went the
+  other way: the shell reached INTO the part that mattered and pulled it out
+  of the database.
+
+  WHAT DUCKDB IS ACTUALLY NEEDED FOR, once this is done: nothing, in this
+  path. The clip is server-side at SDA. The area is arithmetic. The spatial
+  engine in the A2 pipeline is doing work that does not require a spatial
+  engine. (ST_Buffer for corridor selection is genuinely spatial -- but that
+  is universe selection, upstream, once per corridor, not per parcel.)
+input: SoilPolygonShape
+output: SoilPolygonArea
+examples:
+  - given:
+      SoilPolygonShape:
+        polygonId: "sp-1"
+        mukey: "162341"
+        rings:
+          "0":
+            seq: 0
+            vertices:
+              "0": { seq: 0, lng: -85.3, lat: 44 }
+              "1": { seq: 1, lng: -85.3, lat: 44.001 }
+              "2": { seq: 2, lng: -85.299, lat: 44.001 }
+              "3": { seq: 3, lng: -85.299, lat: 44 }
+              "4": { seq: 4, lng: -85.3, lat: 44 }
+    expect:
+      SoilPolygonArea:
+        polygonId: "sp-1"
+        mukey: "162341"
+        acres: 2.202718
+properties:
+  - name: area is never negative
+    description: >-
+      Shoelace returns a signed area whose sign is ring winding order. SDA does
+      not guarantee winding. An implementation that forgets the absolute value
+      returns negative acreage for every clockwise ring -- which is exactly the
+      class of bug that produced the 8.4x error, and which nothing in
+      blue-ribbon would currently catch until validateCard rejected the card
+      several nodes later with no idea which polygon caused it.
+    expr:
+      gte:
+        - get: output.acres
+        - lit: 0
+  - name: the segment keeps its identity through measurement
+    description: Measuring must not re-key a polygon onto a different map unit.
+    expr:
+      and:
+        - eq:
+            - get: output.polygonId
+            - get: input.polygonId
+        - eq:
+            - get: output.mukey
+            - get: input.mukey

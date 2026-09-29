@@ -1,0 +1,24 @@
+label: Total By Mukey
+description: >-
+  Sum every clipped segment's acreage into a per-map-unit total. The gather --
+  fires once when every segment that descended from the fetch has been
+  measured.
+
+  blue-ribbon builds this as a mutable `Map<string, number>` inside
+  summarizeSoil (derive.ts:63). Here the accumulator is gone: the collection
+  arrives whole.
+input:
+  gather: SoilPolygonArea
+output: SoilAreaTotals
+examples:
+  - given:
+      SoilPolygonArea:
+        "sp-1": { polygonId: "sp-1", mukey: "162341", acres: 2.202718 }
+        "sp-2": { polygonId: "sp-2", mukey: "162355", acres: 4.4054 }
+    expect:
+      SoilAreaTotals:
+        mukeyList: "162341,162355"
+        totalAcres: 6.608118
+        byMukey:
+          "162341": { mukey: "162341", acres: 2.202718 }
+          "162355": { mukey: "162355", acres: 4.4054 }

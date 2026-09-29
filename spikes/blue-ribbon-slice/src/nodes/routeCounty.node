@@ -9,6 +9,22 @@ description: >-
   distinction dies there. Making it a `oneOf` is weir's "a decision becomes a
   type" applied to the finding that motivated this exercise.
 
+  SHARPENED 2026-09-29. #1 and #11 largely dissolved on re-examination (see
+  RawParcelFeature.edge), and what they dissolved INTO is this friction, which
+  is now the load-bearing one. Restating it with the right weight:
+
+  The honest modelling is five edges with five real schemas. At five counties
+  that is fine and arguably better than blue-ribbon's single interface. But
+  02_MICHIGAN_GIS_DATA_SOURCES.md wants statewide coverage: MICHIGAN HAS 83
+  COUNTIES. 83 edges and 83 nodes whose only differences are
+  {fieldName, areaFormula, pinSeparator} is configuration wearing an ontology
+  costume. weir cannot say "these N edges are one edge under a renaming",
+  which is exactly what a schema mapping is, and generating 83 .edge files
+  from a table fights the one-place-to-write-it-down property that makes the
+  filename the name.
+
+  ORIGINAL TEXT FOLLOWS.
+
   FRICTION (#2, the shape of an adapter): weir has no interfaces, typeclasses,
   or dispatch. blue-ribbon has ONE interface with FIVE implementations, which
   is the correct factoring -- each county differs only in URL, field names and

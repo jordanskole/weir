@@ -1,0 +1,73 @@
+label: Summarize Soil
+description: >-
+  Classify each map unit dry or wet and find the dominant dry one. The A2 rule:
+  drainage class in {Somewhat excessively drained, Excessively drained, Well
+  drained} AND wtdepannmin IS NULL.
+
+  blue-ribbon's summarizeSoil (derive.ts:57) plus isDryComponent (derive.ts:11).
+
+  THE FAN-IN, and the same ancestor-diamond as the first slice: ComponentSet
+  descends from SoilAreaTotals, and both feed this node.
+input:
+  allOf:
+    - SoilAreaTotals
+    - ComponentSet
+output: SoilSummary
+examples:
+  - given:
+      SoilAreaTotals:
+        mukeyList: "162341,162355"
+        totalAcres: 6.608118
+        byMukey:
+          "162341": { mukey: "162341", acres: 2.202718 }
+          "162355": { mukey: "162355", acres: 4.4054 }
+      ComponentSet:
+        componentCount: 2
+        byMukey:
+          "162341":
+            mukey: "162341"
+            cokey: "21012345"
+            compname: "Kalkaska"
+            comppctR: 85
+            drainagecl: "Somewhat excessively drained"
+            wtdepannmin: null
+          "162355":
+            mukey: "162355"
+            cokey: "21012399"
+            compname: "Au Gres"
+            comppctR: 90
+            drainagecl: "Somewhat poorly drained"
+            wtdepannmin: 15
+    expect:
+      SoilSummary:
+        dryAcres: 2.202718
+        wetAcres: 4.4054
+        dominantMukey: "162341"
+        dominantCokey: "21012345"
+        dominantSeries: "Kalkaska"
+properties:
+  - name: dry and wet acreage together account for every measured acre
+    description: >-
+      The conservation law of this reduction, and the one blue-ribbon checks
+      only much later in validateCard -- against the parcel's acreage rather
+      than against the soil total, so a map unit silently dropped here would
+      surface as an acreage mismatch attributed to the wrong cause.
+    expr:
+      eq:
+        - add:
+            - get: output.dryAcres
+            - get: output.wetAcres
+        - get: input.SoilAreaTotals.totalAcres
+  - name: a dry-dominant map unit implies a series name
+    description: >-
+      dominantMukey and dominantSeries are null together or present together.
+      Three nullable fields that must agree is exactly the invariant a reader
+      cannot see and a type cannot state.
+    expr:
+      implies:
+        - ne:
+            - get: output.dominantMukey
+            - lit: null
+        - ne:
+            - get: output.dominantSeries
+            - lit: null

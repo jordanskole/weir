@@ -1,0 +1,39 @@
+label: Soil Polygon WKT
+description: >-
+  One soil map-unit polygon, already clipped to the parcel BY THE SERVER, as
+  SDA returns it: a mukey and a WKT string.
+
+  Worth pinning down, because modelling it made it obvious and it was not
+  obvious before: the CLIP happens at USDA
+  (`mupolygongeo.STIntersection(...)`, ssurgo.ts:44), not locally. See
+  measureSoilPolygon.node for why that matters.
+index: polygonId
+fields:
+  polygonId:
+    type: utf8
+    label: Polygon ID
+    description: >-
+      Stable key for this clipped segment. SDA returns one row per
+      mukey/segment and a single mukey can produce several disjoint segments
+      within one parcel, so mukey alone is NOT a key -- blue-ribbon discovers
+      this implicitly by summing per mukey afterwards.
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 100
+  mukey:
+    type: utf8
+    label: Map Unit Key
+    description: SSURGO map unit this segment belongs to
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 30
+  wkt:
+    type: utf8
+    label: WKT
+    description: The clipped polygon geometry, as SDA returned it
+    nullable: false
+    validations:
+      minLength: 10
+      maxLength: 1000000

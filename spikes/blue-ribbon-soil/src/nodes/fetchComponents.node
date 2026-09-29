@@ -1,0 +1,8 @@
+label: Fetch Components
+description: >-
+  Second SDA call: the dominant soil component of each map unit. Fans out
+  again -- one component per map unit, each on its own path.
+effect: http
+input: ComponentQuery
+output:
+  many: SoilComponent

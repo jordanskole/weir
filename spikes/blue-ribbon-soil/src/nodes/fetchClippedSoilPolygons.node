@@ -1,0 +1,13 @@
+label: Fetch Clipped Soil Polygons
+description: >-
+  POST the parcel WKT to USDA Soil Data Access and get back the soil map-unit
+  polygons CLIPPED TO THE PARCEL, server-side.
+
+  The `many` output is the fan-out: one parcel becomes N soil segments, each
+  taking its own path with its own lineage.
+
+  blue-ribbon's fetchClippedSoilPolygons, ssurgo.ts:38.
+effect: http
+input: SoilQuery
+output:
+  many: SoilPolygonWkt

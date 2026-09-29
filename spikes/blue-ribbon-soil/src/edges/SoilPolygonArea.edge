@@ -1,0 +1,31 @@
+label: Soil Polygon Area
+description: One clipped soil segment's area in acres
+index: polygonId
+fields:
+  polygonId:
+    type: utf8
+    label: Polygon ID
+    description: Stable key for this clipped segment
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 100
+  mukey:
+    type: utf8
+    label: Map Unit Key
+    description: SSURGO map unit this segment belongs to
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 30
+  acres:
+    type: f64
+    label: Acres
+    description: >-
+      Segment area, by the verified formula. See measureSoilPolygon.node --
+      this number was wrong by ~8.4x twice in blue-ribbon's history, and the
+      reason it could be wrong twice is that it has never had a unit test.
+    nullable: false
+    validations:
+      min: 0
+      max: 1000000

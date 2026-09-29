@@ -1,0 +1,35 @@
+label: Dry Wet Adjacency
+description: >-
+  The A2 block of a parcel card: dry ground, wet ground, and what the dominant
+  dry soil is rated for building on. The end of this slice.
+fields:
+  dryAcres:
+    type: f64
+    label: Dry Acres
+    description: Acreage of well-drained ground with no water table in profile
+    nullable: false
+    validations:
+      min: 0
+      max: 1000000
+  wetAcres:
+    type: f64
+    label: Wet Acres
+    description: Everything else
+    nullable: false
+    validations:
+      min: 0
+      max: 1000000
+  dominantSeries:
+    type: utf8
+    label: Dominant Dry Series
+    description: Largest dry soil series, or null if there is no dry ground
+    nullable: true
+    validations:
+      maxLength: 100
+  dwellingRating:
+    type: utf8
+    label: Dwelling Rating
+    description: What SSURGO rates that series for dwellings without basements
+    nullable: true
+    validations:
+      maxLength: 100

@@ -70,6 +70,17 @@ crossings
 That is §7's sentence, answerable. What it is **not** is enforcement: nothing
 here rejects that crossing.
 
+**And a limit found after shipping, by the first program to serialize anything
+(2026-09-29):** a crossing is measured at the *node boundary*, while the wire
+format is produced inside whichever node or handler serializes. So an edge
+carrying a serialized `POLYGON((...))` string crosses reporting only the labels
+on its *own* fields, and the labelled geometry edge behind the string never
+crosses at all — a **false negative**, which is the one failure mode a leakage
+query cannot afford. §5 below argues that an unlabelled edge crossing is the
+design working, and that holds for deliberate redaction; it does not hold when
+the labels were lost to *encoding*. Recorded in `open-questions.md`; not fixed
+here.
+
 **Deliberate, and the reason is that the policy has nowhere to live yet.** §7's
 rule is parameterised by a label *and* a set of zones — "no **PII** into a
 **non-client** zone" — and neither half is declared anywhere. A rule needs a home:

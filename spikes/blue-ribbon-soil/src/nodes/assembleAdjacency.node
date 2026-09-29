@@ -1,0 +1,27 @@
+label: Assemble Adjacency
+description: >-
+  The A2 card block. Second fan-in, and the end of the slice.
+
+  Its output cannot name the parcel it is about -- see DryWetAdjacency.edge.
+input:
+  allOf:
+    - SoilSummary
+    - DwellingRating
+output: DryWetAdjacency
+examples:
+  - given:
+      SoilSummary:
+        dryAcres: 2.202718
+        wetAcres: 4.4054
+        dominantMukey: "162341"
+        dominantCokey: "21012345"
+        dominantSeries: "Kalkaska"
+      DwellingRating:
+        cokey: "21012345"
+        rating: "Somewhat limited"
+    expect:
+      DryWetAdjacency:
+        dryAcres: 2.202718
+        wetAcres: 4.4054
+        dominantSeries: "Kalkaska"
+        dwellingRating: "Somewhat limited"

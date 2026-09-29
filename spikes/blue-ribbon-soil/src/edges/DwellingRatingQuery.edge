@@ -1,0 +1,17 @@
+label: Dwelling Rating Query
+description: >-
+  The cokey whose "ENG - Dwellings W/O Basements" rating is wanted.
+
+  THIS IS THE INTERESTING DEPENDENCY: its input is the output of a REDUCTION
+  over the previous fetch. Effect 3 cannot be issued until effect 2's results
+  have been gathered and folded. Three chained effects where each one's
+  request is computed from the last one's answers.
+fields:
+  cokey:
+    type: utf8
+    label: Component Key
+    description: The dominant dry component to rate
+    nullable: false
+    validations:
+      minLength: 1
+      maxLength: 30

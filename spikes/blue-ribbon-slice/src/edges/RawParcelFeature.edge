@@ -1,7 +1,51 @@
 label: Raw Parcel Feature
 description: >-
   ########################################################################
-  # THIS EDGE IS THE ONE THAT DOES NOT FIT. READ THE COMMENT.            #
+  # CORRECTED 2026-09-29. THE ARGUMENT BELOW IS WRONG. READ THIS FIRST.  #
+  ########################################################################
+
+  WHAT I CLAIMED: that an ArcGIS response is undescribable, that modelling it
+  as a JSON string was forced, and that "every guarantee weir advertises --
+  schema assertion, structural hashing, typed generators -- is inert across
+  this one hop."
+
+  WHY IT IS WRONG, on two counts:
+
+  1. THE ASSERTION RUNS. `runtime.ts` wraps every effect handler and asserts
+     its result against the declared output edge before it can reach the log,
+     because a host handler is host code and never passed through the
+     acceptance gate. A handler returning the wrong shape becomes
+     `Failed_ProxiedCountyQuery` carrying the reason. I verified this by
+     making the handler drop `featureJson`:
+
+       Failed_ProxiedCountyQuery
+         { input: {...}, reason: "RawParcelFeature: featureJson should be
+                                  string, got undefined." }
+
+     Assertion was never inert. It was WEAK, because the schema I wrote was
+     weak. Different problem, different fix, and the fix is mine not weir's.
+
+  2. THE SCHEMA WAS ALREADY WRITTEN, BY ME, IN THE REQUEST. blue-ribbon sends
+     `outFields=PIN,OWNER,PROPCLASS,UNIT,Shape__Area` on every Osceola query.
+     That IS a schema declaration. The five counties project 5, 2, 2, 2 and 2
+     fields respectively. `Record<string, unknown>` is not there because the
+     shape is unknowable -- it is there because `res.json()` returns `any` and
+     nobody typed five small projections. I dressed laziness as necessity.
+
+  THE HONEST MODELLING is five edges with five real schemas converging on
+  NormalizedParcel. See routeCounty.node's corrected note: this friction does
+  not vanish, it MOVES INTO #2, and gets sharper there -- 5 counties is fine,
+  the 83 this project wants is not, and what varies between them is
+  configuration rather than ontology.
+
+  ONE THING SURVIVES, AND ONLY ONE: an undeclared field rides through. I
+  demonstrated it on this exact edge -- a handler returning
+  `ownerName: "SPRAGUE WILLIAM E"` put a real owner name in the durable log at
+  a third-party-zone crossing that `weir sys` reports as carrying nothing.
+  That is being fixed in docs/superpowers/specs/2026-09-29-drift-and-fork.md.
+
+  ########################################################################
+  # THE ORIGINAL ARGUMENT, PRESERVED. IT IS WRONG. KEPT AS THE RECORD.   #
   ########################################################################
 
   What blue-ribbon actually has here is:

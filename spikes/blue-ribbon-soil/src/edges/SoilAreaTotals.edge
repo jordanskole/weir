@@ -1,0 +1,27 @@
+label: Soil Area Totals
+description: >-
+  Every map unit in the parcel with its total acreage -- the gather's output.
+  `byMukey` is a declared keyed collection, which is the shape blue-ribbon
+  builds imperatively as `acresByMukey: Map<string, number>` inside
+  summarizeSoil (derive.ts:63).
+fields:
+  mukeyList:
+    type: utf8
+    label: Mukey List
+    description: >-
+      Comma-separated mukeys, sorted. Carried as a field because the next SDA
+      query needs `WHERE c.mukey IN (...)` and a SQL fragment is a string.
+      This is the second place structure degrades to text on the way to an API.
+    nullable: false
+    validations:
+      maxLength: 100000
+  totalAcres:
+    type: f64
+    label: Total Acres
+    description: Sum over every map unit -- should equal the parcel's own acreage
+    nullable: false
+    validations:
+      min: 0
+      max: 1000000
+  byMukey:
+    many: MukeyAcres

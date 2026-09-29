@@ -1,0 +1,32 @@
+label: Soil Query
+description: >-
+  The parcel boundary rendered as WKT, ready to be embedded in the SQL that
+  goes to USDA's Soil Data Access.
+
+  NOTE WHAT THIS EDGE IS: the point where declared structure becomes an
+  untyped string again, because the wire to SDA is a SQL string and nothing
+  can change that. blue-ribbon builds this in `ringToWkt`
+  (apps/etl/src/fetch/ssurgo.ts:30). Making it an edge means the
+  serialization is a gated, testable node instead of a helper, and it means
+  the structure->string boundary is VISIBLE rather than incidental.
+fields:
+  pin:
+    classification: linkable
+    type: utf8
+    label: PIN
+    description: The parcel being queried
+    nullable: false
+    validations:
+      minLength: 8
+      maxLength: 40
+  wkt:
+    type: utf8
+    label: WKT
+    description: >-
+      POLYGON((lng lat,...)) in EPSG:4326. Escaped and interpolated into SDA's
+      SQL by the effect handler -- blue-ribbon does `parcelWkt.replace(/'/g,
+      "''")` at ssurgo.ts:42 and this edge is where that obligation lives.
+    nullable: false
+    validations:
+      minLength: 20
+      maxLength: 1000000

@@ -1,0 +1,21 @@
+# USDA Soil Data Access. The parcel's FULL BOUNDARY leaves here, embedded in a
+# SQL string, to a federal API.
+#
+# This is the crossing worth seeing: SoilQuery carries a `linkable` PIN and the
+# complete parcel geometry. With the boundary declared as structure rather than
+# a JSON blob (see Vertex.edge), every coordinate is labelled `location`, so
+# `weir sys` can now say what leaves -- which it could NOT say in the first
+# slice, where the whole geometry was one unlabelled utf8 field.
+#
+# FRICTION #13 again: the other two SDA calls (fetchComponents,
+# fetchDwellingRating) go to the SAME host and should be in the same zone, but
+# they are not contiguous in the graph, so each would need its own single-node
+# wrapper. Three wrappers to say one word three times. Zone belongs on a node.
+zone: usda-sda
+input: SoilQuery
+output:
+  many: SoilPolygonWkt
+terminals:
+  - fetchClippedSoilPolygons
+wiring:
+  fetchClippedSoilPolygons: {}

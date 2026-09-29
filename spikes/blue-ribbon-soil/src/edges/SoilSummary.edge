@@ -1,0 +1,42 @@
+label: Soil Summary
+description: >-
+  Dry and wet acreage, and which dry component dominates. blue-ribbon's
+  summarizeSoil (derive.ts:57) -- the reduction the whole A2 criterion rests on.
+fields:
+  dryAcres:
+    type: f64
+    label: Dry Acres
+    description: Acreage whose dominant component is well-drained with no water table
+    nullable: false
+    validations:
+      min: 0
+      max: 1000000
+  wetAcres:
+    type: f64
+    label: Wet Acres
+    description: Everything else, INCLUDING map units with no component at all
+    nullable: false
+    validations:
+      min: 0
+      max: 1000000
+  dominantMukey:
+    type: utf8
+    label: Dominant Dry Mukey
+    description: Largest-area dry map unit. Null when no dry ground exists.
+    nullable: true
+    validations:
+      maxLength: 30
+  dominantCokey:
+    type: utf8
+    label: Dominant Dry Cokey
+    description: Its component key -- the input to the dwelling-rating lookup
+    nullable: true
+    validations:
+      maxLength: 30
+  dominantSeries:
+    type: utf8
+    label: Dominant Dry Series
+    description: Its soil series name
+    nullable: true
+    validations:
+      maxLength: 100

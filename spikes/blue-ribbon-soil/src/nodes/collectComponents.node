@@ -1,0 +1,43 @@
+label: Collect Components
+description: >-
+  The second gather. Nested inside the first spread/gather cycle, which is the
+  structural question this slice was built to answer: can a gather collect
+  instances from a spread that is itself downstream of an earlier gather?
+input:
+  gather: SoilComponent
+output: ComponentSet
+examples:
+  - given:
+      SoilComponent:
+        "162341":
+          mukey: "162341"
+          cokey: "21012345"
+          compname: "Kalkaska"
+          comppctR: 85
+          drainagecl: "Somewhat excessively drained"
+          wtdepannmin: null
+        "162355":
+          mukey: "162355"
+          cokey: "21012399"
+          compname: "Au Gres"
+          comppctR: 90
+          drainagecl: "Somewhat poorly drained"
+          wtdepannmin: 15
+    expect:
+      ComponentSet:
+        componentCount: 2
+        byMukey:
+          "162341":
+            mukey: "162341"
+            cokey: "21012345"
+            compname: "Kalkaska"
+            comppctR: 85
+            drainagecl: "Somewhat excessively drained"
+            wtdepannmin: null
+          "162355":
+            mukey: "162355"
+            cokey: "21012399"
+            compname: "Au Gres"
+            comppctR: 90
+            drainagecl: "Somewhat poorly drained"
+            wtdepannmin: 15
