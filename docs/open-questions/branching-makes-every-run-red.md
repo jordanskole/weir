@@ -1,6 +1,6 @@
 # The idiomatic way to branch makes every such run red
 
-Status: open.
+Status: resolved (2026-09-29).
 Last grounded: 2026-09-29 — reproduced on a four-node fixture, then again with a
 spread above it.
 
@@ -42,18 +42,25 @@ That kills the fix first proposed here — *"teach the residue check that two no
 fed by the same `oneOf` are mutually exclusive"* — which would suppress genuine
 stalls and has nothing to key on in the case above.
 
-## The rule it has to be instead
+## The rule, and it is built
 
 A node waiting on edge `E` for lineage group `G` is not residue when, for that
 same `G`, a sibling branch of the `oneOf` that produces `E` was taken.
 
-That needs **both** halves: the *declarations* say `L` and `R` are siblings of one
-`oneOf` output, and the *log* says which branch each group took. More than the
-"already in the declarations" first claimed here, though both halves do exist.
+Both halves were needed and both already existed: the *declarations* say `L` and
+`R` are siblings of one `oneOf` output, and the *log* says which branch each
+token took. More than the "already in the declarations" this entry first
+claimed, though neither half had to be invented.
 
-Alternatives not explored: let a node declare it is one of a mutually-exclusive
-set, or reconsider whether an unconsumed token on a branch not taken is residue
-at all.
+Built 2026-09-29 as `explainedByBranch` in `runtime.ts`, and recorded as an
+amendment to
+[quiescence is not success](../superpowers/specs/2026-09-27-quiescence-is-not-success.md),
+whose §2 claimed the benign cases were excluded by construction. The unrouted
+branch was; the arm *paired with* an unrouted branch was not.
+
+Alternatives not explored, and no longer needed: letting a node declare it is
+one of a mutually-exclusive set, or dropping branch-not-taken tokens from
+residue wholesale.
 
 ## Why it matters beyond tidiness
 

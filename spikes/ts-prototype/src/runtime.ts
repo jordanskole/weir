@@ -84,7 +84,7 @@
 import { assertOutput, membrane } from "./membrane.js";
 import type { InstanceEnvelope, InvocationContext, Log, LoggedInstance } from "./membrane.js";
 import { outputEdgeNames } from "./elaborate.js";
-import { gatherGroups, joinRows } from "./lineage.js";
+import { gatherGroups, joinRows, selfAndAncestorIds } from "./lineage.js";
 import type { GatherGroup } from "./lineage.js";
 import type { Program } from "./implementation.js";
 import type { AnyEdgeDef, Envelope, Failed, InputSpec, NodeDef, OutputSpec, PayloadOf } from "./types.js";
@@ -881,17 +881,80 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
    * and fired it — so if one ever shows up here, the pulse loop dropped
    * something. Generality costs nothing and buys that invariant.
    */
+  /**
+   * For each edge, the *other* edges of the same `oneOf` output — the branches
+   * a producer chose between.
+   *
+   * Half of the branch rule below; the log supplies the other half. Read off
+   * the declarations, so it costs one pass and is exact: `oneOf` is right there
+   * in the producing node's output spec.
+   */
+  const oneOfSiblings = new Map<string, string[]>();
+  for (const node of Object.values(program.nodes)) {
+    if (node.output.kind !== "oneOf") continue;
+    const names = node.output.edges.map((edge) => edge.name);
+    for (const name of names) {
+      const seen = oneOfSiblings.get(name) ?? [];
+      oneOfSiblings.set(name, [...new Set([...seen, ...names.filter((other) => other !== name)])]);
+    }
+  }
+
+  /** Does any instance of `edgeName` descend from `instanceId` (or is it that instance)? */
+  const inLineageOf = (edgeName: string, instanceId: string): boolean =>
+    log
+      .instances(edgeName, correlationId)
+      .some((candidate) => selfAndAncestorIds(log, candidate.id).has(instanceId));
+
+  /**
+   * **Is this held instance explained by a branch that was not taken?**
+   *
+   * A node whose sibling arm came from a `oneOf` holds its other arm forever
+   * when the producer chose the other branch — and that is the correct
+   * behaviour of a correct program, not a stall. Routing to one of N handlers
+   * is the most ordinary branching topology there is, and every instance of it
+   * in weir exited non-zero before this
+   * (docs/open-questions/branching-makes-every-run-red.md).
+   *
+   * **Per lineage group, not per node pair**, which is the part that took a
+   * second fixture to see. Put a spread above the branch and *both* joins fire
+   * correctly while both still hold the other element's token — so neither node
+   * is "the loser", and a node-level exclusivity rule has nothing to key on.
+   * The question is asked of one held instance at a time: for *this* token, did
+   * the producer route the missing edge's sibling instead?
+   *
+   * Deliberately strict in two ways, because the check this suppresses is the
+   * one that catches real stalls:
+   *
+   * - **Every** absent edge must be explained. A node missing both a
+   *   branch-not-taken *and* an arm that genuinely never arrived is still
+   *   stalled, and `some` rather than `every` would hide it.
+   * - At least one edge must actually be absent. If everything this node needs
+   *   is present in this token's lineage and it still did not fire, that is a
+   *   pulse-loop bug and must stay visible.
+   */
+  const explainedByBranch = (nodeName: string, heldEdge: string, instanceId: string): boolean => {
+    const others = inputEdgeNames(program.nodes[nodeName].input).filter((name) => name !== heldEdge);
+    const absent = others.filter((other) => !inLineageOf(other, instanceId));
+    if (absent.length === 0) return false;
+    return absent.every((missing) =>
+      (oneOfSiblings.get(missing) ?? []).some((sibling) => inLineageOf(sibling, instanceId)),
+    );
+  };
+
   const residueNow = (): Residue[] => {
     const found: Residue[] = [];
     for (const nodeName of scanned) {
       for (const edgeName of inputEdgeNames(program.nodes[nodeName].input)) {
-        const waiting = eligibleForEdge(
+        const eligible = eligibleForEdge(
           program,
           log,
           consumedBy(nodeName),
           nodeName,
           edgeName,
           correlationId,
+        );
+        const waiting = eligible.filter(
+          (instance) => !explainedByBranch(nodeName, edgeName, instance.id),
         ).length;
         if (waiting > 0) found.push({ node: nodeName, edge: edgeName, waiting });
       }

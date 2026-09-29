@@ -308,3 +308,171 @@ describe("residue — the check stays quiet", () => {
     expect(runtimeTests).toContain("result.residue");
   });
 });
+
+describe("residue — a branch not taken is not a stall", () => {
+  const E = (name: string) => defineEdge({ name, label: name, description: "d", fields: { v: utf8("V") } });
+  const Keyed = (name: string) =>
+    defineEdge({ name, label: name, description: "d", index: "id", fields: { id: utf8("ID") } });
+
+  /**
+   * **The defect this rule exists for.** A `oneOf` feeding two mutually
+   * exclusive joins produced exactly the right answer *and* reported a stall,
+   * so `weir run` exited non-zero on a correct program — and routing to one of
+   * N handlers is the most ordinary branching topology there is
+   * (docs/open-questions/branching-makes-every-run-red.md).
+   *
+   * Break-proof: removing the `explainedByBranch` filter from `residueNow`
+   * restores the old behaviour exactly — `handleR` holding one `S`, which is
+   * the reported bug.
+   */
+  it("reports nothing when a oneOf routes past one of two exclusive joins", async () => {
+    const [S, L, R, Out] = [E("S"), E("L"), E("R"), E("Out")];
+    const nodes = {
+      seed: defineNode({ name: "seed", input: single(S), output: single(S), fn: (s) => s }),
+      // Always routes left; `handleR` is left holding an `S` it can never pair.
+      split: defineNode({
+        name: "split",
+        input: single(S),
+        output: oneOf(L, R),
+        fn: () => ({ edge: "L", payload: { v: "l" } }),
+      }),
+      handleL: defineNode({ name: "handleL", input: allOf(S, L), output: single(Out), fn: () => ({ v: "viaL" }) }),
+      handleR: defineNode({ name: "handleR", input: allOf(S, R), output: single(Out), fn: () => ({ v: "viaR" }) }),
+    };
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      {
+        fields: {},
+        edges: { S, L, R, Out },
+        nodes,
+        wiring: { origins: ["seed"], feeds: { seed: ["split", "handleL", "handleR"], split: ["handleL", "handleR"] } },
+      } as never,
+      { correlationId: "x", originPayloads: { seed: { v: "s" } } },
+      { log, maxPulses: 10 },
+    );
+
+    expect(log.instances("Out", "x").map((i) => i.payload)).toEqual([{ v: "viaL" }]);
+    expect(result.residue).toEqual([]);
+  });
+
+  /**
+   * **The case that made the obvious fix wrong, and the reason the rule is per
+   * lineage group rather than per node pair.**
+   *
+   * With a spread above the branch, *both* joins fire correctly — and both are
+   * still left holding the other element's token. So neither node is "the
+   * loser", and an exclusivity rule keyed on the node pair has nothing to key
+   * on. It is also where the count gets bad: one spurious entry per element per
+   * branch-not-taken, which over a few-thousand-element spread is thousands of
+   * them on a fully correct run.
+   *
+   * Break-proof: removing the filter reports two entries here, one per join,
+   * each holding the element that went the other way.
+   */
+  it("reports nothing when a spread sends elements down both branches", async () => {
+    const [S, Item, L, R, Out] = [E("S"), Keyed("Item"), Keyed("L"), Keyed("R"), E("Out")];
+    const nodes = {
+      seed: defineNode({ name: "seed", input: single(S), output: many(Item), fn: () => ({ a: { id: "a" }, b: { id: "b" } }) }),
+      split: defineNode({
+        name: "split",
+        input: single(Item),
+        output: oneOf(L, R),
+        fn: (i: { id: string }) =>
+          i.id === "a" ? { edge: "L", payload: { id: i.id } } : { edge: "R", payload: { id: i.id } },
+      }),
+      handleL: defineNode({
+        name: "handleL",
+        input: allOf(Item, L),
+        output: single(Out),
+        fn: (bag: { Item: { id: string } }) => ({ v: `L:${bag.Item.id}` }),
+      }),
+      handleR: defineNode({
+        name: "handleR",
+        input: allOf(Item, R),
+        output: single(Out),
+        fn: (bag: { Item: { id: string } }) => ({ v: `R:${bag.Item.id}` }),
+      }),
+    };
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      {
+        fields: {},
+        edges: { S, Item, L, R, Out },
+        nodes,
+        wiring: { origins: ["seed"], feeds: { seed: ["split", "handleL", "handleR"], split: ["handleL", "handleR"] } },
+      } as never,
+      { correlationId: "m", originPayloads: { seed: { v: "s" } } },
+      { log, maxPulses: 20 },
+    );
+
+    // Both branches answered, each for its own element.
+    expect(log.instances("Out", "m").map((i) => (i.payload as { v: string }).v).sort()).toEqual(["L:a", "R:b"]);
+    expect(result.residue).toEqual([]);
+  });
+
+  /**
+   * **The guard against the fix becoming a blanket suppression**, which is how
+   * this repo's last two corrections went wrong. A fan-in whose other arm has
+   * no producer at all is a genuine stall and must still be reported — there is
+   * no `oneOf` anywhere, so nothing can explain the hold.
+   */
+  it("still reports a fan-in whose other arm nothing produces", async () => {
+    const [A, B, C] = [E("A"), E("B"), E("C")];
+    const nodes = {
+      seed: defineNode({ name: "seed", input: single(A), output: single(A), fn: (a) => a }),
+      join: defineNode({ name: "join", input: allOf(A, B), output: single(C), fn: () => ({ v: "c" }) }),
+    };
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      { fields: {}, edges: { A, B, C }, nodes, wiring: { origins: ["seed"], feeds: { seed: ["join"] } } } as never,
+      { correlationId: "g", originPayloads: { seed: { v: "a" } } },
+      { log, maxPulses: 10 },
+    );
+
+    expect(result.residue).toEqual([{ node: "join", edge: "A", waiting: 1 }]);
+  });
+
+  /**
+   * **Why the rule requires *every* absent arm to be explained, not some.**
+   *
+   * `join` needs three things: the token, a branch that was routed elsewhere,
+   * and an arm nothing produces. The branch half is explainable and the third
+   * arm is a real stall, so the node is stalled and must be reported.
+   *
+   * Break-proof: changing `absent.every(...)` to `absent.some(...)` in
+   * `explainedByBranch` makes this return an empty residue — the branch
+   * decision would excuse a missing arm that has nothing to do with it, which
+   * is precisely the over-correction that would make the check useless.
+   */
+  it("still reports a node missing both a branch-not-taken and an arm nothing produces", async () => {
+    const [S, L, R, Never, Out] = [E("S"), E("L"), E("R"), E("Never"), E("Out")];
+    const nodes = {
+      seed: defineNode({ name: "seed", input: single(S), output: single(S), fn: (s) => s }),
+      split: defineNode({
+        name: "split",
+        input: single(S),
+        output: oneOf(L, R),
+        fn: () => ({ edge: "L", payload: { v: "l" } }),
+      }),
+      // Wants R (routed elsewhere) *and* Never (no producer at all).
+      join: defineNode({ name: "join", input: allOf(S, R, Never), output: single(Out), fn: () => ({ v: "out" }) }),
+    };
+    const log = new InMemoryLog();
+
+    const result = await runNetlist(
+      {
+        fields: {},
+        edges: { S, L, R, Never, Out },
+        nodes,
+        wiring: { origins: ["seed"], feeds: { seed: ["split", "join"], split: ["join"] } },
+      } as never,
+      { correlationId: "p", originPayloads: { seed: { v: "s" } } },
+      { log, maxPulses: 10 },
+    );
+
+    expect(result.residue).toEqual([{ node: "join", edge: "S", waiting: 1 }]);
+  });
+});

@@ -18,12 +18,11 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-## Open (27)
+## Open (26)
 
 Live. Ordered alphabetically, not by priority.
 
 - [An origin node can never iterate](open-questions/an-origin-node-can-never-iterate.md)
-- [The idiomatic way to branch makes every such run red](open-questions/branching-makes-every-run-red.md)
 - [Can a closure carry a formula, or only a value?](open-questions/can-a-closure-carry-a-formula.md)
 - [Cardinality is invisible to a static crossing query](open-questions/cardinality-is-invisible.md)
 - [Where do client/server and PII obfuscation map onto nodes and edges?](open-questions/client-zones-and-obfuscation.md)
@@ -60,10 +59,11 @@ Cannot be built as stated — the reason is in the file.
 
 - [Drift at a boundary, and forking a run to act on it](open-questions/drift-and-fork.md) — specced, not built — `2026-09-29-drift-and-fork.md`, status draft
 
-## Resolved (14)
+## Resolved (15)
 
 Kept because the reasoning is worth more than the answer, and because several specs and code comments cite them.
 
+- [The idiomatic way to branch makes every such run red](open-questions/branching-makes-every-run-red.md) — resolved (2026-09-29)
 - [No way to say "these N things vary only in configuration"](open-questions/configuration-versus-ontology.md) — resolved (2026-09-29) for the configuration half. The arithmetic half is open by design
 - [Should `membrane()` build the envelope before asserting input?](open-questions/envelope-before-assert.md) — resolved (2026-09-24 — build it first)
 - [YAML examples are tagged, TypeScript examples are bare, and the gate only knew the bare form](open-questions/examples-reach-the-gate.md) — resolved (2026-09-28)

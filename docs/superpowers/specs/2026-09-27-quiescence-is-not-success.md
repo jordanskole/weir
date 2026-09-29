@@ -246,3 +246,42 @@ honest.
 - **Liveness analysis at elaboration.** "Can this topology ever stall" is a
   static question, genuinely answerable for some shapes, and a different piece of
   work from observing that one run did.
+
+## Amended 2026-09-29: a branch not taken is not a stall
+
+This spec's §2 defines residue as *"a node still holding eligible unconsumed
+input on a declared arc when the run stopped"*, and argued it excludes the
+benign cases **by construction** — a terminal output and an unrouted `oneOf`
+branch are declared as input by nobody, so no node waits on them.
+
+**One benign case was missed, and it is the most ordinary branching topology
+there is.** A `oneOf` feeding two mutually exclusive joins — route to one of N
+handlers — leaves the loser holding its other arm forever:
+
+```
+Out produced: [{"v":"viaL"}]        ← correct
+residue [{ node: "handleR", edge: "S", waiting: 1 }]
+```
+
+The output is right and the run exits non-zero. The unrouted branch is excluded
+by construction; the *arm paired with* an unrouted branch is not.
+
+**It is per lineage group, not per node pair**, which took a second fixture to
+see. Put a spread above the branch and *both* joins fire correctly while both
+still hold the other element's token — so neither is "the loser", and a
+node-level exclusivity rule has nothing to key on. The count is also one
+spurious entry per element per branch-not-taken, so a few-thousand-element
+spread reports thousands of them on a correct run.
+
+**The rule added.** A held instance is not residue when, for that instance's own
+lineage, every input edge the node is missing has a `oneOf` sibling that *was*
+produced. Both halves are needed and both already existed: the declarations say
+which edges are siblings of one `oneOf` output, and the log says which branch
+each token took.
+
+Strict in two ways, because this suppresses the check that catches real stalls.
+**Every** absent edge must be explained — a node missing both a
+branch-not-taken and an arm that genuinely never arrived is still stalled, and
+`some` rather than `every` hides it (tested). And at least one edge must
+actually be absent, so a node that could have fired and did not stays visible as
+the pulse-loop bug it would be.
