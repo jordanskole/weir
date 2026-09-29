@@ -234,4 +234,16 @@ Things raised in the design conversation that were not resolved — as opposed t
 
   This is not a modelling error and not blue-ribbon's: routing to one of N handlers is the most ordinary branching topology there is, and every instance of it in weir is red today. The residue rule cannot currently separate **"waiting on something a peer branch decided against"** (benign, and knowable statically — `L` and `R` come from one `oneOf`) from **"waiting on something nothing will ever produce"** (the real stall the check exists to catch). The pressure-test's own report calls this worse than the friction it started from: *"it is expressible, it is correct, and it is indistinguishable from a broken run."*
 
-  Candidate directions, none taken: teach the residue check that two nodes fed by the same `oneOf` are mutually exclusive, so the loser's leftovers are expected; or let a node declare that it is one of a mutually-exclusive set; or reconsider whether an unconsumed token on a *branch not taken* is residue at all. The first looks most promising because the information is already in the declarations — `oneOf` is right there in the producing node's output spec — and it needs no new syntax.
+  **It is worse with a spread above it, and that case corrects the obvious fix.** Two items, one routed to each branch, and *both* joins fire correctly — yet both still report residue:
+
+  ```
+  Out: [{"v":"L:a"},{"v":"R:b"}]
+  residue [{ node: "handleL", edge: "Item", waiting: 1 },
+           { node: "handleR", edge: "Item", waiting: 1 }]
+  ```
+
+  `handleL` consumed `Item(a)` with `L(a)` and fired, then holds `Item(b)` forever because `b` went to `R`; `handleR` mirrors it. So **neither node is "the loser"** — exclusivity is per *lineage group*, not per node pair, and the count is one spurious entry per element per branch-not-taken. A 3,265-element spread over a two-way branch reports thousands of them on a fully correct run.
+
+  That kills the obvious fix, which this entry originally proposed: *"teach the residue check that two nodes fed by the same `oneOf` are mutually exclusive, so the loser's leftovers are expected."* Stated that way it is wrong, and it would suppress genuine stalls — in the case above both nodes fired, so a node-level exclusivity rule has nothing to key on.
+
+  **The rule it has to be instead:** a node waiting on edge `E` for lineage group `G` is not residue when, for that same `G`, a sibling branch of the `oneOf` that produces `E` was taken. That needs both halves — the *declarations* say `L` and `R` are siblings of one `oneOf` output, and the *log* says which branch each group took — which is more than the "already in the declarations" this entry first claimed, though both halves do already exist. Alternatives not explored: let a node declare it is one of a mutually-exclusive set, or reconsider whether an unconsumed token on a branch not taken is residue at all.
