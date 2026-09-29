@@ -18,12 +18,13 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-## Open (26)
+## Open (27)
 
 Live. Ordered alphabetically, not by priority.
 
 - [An origin node can never iterate](open-questions/an-origin-node-can-never-iterate.md)
 - [The idiomatic way to branch makes every such run red](open-questions/branching-makes-every-run-red.md)
+- [Can a closure carry a formula, or only a value?](open-questions/can-a-closure-carry-a-formula.md)
 - [Cardinality is invisible to a static crossing query](open-questions/cardinality-is-invisible.md)
 - [Where do client/server and PII obfuscation map onto nodes and edges?](open-questions/client-zones-and-obfuscation.md)
 - [`correlation_id` origin and lifetime for multi-invocation threads](open-questions/correlation-id-lifetime.md)

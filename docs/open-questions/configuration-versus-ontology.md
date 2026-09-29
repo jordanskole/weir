@@ -72,10 +72,12 @@ declaration into N contracts, one per row.
 
 ## What stays open under it
 
-- **The arithmetic does not dissolve.** A closure carries a value, not a formula,
-  so counties differing in kind — a Web Mercator latitude correction, an
-  integer-truncating acreage field — stay distinct implementations. That is
-  correct: they are not varying only in configuration.
+- **The arithmetic does not dissolve**, and it has its own file:
+  [can a closure carry a formula?](can-a-closure-carry-a-formula.md). A closure
+  carries a value, so counties differing in kind — a Web Mercator latitude
+  correction, an integer-truncating acreage field — stay distinct
+  implementations. The spec argues that is correct; whether the boundary falls
+  in the right place is the open half.
 - **Edge instantiation** is deliberately out of scope and is the larger half,
   since an edge template's fields vary in *name*, which is what structural
   hashing is most sensitive to.
