@@ -34,6 +34,9 @@ const birthday: NodeDecl = {
 };
 
 const CORRECT = `export default function birthday(payload) {
+  // uint8 maxes at 255, so incrementing 255 would overflow the declared width.
+  // Declining is the correct answer and the membrane records it as Failed<In>.
+  if (payload.age === 255) throw new Error("age 255 cannot be incremented within uint8");
   return { age: payload.age + 1 };
 }
 `;
@@ -75,6 +78,9 @@ const ALWAYS_WRONG = `export default function birthday() {
 const IMPORTS_A_DEPENDENCY = `import { parse } from "yaml";
 export default function birthday(payload) {
   parse("age: 1");
+  // uint8 maxes at 255, so incrementing 255 would overflow the declared width.
+  // Declining is the correct answer and the membrane records it as Failed<In>.
+  if (payload.age === 255) throw new Error("age 255 cannot be incremented within uint8");
   return { age: payload.age + 1 };
 }
 `;
@@ -144,8 +150,10 @@ describe("acceptImplementation", () => {
     });
     expect(await readFile(join(dir, "birthday", `${short}.ts`), "utf8")).toBe(CORRECT);
     expect(JSON.parse(await readFile(join(dir, "birthday", `${short}.meta.json`), "utf8"))).toEqual({
-      lines: 3,
-      complexity: 1,
+      // 6 and 2, not 3 and 1: CORRECT now guards the uint8 ceiling, which adds
+      // the lines and the one branch.
+      lines: 6,
+      complexity: 2,
     });
   });
 

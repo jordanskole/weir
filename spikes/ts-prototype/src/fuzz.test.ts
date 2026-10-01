@@ -237,13 +237,23 @@ describe("fuzzNode — properties", () => {
       input: single(Person),
       output: single(Person),
       properties: [increments],
-      fn: (payload) => ({ age: payload.age + 1 }),
+      // Declines at the uint8 ceiling rather than returning 256, which the
+      // membrane now rejects — enforcing the declared width surfaced this
+      // overflow, which had been invisible while the width was decorative.
+      fn: (payload) => {
+        if (payload.age === 255) throw new Error("age 255 cannot be incremented within uint8");
+        return { age: payload.age + 1 };
+      },
     });
 
     const report = await fuzzNode(birthday, { count: 20 });
 
     expect(report.propertyFailures).toEqual([]);
-    expect(report.realOutputs).toBe(20);
+    // 19 of 20, not 20: the generator probes the uint8 boundary at 255, and
+    // incrementing that would leave the declared width, so `fn` declines. The
+    // property holds on every case that produced a real output, which is what
+    // this asserts — a decline is not a property failure.
+    expect(report.realOutputs).toBe(19);
   });
 
   it("reports a counterexample when the property is violated", async () => {
@@ -298,7 +308,13 @@ describe("fuzzNode — output-rooted property paths report, input-rooted still t
       input: single(Person),
       output: single(Person),
       properties: [{ name: "typo", description: "references an input field that isn't there", expr: { get: "input.nope" } }],
-      fn: (payload) => ({ age: payload.age + 1 }),
+      // Declines at the uint8 ceiling rather than returning 256, which the
+      // membrane now rejects — enforcing the declared width surfaced this
+      // overflow, which had been invisible while the width was decorative.
+      fn: (payload) => {
+        if (payload.age === 255) throw new Error("age 255 cannot be incremented within uint8");
+        return { age: payload.age + 1 };
+      },
     });
 
     await expect(fuzzNode(broken, { count: 5 })).rejects.toThrow(/typo/);

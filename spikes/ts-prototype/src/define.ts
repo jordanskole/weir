@@ -8,7 +8,7 @@
  * step 2).
  */
 
-import { SCALAR_TYPES } from "./types.js";
+import { INT_BOUNDS, SCALAR_TYPES } from "./types.js";
 import type {
   AnyEdgeDef,
   EdgeDef,
@@ -32,14 +32,16 @@ export const UNSIGNED_TYPES: ScalarType[] = ["uint8", "uint16", "uint32"];
  * here on purpose. Exported so schema.ts's JSON Schema generator can encode
  * the exact same bounds rather than duplicating these numbers.
  */
-export const INTEGER_RANGES: Partial<Record<ScalarType, [number, number]>> = {
-  uint8: [0, 255],
-  uint16: [0, 65535],
-  uint32: [0, 4294967295],
-  int8: [-128, 127],
-  int16: [-32768, 32767],
-  int32: [-2147483648, 2147483647],
-};
+/**
+ * The table lives in types.ts, beside `SCALAR_TYPES`. Re-exported under this
+ * name because define.ts and generate.ts already read it.
+ *
+ * One table on purpose: `membrane.ts` enforces these bounds, `emit-zod.ts` emits
+ * them, `define.ts` checks a `validations` range against them and `generate.ts`
+ * samples within them — four readers, and two copies drifting is this repo's most
+ * frequent defect.
+ */
+export const INTEGER_RANGES: Partial<Record<ScalarType, readonly [number, number]>> = INT_BOUNDS;
 
 interface NumberValidationShape {
   min?: number;

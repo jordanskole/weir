@@ -34,6 +34,29 @@ export const SCALAR_TYPES = [
  */
 export type ScalarType = (typeof SCALAR_TYPES)[number];
 
+/**
+ * What each integer type's name actually promises, as bounds.
+ *
+ * Read by `membrane.ts` (to enforce them) and by `emit-zod.ts` (to emit them).
+ * One table because two copies of it is the drift this repo keeps finding — and
+ * because until 2026-10-01 there were zero copies: `typeofFor` collapsed every
+ * numeric type to `"number"`, so a declared `uint8` accepted -5, 1e9 and 1.5 and
+ * the width was documentation.
+ */
+export const INT_BOUNDS = {
+  uint8: [0, 255],
+  uint16: [0, 65535],
+  uint32: [0, 4294967295],
+  int8: [-128, 127],
+  int16: [-32768, 32767],
+  int32: [-2147483648, 2147483647],
+} as const satisfies Partial<Record<ScalarType, readonly [number, number]>>;
+
+/** Whether a scalar type is one of the sized integers in `INT_BOUNDS`. */
+export function isIntegerType(type: ScalarType): type is keyof typeof INT_BOUNDS {
+  return type in INT_BOUNDS;
+}
+
 /** Statistical measure classification for a field. */
 export type Measure = "nominal" | "ordinal" | "quantitative" | "temporal";
 

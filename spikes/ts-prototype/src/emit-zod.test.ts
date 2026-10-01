@@ -18,7 +18,7 @@ import { elaborate } from "./elaborate.js";
 import { emitZodModule } from "./emit-zod.js";
 import { assertPayload } from "./membrane.js";
 import { generateInputCases } from "./generate.js";
-import { SCALAR_TYPES } from "./types.js";
+import { INT_BOUNDS, SCALAR_TYPES, isIntegerType } from "./types.js";
 import type { AnyEdgeDef, FieldDef, NodeDecl } from "./types.js";
 
 const REPO = join(import.meta.dirname, "..", "..", "..");
@@ -318,28 +318,21 @@ describe("emit-zod — the mapping is covered, not assumed", () => {
   });
 
   /**
-   * A RECORDED DIVERGENCE, and the only one. The emitter is deliberately
-   * stricter than the membrane here.
+   * This test used to record a DIVERGENCE: the membrane accepted `-5`, `1e9` and
+   * `1.5` in a declared `uint8`, because `typeofFor` collapsed every numeric type
+   * to `"number"`. The emitter was deliberately stricter, and the divergence was
+   * written as a test designed to fail the day the gap closed.
    *
-   * `membrane.ts`'s `typeofFor` collapses every numeric type to `"number"`, and
-   * `validationErrors` enforces only an explicit `validations: { min, max }` —
-   * so a declared `uint8` accepts `-5`, `1e9` and `1.5`. The declared width is
-   * decorative at runtime. Found by the agreement test above on its first run.
+   * It closed, so this is now an agreement test. `validationErrors` enforces the
+   * declared width and integerness, both reading `INTEGER_RANGES` from define.ts
+   * so the bounds have one home.
    *
-   * The emitter keeps `.int().min().max()` rather than matching, because the two
-   * divergence directions are not equally safe: stricter means an implementer
-   * writes a value that satisfies the declared width and the membrane then
-   * accepts it, while looser would let an implementer emit 999 for a `uint8`,
-   * see a local green, see a gate green, and put it in the durable log.
-   *
-   * THIS TEST FAILS WHEN THE MEMBRANE IS FIXED. That is intended — closing the
-   * gap should force deleting the exception rather than leaving a stale
-   * allowance behind. See docs/open-questions/integer-widths-are-decorative.md.
+   * Enforcing it surfaced a real overflow that had been invisible: `birthday`
+   * increments a `uint8` age, the generator probes the boundary at 255, and 256
+   * is not a `uint8`. That fixture now declines at the ceiling.
    */
-  it("is stricter than the membrane on integer width and integerness, and on nothing else", async () => {
+  it("agrees with the membrane on integer width and integerness", async () => {
     const { edge, schema } = await everyScalar();
-    // Per-type bounds, because a violation for one width is legal for another:
-    // -5 is a perfectly good int16 and 1e9 fits in an int32.
     const INTS: [string, number, number][] = [
       ["uint8", 0, 255],
       ["uint16", 0, 65535],
@@ -352,31 +345,58 @@ describe("emit-zod — the mapping is covered, not assumed", () => {
       SCALAR_TYPES.map((t) => [`f_${t}`, t === "bool" ? true : t === "utf8" || t === "datetime" ? "x" : 1]),
     );
 
-    const unenforced: string[] = [];
+    const disagreements: string[] = [];
     for (const [t, min, max] of INTS) {
-      for (const [label, value] of [
-        ["above max", max + 1],
-        ["below min", min - 1],
-        ["non-integer", 1.5],
-      ] as [string, number][]) {
+      const probes: [string, number, boolean][] = [
+        ["above max", max + 1, false],
+        ["below min", min - 1, false],
+        ["non-integer", 1.5, false],
+        ["at max", max, true],
+        ["at min", min, true],
+      ];
+      for (const [label, value, shouldPass] of probes) {
         const payload = { ...base, [`f_${t}`]: value };
-        const membraneAccepts = enforced(edge, payload).ok;
-        const schemaAccepts = schema.safeParse(payload).success;
-        // The recorded gap: membrane accepts, emitted schema rejects.
-        if (!(membraneAccepts && !schemaAccepts)) {
-          unenforced.push(`${t} ${label} (${value}): membrane ${membraneAccepts}, schema ${schemaAccepts}`);
+        const membrane = enforced(edge, payload).ok;
+        const emitted = schema.safeParse(payload).success;
+        if (membrane !== emitted || membrane !== shouldPass) {
+          disagreements.push(
+            `${t} ${label} (${value}): membrane ${membrane}, schema ${emitted}, expected ${shouldPass}`,
+          );
         }
       }
     }
-    expect(unenforced).toEqual([]);
+    expect(disagreements).toEqual([]);
+  });
 
-    // And the divergence stops there — a wrong scalar type is still rejected by
-    // both, so this is a range/integerness gap and not a missing type check.
-    for (const [t] of INTS) {
-      const payload = { ...base, [`f_${t}`]: "not-a-number" };
-      expect(enforced(edge, payload).ok).toBe(false);
-      expect(schema.safeParse(payload).success).toBe(false);
+  /**
+   * The agreement test cannot catch a generator that produces out-of-range
+   * integers: both the membrane and the emitted schema would reject them, so the
+   * two would agree and the test would pass. This asserts the stronger thing —
+   * that generated integers are *within* the declared width — which is what
+   * `realOutputs` counts depend on.
+   */
+  it("generates integers within the declared width, for every integer field in the corpus", async () => {
+    const rows = await corpus();
+    const outOfRange: string[] = [];
+    let probed = 0;
+
+    for (const { app, edge } of rows) {
+      const intFields = scalarFields(edge).filter(([, f]) => isIntegerType(f.type));
+      if (intFields.length === 0) continue;
+      for (const payload of generateInputCases({ kind: "single", edge } as any, 5, 12)) {
+        for (const [key, field] of intFields) {
+          const value = (payload as Record<string, unknown>)[key];
+          if (typeof value !== "number") continue;
+          const [min, max] = INT_BOUNDS[field.type as keyof typeof INT_BOUNDS];
+          probed += 1;
+          if (!Number.isInteger(value) || value < min || value > max) {
+            outOfRange.push(`${app} ${edge.name}.${key} (${field.type}): ${value}`);
+          }
+        }
+      }
     }
+    expect(probed).toBeGreaterThan(20);
+    expect(outOfRange).toEqual([]);
   });
 
   it("carries each field's description into .describe(), so the prose has a home at field level", async () => {

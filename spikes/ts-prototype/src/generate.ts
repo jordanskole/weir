@@ -7,6 +7,7 @@
  */
 
 import { INTEGER_RANGES } from "./define.js";
+import { isIntegerType } from "./types.js";
 import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ScalarType } from "./types.js";
 
 export type Rng = () => number;
@@ -33,10 +34,6 @@ function randomInt(rng: Rng, min: number, max: number): number {
 
 /** A pragmatic sampling range for f32/f64 fields — these have no representable-range check (INTEGER_RANGES has no entry for them), but generation still needs *some* concrete domain to sample uniform-random fill from. Not a spec requirement, an implementation default. */
 const DEFAULT_FLOAT_BOUND = 1_000_000;
-
-function isIntegerType(type: ScalarType): boolean {
-  return type in INTEGER_RANGES;
-}
 
 function numericBounds(field: FieldDef): [number, number] {
   const v = field.validations as { min?: number; max?: number } | undefined;

@@ -18,7 +18,7 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-## Open (29)
+## Open (28)
 
 Live. Ordered alphabetically, not by priority.
 
@@ -36,7 +36,6 @@ Live. Ordered alphabetically, not by priority.
 - [A gather composes with nothing](open-questions/gather-composes-with-nothing.md)
 - [Should the generator produce `null`, and explore cross-field combinations?](open-questions/generator-coverage.md)
 - [The version pin pins the contract, not the implementation](open-questions/implementation-identity.md)
-- [The declared integer widths are not enforced](open-questions/integer-widths-are-decorative.md)
 - [Classification says what may not go out; nothing says what may not be trusted coming in](open-questions/integrity-inbound.md)
 - [A collection is keyed, and streamed data is ordered](open-questions/keyed-versus-ordered-collections.md)
 - [The membrane bounds behaviour, not control — `fn` is still directly reachable](open-questions/membrane-bounds-behaviour-not-control.md)
@@ -58,7 +57,7 @@ Cannot be built as stated — the reason is in the file.
 
 - [Positional identity: `birthday.then.birthday` should run twice](open-questions/positional-identity.md) — **blocked** — two shipped things use the same syntax with opposite
 
-## Resolved (19)
+## Resolved (20)
 
 Kept because the reasoning is worth more than the answer, and because several specs and code comments cite them.
 
@@ -72,6 +71,7 @@ Kept because the reasoning is worth more than the answer, and because several sp
 - [Is `many` a compositional type, or only a one-way fan-out?](open-questions/gather-and-the-vectorized-consumer.md) — resolved (2026-09-27, `gather`). One half deliberately still unbuilt
 - [A gather is all-or-nothing, and a batch wants partial success](open-questions/gather-is-all-or-nothing.md) — resolved (2026-10-01)
 - [Which host language elaborates](open-questions/host-language.md) — resolved (2026-09-28 — TypeScript for v1)
+- [The declared integer widths are not enforced](open-questions/integer-widths-are-decorative.md) — resolved (2026-10-01 — enforced, and it found a live overflow)
 - [Iteration, and the "no loop construct" claim](open-questions/iteration-and-the-loop-construct.md) — resolved (2026-09-26, in four specs)
 - [`Log` is doing two jobs under one interface](open-questions/log-does-two-jobs.md) — resolved (2026-09-28)
 - [There is no fan-out primitive: a `many` output is one token, not N](open-questions/no-fan-out-primitive.md) — resolved (2026-09-26)
@@ -81,4 +81,3 @@ Kept because the reasoning is worth more than the answer, and because several sp
 - ["System nodes": nodes whose contract determines their implementation](open-questions/system-nodes.md) — resolved (2026-09-26, all three built)
 - [`.topology` authoring format](open-questions/topology-authoring-format.md) — resolved (2026-09-25). Kept as a citation target
 - [Zones: a line in the topology, not a per-node annotation](open-questions/zones.md) — resolved (2026-09-28, built)
-

@@ -23,21 +23,8 @@
  * envelope and the trace, so those strings would change observably.
  */
 
-import type { AnyEdgeDef, FieldDef, ManyEdgeDef, NodeDecl, ScalarType } from "./types.js";
-
-/**
- * The integer widths, as the bounds they actually mean. This is the clearest
- * case for emitting a schema rather than a type: `uint8` carries a declared
- * range, and every hand-written TypeScript type for it says `number`.
- */
-const INT_BOUNDS: Partial<Record<ScalarType, [number, number]>> = {
-  uint8: [0, 255],
-  uint16: [0, 65535],
-  uint32: [0, 4294967295],
-  int8: [-128, 127],
-  int16: [-32768, 32767],
-  int32: [-2147483648, 2147483647],
-};
+import { INT_BOUNDS, isIntegerType } from "./types.js";
+import type { AnyEdgeDef, FieldDef, ManyEdgeDef, NodeDecl } from "./types.js";
 
 /** A JS string literal for emitted source. */
 function lit(value: string): string {
@@ -62,9 +49,9 @@ function scalarBase(field: FieldDef): string {
   if (field.type === "bool") return "z.boolean()";
   if (field.type === "utf8" || field.type === "datetime") return "z.string()";
 
-  const bounds = INT_BOUNDS[field.type];
-  if (bounds === undefined) return "z.number()";
-  return `z.number().int().min(${bounds[0]}).max(${bounds[1]})`;
+  if (!isIntegerType(field.type)) return "z.number()";
+  const [min, max] = INT_BOUNDS[field.type];
+  return `z.number().int().min(${min}).max(${max})`;
 }
 
 /**

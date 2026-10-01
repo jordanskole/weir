@@ -45,7 +45,7 @@
  */
 
 import { hashNode } from "./hash.js";
-import { Identity, gatherKey } from "./types.js";
+import { INT_BOUNDS, Identity, gatherKey, isIntegerType } from "./types.js";
 import type {
   AnyEdgeDef,
   Envelope,
@@ -87,6 +87,28 @@ function validationErrors(key: string, field: FieldDef, value: string | number |
 
   if (field.enumValues !== undefined && typeof value === "string" && !field.enumValues.includes(value)) {
     errors.push(`${key} must be one of ${field.enumValues.join(", ")}, got "${value}"`);
+  }
+
+  /**
+   * The declared integer width, enforced — `uint8` means 0..255 and an integer,
+   * not merely "a number". Until 2026-10-01 `typeofFor` collapsed every numeric
+   * type to `"number"` and only an explicit `validations` block was checked, so
+   * the width was decorative and a `uint8` field accepted -5, 1e9 and 1.5
+   * (docs/open-questions/integer-widths-are-decorative.md).
+   *
+   * It fails rather than truncating. Truncation would be a membrane that
+   * silently rewrites data — wrong on its own terms, and it would break replay
+   * determinism, since the value in the log would not be the value the caller
+   * produced. Bounds come from types.ts's INT_BOUNDS, which emit-zod.ts also
+   * reads, so the rule has one home.
+   */
+  if (typeof value === "number" && isIntegerType(field.type)) {
+    const [min, max] = INT_BOUNDS[field.type];
+    if (!Number.isInteger(value)) {
+      errors.push(`${key} must be an integer (${field.type}), got ${value}`);
+    } else if (value < min || value > max) {
+      errors.push(`${key} must be within ${field.type} range ${min}..${max}, got ${value}`);
+    }
   }
 
   const validations = field.validations as
