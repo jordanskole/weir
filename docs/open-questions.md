@@ -56,7 +56,7 @@ Cannot be built as stated — the reason is in the file.
 
 ## Specced, not built (1)
 
-- [A gather is all-or-nothing, and a batch wants partial success](open-questions/gather-is-all-or-nothing.md) — specced, not built — `2026-10-01-gather-accepting.md`, status draft
+- [A gather is all-or-nothing, and a batch wants partial success](open-questions/gather-is-all-or-nothing.md) — specced, not built — `2026-10-01-gather-settled.md`, status draft
 
 ## Resolved (18)
 

@@ -1,6 +1,6 @@
 # A gather is all-or-nothing, and a batch wants partial success
 
-Status: specced, not built — `2026-10-01-gather-accepting.md`, status draft.
+Status: specced, not built — `2026-10-01-gather-settled.md`, status draft.
 Last grounded: 2026-10-01 — split out of
 [run granularity](run-granularity.md), whose other two blockers both shipped.
 
@@ -35,8 +35,9 @@ anticipated — which is the point of `Failed_X` existing.
 
 ## Specced 2026-10-01, and the barrier already generalized
 
-[`gather … accepting`](../superpowers/specs/2026-10-01-gather-accepting.md), and
-the shape was not what this entry assumed.
+[`gather … settled`](../superpowers/specs/2026-10-01-gather-settled.md), and the
+shape was not what this entry assumed — nor what the spec's own first draft
+assumed.
 
 `gather`'s barrier is *"every element resolved"*, and "resolved" has always meant
 *"produced an instance of the declared edge"* — a set of exactly one. So the rule
@@ -66,3 +67,12 @@ Not the dead-group rule being wrong. `gather`'s all-or-nothing behaviour is
 correct *for a gather*, and was built deliberately to stop a group hanging until
 the budget. The question is whether weir also needs the other operation, beside
 it, with a different signature and a different name.
+
+**And the first draft had the node receive both edges, which was wrong.** Jordan's
+objection — *a node should take a single input; branching lives in the topology* —
+corrected it: `settled:` widens **what closes the barrier**, never what the node
+receives. The partition happens in the wiring, as two single-input gather nodes
+sharing one barrier. [Diagram](../superpowers/specs/2026-10-01-gather-barrier.html).
+
+That correction is also what killed `partition:` as the keyword, which had been
+the leading candidate: the node does not partition, the topology does.

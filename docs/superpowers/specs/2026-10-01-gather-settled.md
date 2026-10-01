@@ -45,13 +45,20 @@ the whole feature:
 # summarizeCorridor.node
 input:
   gather: ParcelCard
-  accepting:
+  settled:
     - Failed_ParcelCard
 output: CorridorSummary
 ```
 
+`settled:` borrows the one distinction a reader is most likely to already hold
+precisely: `Promise.all` is `sequence` and fails on the first rejection;
+`Promise.allSettled` waits for every outcome. That is exactly the pair being
+added here. The cost, taken deliberately: it is vocabulary from one host
+language, and an OCaml implementation comes after v1 — but the concept is not
+JavaScript's, only the spelling is.
+
 **Today's behaviour is the degenerate case, not a parallel mechanism.** With no
-`accepting:`, the declared set is `{ParcelCard}`, a `Failed_ParcelCard` falls
+`settled:`, the declared set is `{ParcelCard}`, a `Failed_ParcelCard` falls
 outside it, and the group dies exactly as it does now. That the existing rule
 falls out of the new one unchanged is the main reason to believe this shape is
 right.
@@ -59,7 +66,7 @@ right.
 ## 2. Tolerance is named in the contract, or it does not happen
 
 An author must write the edge they will tolerate. There is no threshold, no
-`tolerant: true`, and no implicit acceptance of `Failed_*`.
+`settled: true`, and no implicit acceptance of `Failed_*`.
 
 That is the point rather than ceremony. A gather that silently absorbed failures
 would turn "3,264 of 3,265 succeeded" into a result indistinguishable from
@@ -80,71 +87,97 @@ impossible for the same reason: the declared set holds one edge.
 ```yaml
 input:
   gather: TownshipLookup
-  accepting:
+  settled:
     - TownshipUnavailable
 ```
 
 A failure-specific `tolerating:` would not have covered this, and the two cases
-would have grown separate machinery for one question.
+would have grown separate machinery for one question. `settled:` reads correctly
+for both, because "this element has settled" is true of a legitimate absence and
+of a failure alike — which is the property the name was chosen for.
 
-## 4. The payload becomes a bag, and only when it has to
+## 4. The node still receives one collection — the barrier is not the payload
 
-With no `accepting:`, `Fn` receives the collection it receives today — a map
-keyed by each element's `index`. Unchanged.
-
-With `accepting:`, it receives a **bag keyed by edge name**, each value a
-collection:
+**Corrected 2026-10-01, and it changed the design rather than the wording.** A
+first version of this spec had the gather receive a bag of successes *and*
+failures:
 
 ```js
-{
-  ParcelCard:        { "10-003": {...}, "10-004": {...} },
-  Failed_ParcelCard: { "10-009": { input: {...}, reason: "..." } }
-}
+{ ParcelCard: {…}, Failed_ParcelCard: {…} }   // WRONG
 ```
 
-Shape following the declaration is established here — a `oneOf` output is tagged
-where a `single` is not, an `allOf` input is a bag where a `single` is not — so
-this adds no new idea. And it is the shape the body wants: a summary iterates the
-successes and reports the failures, which are two different loops.
+That puts the branch **inside the node**, and weir's position is that a node
+takes a single input and branching lives in the topology. The objection came from
+outside this spec and is correct.
 
-**A `Failed_X` has no `index`**, since its payload is `{input, reason}`. It is
-keyed by the **failed element's** index, read from `input`, so a caller can line a
-failure up against the element that produced it. Where the index cannot be
-recovered, the instance id is the key — the same fallback the ordinary gather
-already uses.
+**The barrier and the collection are two different things.** `settled:` widens
+*what closes the barrier*; it never widens what the node receives. So `Fn` gets
+exactly the collection it gets today — a map keyed by each element's `index`,
+holding instances of the **one** edge the node gathers.
 
-## 5. Asymmetry between `gather:` and `accepting:`, deliberately
+The failures are handled by a **separate node**, in the topology:
 
-`gather: X` names what the author *wanted*; `accepting: [...]` names what they
-will *tolerate*. A symmetric `gather: [X, Y]` was considered and not taken, for
-two reasons:
+```yaml
+# summarizeCorridor.node — sees only the cards
+input:
+  gather: ParcelCard
+  settled: [Failed_ParcelCard]
 
-- It would make the payload a bag in every case, changing what every existing
-  gather's `Fn` receives for no benefit to those nodes.
-- The asymmetry is true. A summary over 3,265 parcels is *about* the cards; the
-  failures are an exception it must handle, not a second kind of answer. A
-  declaration that says so reads better than one that pretends they are peers.
+# reportFailures.node — sees only the failures
+input:
+  gather: Failed_ParcelCard
+  settled: [ParcelCard]
+```
 
-The cost, stated: `accepting` is a second list that a reader must know to look at
-to understand what closes the barrier. Mitigated by `weir sys` reporting the full
-accepted set rather than only `gather:`.
+Both close on the same barrier; each receives one edge. The partition is real and
+it is drawn in the wiring, where a reader can see it — see
+[the diagram](2026-10-01-gather-barrier.html).
+
+Three consequences worth stating:
+
+- **No payload shape changes.** There is no conditional bag, and no existing
+  gather's `Fn` sees anything different. The back-compat question disappears
+  rather than being managed.
+- **`settled:` is symmetric in use and asymmetric in reading.** Each node names
+  what it gathers first and what else settles second, so the two declarations
+  above are mirror images. Neither node is privileged.
+- **A failure needs no `index`.** It was only required because the earlier design
+  handed failures to the node as a keyed collection. `reportFailures` gathers
+  `Failed_ParcelCard` as its *own* edge, so the ordinary gather keying applies
+  with nothing special-cased.
+
+## 5. One keyword, not a second input kind
+
+`partition:` as its own input kind was the leading candidate until §4's
+correction, and the correction is what rules it out: the node does not partition.
+The topology does. A key named for an operation the node no longer performs would
+be worse than an awkward one that describes the barrier accurately.
+
+It would also need a second key to say which of the partitioned edges *this* node
+receives — `partition: [A, B]` plus `take: A` — which is two keys to express what
+`gather: A` already says.
+
+Rejected for the same reason: `or:`, because `or` is already a property-language
+operator and echoes `oneOf`, making three meanings for one word in one
+declaration language.
 
 ## 6. What stays unchanged
 
 - **Dead groups still die.** An element resolving to something in *no* declared
-  outcome still kills the group. With `accepting: [Failed_X]` declared, the
+  outcome still kills the group. With `settled: [Failed_X]` declared, the
   remaining way to die is a `Failed_Many_X` from a nested gather, or an element
   whose subgraph simply ends — which residue reports.
 - **`until:` composes.** A cycle-gather may also accept failures; the barrier is
   "the terminator exists" and the membership rule is unchanged by which outcomes
   count as resolved.
 - **The empty collection still fires**, and an all-failures group now fires with
-  an empty success collection and a full failure one — which is the honest answer
-  and was previously a `Failed_Many_X`.
+  an **empty** collection rather than a `Failed_Many_X` — the honest answer, and
+  the one a sibling `reportFailures` node makes useful by gathering the failures
+  on its own wire.
 
 ## 7. Explicitly out of scope
 
-- **A tolerance threshold** (`tolerate: 0.01`). It turns a judgement into a
+- **A tolerance threshold** (`settled: 0.01`). It turns a judgement into a
   number that will be wrong for somebody, and the number has no home in a
   contract — a node cannot know what fraction of failures its *caller* finds
   acceptable.
@@ -161,25 +194,27 @@ Break-proofs required for each, recorded in the test's own comment with what the
 break-proof showed — including breaks that do **not** redden.
 
 1. A spread of four elements where one fails, gathered with
-   `accepting: [Failed_X]`, fires once with three successes and one failure.
-   The motivating case.
-2. **The same spread with no `accepting:` still dies**, producing
+   `settled: [Failed_X]`, fires once with the three successes. The motivating
+   case.
+2. **The same spread with no `settled:` still dies**, producing
    `Failed_Many_X`. The guard against this quietly replacing the existing rule,
    and the assertion that today's behaviour is the degenerate case.
-3. The failure collection is keyed by the **failed element's** index, so a caller
-   can line it up against what produced it.
+3. **The node receives one collection, not a bag.** `Fn` gets exactly what it
+   gets with no `settled:` declared — the §4 correction, and the assertion that
+   the barrier is not the payload.
 4. The barrier still waits: three of four elements resolved and nothing fired.
-5. An all-failures group fires with an empty success collection and a full
-   failure collection — not a `Failed_Many_X`.
+5. An all-failures group fires with an **empty** collection — not a
+   `Failed_Many_X`. The honest answer, and previously impossible.
 6. Two success edges from a `oneOf` (`TownshipLookup` / `TownshipUnavailable`)
    gather together, which is §3's case and has nothing to do with failure.
 7. An element resolving to an edge in *no* declared outcome still kills the
    group.
-8. `accepting:` composes with `until:` on a cycle-gather.
-9. `accepting:` is fingerprinted — two otherwise identical nodes accepting
+8. `settled:` composes with `until:` on a cycle-gather.
+9. `settled:` is fingerprinted — two otherwise identical nodes settling on
    different sets are different contracts.
-10. `accepting:` naming an edge nothing upstream can produce is refused at
+10. `settled:` naming an edge nothing upstream can produce is refused at
     elaboration, like a gather with no spread above it.
-11. With no `accepting:`, `Fn` receives exactly the collection it receives today.
-    The back-compat assertion.
+11. **Two gather nodes over the same spread both fire**, one per edge, each
+    receiving only its own — the topology-level partition, which is the shape
+    this is actually for.
 12. Every existing example still elaborates and runs, and no contract hash moves.
