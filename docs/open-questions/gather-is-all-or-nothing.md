@@ -1,6 +1,6 @@
 # A gather is all-or-nothing, and a batch wants partial success
 
-Status: open. **The last blocker on `run-granularity`.**
+Status: specced, not built — `2026-10-01-gather-accepting.md`, status draft.
 Last grounded: 2026-10-01 — split out of
 [run granularity](run-granularity.md), whose other two blockers both shipped.
 
@@ -33,24 +33,32 @@ assertion, an effect handler that times out. Those produce `Failed_X`, and no
 amount of declaring can convert them into an `Unavailable` the author
 anticipated — which is the point of `Failed_X` existing.
 
-## What it would have to be
+## Specced 2026-10-01, and the barrier already generalized
 
-A `traverse` that tolerates failures returns **two** things: the partial
-collection and the failures. Candidate shapes, none designed:
+[`gather … accepting`](../superpowers/specs/2026-10-01-gather-accepting.md), and
+the shape was not what this entry assumed.
 
-- A gather whose output is `allOf: [Collection, Failures]`, making the failure
-  list a declared edge a downstream node must consume — the most weir-ish, and it
-  forces the author to say what happens to the failures rather than ignoring
-  them.
-- A declared tolerance (`tolerate: 0.01`), which turns a judgement into a number
-  and will be wrong for somebody.
-- Report residue **into the payload** rather than only to the exit code, which is
-  what the reporter actually asked for and is the smallest change — though it
-  answers "what did not finish" rather than "what failed".
+`gather`'s barrier is *"every element resolved"*, and "resolved" has always meant
+*"produced an instance of the declared edge"* — a set of exactly one. So the rule
+was never "all or nothing"; it was **"every element resolved to a declared
+outcome"**, and widening that set is the whole feature. Today's behaviour falls
+out as the degenerate case rather than sitting beside a second mechanism, which
+is the main reason to believe the shape is right.
 
-The first is the one worth designing. The reason is the usual one: it makes the
-failure a thing on a wire that something must handle, rather than a number in a
-declaration or a line in a log.
+Tolerance has to be **named in the contract** — no threshold, no implicit
+acceptance of `Failed_*` — because a gather that silently absorbed failures makes
+"3,264 of 3,265 succeeded" indistinguishable from "3,265 succeeded", which is the
+shape of every quiet data-loss bug.
+
+It also turned out not to be only about failure: the same widening is what lets a
+legitimate absence routed as `oneOf: [Found, Unavailable]` be gathered, which is
+two **success** edges and the case a failure-specific `tolerating:` would have
+missed. One mechanism, two cases.
+
+The two rejected candidates and why: a tolerance threshold turns a judgement into
+a number with no home in a contract, since a node cannot know what fraction its
+*caller* finds acceptable; and reporting residue into the payload answers "what
+did not finish" rather than "what failed".
 
 ## What this is not
 
