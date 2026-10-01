@@ -264,6 +264,48 @@ This is also what changes when a model does the routing. The netlist can be fixe
 
 And because every edge instance is typed and causally logged, a path the model keeps taking can be mined out of history and promoted into a fixed subgraph. Probabilistic where the shape isn't known yet, deterministic once it is.
 
+## Running it
+
+The implementation is a spike at [`spikes/ts-prototype`](spikes/ts-prototype), and
+the CLI is `bin/weir.ts`. There is no published package — everything below runs
+from a clone.
+
+```bash
+cd spikes/ts-prototype
+npm install
+npm test                            # 826 tests
+```
+
+Then, from that directory, any of:
+
+```bash
+./bin/weir.ts check ../blue-ribbon-slice     # the shebang runs it under tsx
+npm run weir -- check ../blue-ribbon-slice   # same thing, via the package script
+npx tsx bin/weir.ts check ../blue-ribbon-slice
+```
+
+For a `weir` on your `PATH`, `npm link` from `spikes/ts-prototype` — then
+`weir check .` works from inside a declaration directory, which is the ergonomics
+the relative `../` above is standing in for.
+
+`weir` with no arguments prints every command. The ones to start with:
+
+| command | what it does |
+|---|---|
+| `weir check [dir]` | elaborate the declarations and report what fails |
+| `weir graph [dir]` | print the topology, or `--json` for the netlist |
+| `weir sys [dir]` | query the ontology — what exists, what refines what, what is orphaned |
+| `weir test [dir] --impl <dir>` | run every declared example |
+| `weir scaffold [dir] --out <dir>` | write a workspace to implement the program in |
+| `weir contract <node> [dir]` | one node's sealed contract, as an agent receives it |
+
+Two programs to point them at, both written to find friction rather than to be
+good examples: [`spikes/blue-ribbon-slice`](spikes/blue-ribbon-slice) (boundary-heavy
+— trust zones, a `oneOf` route, provenance combining at a fan-in) and
+[`spikes/blue-ribbon-soil`](spikes/blue-ribbon-soil) (transformation-heavy — chained
+effects, nested spread/gather, two fan-ins). The [`examples/`](examples) directory
+holds the small ones.
+
 ## Where to look next
 
 - [`docs/design.md`](docs/design.md) — the current-state spec: typing, composition, execution model, zones and identity, the planner
