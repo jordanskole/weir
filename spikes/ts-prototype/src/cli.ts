@@ -21,13 +21,13 @@
 
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { elaborate } from "./elaborate.js";
 import { serializeNetlist } from "./netlist.js";
 import { exportContract } from "./contract.js";
 import { emitZodModule } from "./emit-zod.js";
-import { scaffoldFiles } from "./scaffold.js";
+import { scaffoldFiles, scaffoldProgramFiles } from "./scaffold.js";
 import { acceptImplementation } from "./accept.js";
 import { runExamples } from "./test-run.js";
 import { analyze, mediation } from "./sys.js";
@@ -54,10 +54,13 @@ usage
   weir contract <node> [dir]    print one node's sealed contract, as an agent receives it
   weir emit-zod <node> [dir]    print the node's edges as a zod module, the typed
                                 form of the same contract
+  weir scaffold [dir] --out <dir> [--force]
+                                write a workspace for every pure node: one shared
+                                edge schema per edge, a typed stub per node, the
+                                declared examples and properties as runnable tests,
+                                and what the gate will generate
   weir scaffold <node> [dir] --out <dir> [--force]
-                                write a standalone workspace for one node: schema,
-                                typed stub, declared examples and properties as
-                                runnable tests
+                                the same for one node, self-contained
   weir run [dir] --impl <dir> --payload <file.json> [--effects <file.ts>]
                  [--log <file>] [--run <id>]
                                 elaborate, resolve implementations, and execute
@@ -906,7 +909,7 @@ async function emitZod(nodeName: string, dir: string): Promise<CliResult> {
  * one a human or agent edits, and clobbering it silently would discard the work
  * the scaffold exists to collect.
  */
-async function scaffold(nodeName: string, dir: string, flags: Map<string, string>): Promise<CliResult> {
+async function scaffold(nodeName: string | undefined, dir: string, flags: Map<string, string>): Promise<CliResult> {
   const out = flags.get("out");
   if (out === undefined) return { code: 1, out: `✗ scaffold needs --out <dir>.\n\n${USAGE}` };
 
@@ -916,6 +919,60 @@ async function scaffold(nodeName: string, dir: string, flags: Map<string, string
   } catch (error) {
     return failure(error, dir);
   }
+
+  /**
+   * No node name scaffolds the whole program into one workspace with a shared
+   * `schemas/` directory. Per-node is still available by naming one, and is the
+   * right form for handing a single node to an isolated agent — but for a program
+   * it emitted one copy of each edge schema per consuming node, byte-identical,
+   * which contradicts an edge being the shared vocabulary.
+   *
+   * Effect nodes are skipped: their implementation is a host handler, not an `fn`
+   * that goes through the acceptance gate.
+   */
+  if (nodeName === undefined) {
+    const pure = Object.values(elaborated.nodes).filter(
+      (n) => !(n as { effect?: unknown }).effect && !n.name.includes("/"),
+    );
+    if (pure.length === 0) {
+      return { code: 1, out: `✗ no pure nodes to scaffold in ${dir} — every node declares an effect.` };
+    }
+    const root = resolve(out);
+    const force = flags.has("force");
+    const existing = pure.filter((n) => existsSync(join(root, "nodes", n.name, `${n.name}.ts`)));
+    if (!force && existing.length > 0) {
+      return {
+        code: 1,
+        out:
+          `✗ ${existing.length} implementation file(s) already exist under ${join(root, "nodes")}:\n\n` +
+          existing.map((n) => `  · nodes/${n.name}/${n.name}.ts`).join("\n") +
+          `\n\n  Those are the files you edit, so this refuses rather than overwrite them.\n` +
+          `  Re-run with --force to replace them, or scaffold into a fresh directory.`,
+      };
+    }
+
+    const files = scaffoldProgramFiles(pure);
+    for (const [name, contents] of Object.entries(files)) {
+      await mkdir(dirname(join(root, name)), { recursive: true });
+      await writeFile(join(root, name), contents, "utf8");
+    }
+
+    const skipped = Object.keys(elaborated.nodes).length - pure.length;
+    return {
+      code: 0,
+      out: [
+        `scaffolded ${pure.length} node(s) into ${root}`,
+        "",
+        ...pure.map((n) => `  · nodes/${n.name}/${n.name}.ts`),
+        "",
+        `  ${Object.keys(files).filter((f) => f.startsWith("schemas/") && !f.includes("_")).length} shared edge schema(s) in schemas/`,
+        ...(skipped > 0 ? [`  ${skipped} effect/composite node(s) skipped — host-supplied, not gated`] : []),
+        "",
+        `  npm install && npm test`,
+      ].join("\n"),
+    };
+  }
+
   const node = elaborated.nodes[nodeName];
   if (node === undefined) {
     const known = Object.keys(elaborated.nodes).sort().join(", ");
@@ -1016,7 +1073,12 @@ export async function runCli(argv: string[], cwd: string): Promise<CliResult> {
       return emitZod(rest[0], rest[1] ?? cwd);
     }
     case "scaffold": {
-      if (rest[0] === undefined) return { code: 1, out: `✗ scaffold needs a node name.\n\n${USAGE}` };
+      // A single argument is ambiguous between a node name and a directory, so
+      // the directory form is `weir scaffold . --out …` and a bare `weir scaffold
+      // --out …` scaffolds the whole program from the cwd.
+      const looksLikeDir = rest[0] !== undefined && (rest[0] === "." || rest[0].includes("/"));
+      if (rest[0] === undefined) return scaffold(undefined, cwd, flags);
+      if (looksLikeDir) return scaffold(undefined, rest[0], flags);
       return scaffold(rest[0], rest[1] ?? cwd, flags);
     }
     case undefined:

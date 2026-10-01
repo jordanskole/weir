@@ -27,8 +27,9 @@
  * would let the scaffold pass something the gate rejects.
  */
 
-import { emitZodModule } from "./emit-zod.js";
-import type { NodeDecl, PropertyDecl, PropertyExpr } from "./types.js";
+import { emitEdgeModules, emitNodeSchemaModule, emitZodModule } from "./emit-zod.js";
+import { generateInputCases } from "./generate.js";
+import type { AnyEdgeDef, FieldDef, NodeDecl, PropertyDecl, PropertyExpr } from "./types.js";
 
 /** A JS literal for emitted source. */
 function lit(value: unknown): string {
@@ -385,4 +386,273 @@ describe("${node.name}", () => {
     "tsconfig.json": TSCONFIG,
     "README.md": readme(node),
   };
+}
+
+
+/* ------------------------------------------------------------------------- *
+ * Whole-program scaffold
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The gate's own defaults (fuzz.ts). The report below must quote these or it
+ * describes inputs nobody will be judged against.
+ */
+const GATE_SEED = 42;
+const GATE_COUNT = 100;
+
+/** A utf8 bound this generous means the generator fills it with bulk random text. */
+const BULK_STRING_THRESHOLD = 10_000;
+
+function scalarFieldsOf(edge: AnyEdgeDef): [string, FieldDef][] {
+  return Object.entries(edge.fields).filter(
+    ([, f]) => !("many" in f) && !("fields" in f) && !("literal" in f),
+  ) as [string, FieldDef][];
+}
+
+function inputEdgesOf(node: NodeDecl): AnyEdgeDef[] {
+  return node.input.kind === "allOf" ? node.input.edges : [node.input.edge];
+}
+
+/**
+ * What `weir accept` will actually attack this node with.
+ *
+ * Shipped as a **report** rather than as embedded data, and that is not a
+ * shortcut: at the gate's real settings (seed 42, 100 cases) blue-ribbon's
+ * `parcelCentroid` inputs come to **108 MB**, because `boundaryJson` is declared
+ * `maxLength: 2000000` and the generator samples length uniformly — median
+ * 1,157,240 characters, max 2,000,000. Embedding that is not an option and
+ * truncating it would misrepresent it.
+ *
+ * So the report states the shape, flags the fields that defeat a parser, and
+ * shows a few real values from the head of the same deterministic sequence the
+ * gate uses.
+ */
+function generatedInputReport(node: NodeDecl): string {
+  const SAMPLE = 4;
+  let samples: unknown[] = [];
+  try {
+    samples = generateInputCases(node.input, GATE_SEED, SAMPLE);
+  } catch {
+    samples = [];
+  }
+
+  const trunc = (v: unknown): string => {
+    const text = JSON.stringify(v) ?? "undefined";
+    return text.length <= 90 ? text : `${text.slice(0, 90)}… (${text.length} chars)`;
+  };
+
+  const bulk: string[] = [];
+  for (const edge of inputEdgesOf(node)) {
+    for (const [key, field] of scalarFieldsOf(edge)) {
+      if (field.type !== "utf8") continue;
+      const max = (field.validations as { maxLength?: number } | undefined)?.maxLength;
+      if (max !== undefined && max >= BULK_STRING_THRESHOLD) {
+        bulk.push(`\`${edge.name}.${key}\` (utf8, maxLength ${max.toLocaleString()})`);
+      }
+    }
+  }
+
+  const lines = [
+    `# What the acceptance gate will generate`,
+    ``,
+    `\`weir accept\` runs your \`fn\` against **${GATE_COUNT} generated inputs** at seed`,
+    `${GATE_SEED}, on top of the declared examples. They are not shipped here as data —`,
+    `see below — but they are deterministic, so the samples are the real head of the`,
+    `real sequence.`,
+    ``,
+  ];
+
+  if (bulk.length > 0) {
+    lines.push(
+      `## Read this first`,
+      ``,
+      `${bulk.length === 1 ? "This field is" : "These fields are"} declared as a long \`utf8\` string:`,
+      ``,
+      ...bulk.map((b) => `- ${b}`),
+      ``,
+      `The generator fills ${bulk.length === 1 ? "it" : "them"} with **random text**, sampling the length`,
+      `uniformly up to the declared maximum. Nothing makes the content well-formed, so if`,
+      `your implementation parses ${bulk.length === 1 ? "that field" : "those fields"}, **every generated case will throw** and the`,
+      `gate will report:`,
+      ``,
+      "```",
+      `✗ ${node.name} was not accepted`,
+      `  vacuous   no generated case produced a real output, so every property passed on nothing`,
+      "```",
+      ``,
+      `That verdict is about the declaration, not about your code. Declining input you`,
+      `cannot parse is correct. **Do not invent a plausible value to get past it** — say so`,
+      `instead. See docs/open-questions/the-gate-rewards-fabrication.md.`,
+      ``,
+    );
+  }
+
+  lines.push(`## The first ${samples.length} inputs, verbatim`, ``, "```json");
+  for (const [i, sample] of samples.entries()) {
+    lines.push(`// case ${i + 1}`);
+    if (sample !== null && typeof sample === "object" && !Array.isArray(sample)) {
+      for (const [key, value] of Object.entries(sample as Record<string, unknown>)) {
+        lines.push(`${key}: ${trunc(value)}`);
+      }
+    } else {
+      lines.push(trunc(sample));
+    }
+    lines.push(``);
+  }
+  lines.push("```", ``);
+
+  lines.push(
+    `Long values are truncated **for this report only** — the gate passes them in full.`,
+    `Regenerate with \`weir scaffold\`; nothing here is hand-maintained.`,
+    ``,
+  );
+
+  return lines.join("\n");
+}
+
+const PROGRAM_PACKAGE_JSON = `${JSON.stringify(
+  {
+    name: "weir-scaffold",
+    private: true,
+    type: "module",
+    scripts: { test: "vitest run", "test:watch": "vitest" },
+    dependencies: { zod: "^4.6.5" },
+    devDependencies: { typescript: "^5.7.2", vitest: "^2.1.0" },
+    engines: { node: ">=24" },
+  },
+  null,
+  2,
+)}\n`;
+
+const PROGRAM_VITEST_CONFIG = `import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: { include: ["nodes/**/*.test.ts"], root: "." },
+});
+`;
+
+const PROGRAM_TSCONFIG = `${JSON.stringify(
+  {
+    compilerOptions: {
+      target: "ES2023",
+      module: "NodeNext",
+      moduleResolution: "NodeNext",
+      strict: true,
+      noEmit: true,
+      skipLibCheck: true,
+      verbatimModuleSyntax: true,
+    },
+    include: ["schemas/**/*.ts", "nodes/**/*.ts"],
+  },
+  null,
+  2,
+)}\n`;
+
+function programReadme(nodes: NodeDecl[], edgeCount: number): string {
+  const rows = nodes
+    .map((n) => `| \`nodes/${n.name}/${n.name}.ts\` | ${(n.examples ?? []).length} example(s), ${(n.properties ?? []).length} propert${(n.properties ?? []).length === 1 ? "y" : "ies"} |`)
+    .join("\n");
+
+  return `# Scaffold
+
+Generated from weir declarations. One install, one test run, ${nodes.length} node(s) to
+implement.
+
+\`\`\`
+npm install
+npm test
+\`\`\`
+
+## Layout
+
+\`\`\`
+schemas/            ${edgeCount} edge schema(s) as zod, ONE module per edge
+nodes/<node>/
+  <node>.ts         YOURS. The stub throws; make it work.
+  schema.ts         this node's input/output, importing from schemas/
+  check.ts          the declared examples and properties, as source
+  generated-inputs.md   what the acceptance gate will attack it with
+  <node>.test.ts    runs check()
+\`\`\`
+
+**Edit only \`nodes/<node>/<node>.ts\`.** Everything else is mechanical output and
+re-running the scaffold overwrites it.
+
+\`schemas/\` holds one module per edge rather than a copy per node on purpose. An
+edge is weir's unit of shared vocabulary — the complete description of what crosses
+a wire — and three nodes touching \`NormalizedParcel\` should see one schema, not
+three that can drift.
+
+## What to implement
+
+| file | has |
+|---|---|
+${rows}
+
+## Reading a failure
+
+\`check()\` reports which artifact is wrong, not just that something is:
+
+- **input-schema** — the example's own \`given\` does not satisfy the input schema.
+  A declaration bug; your code never ran.
+- **output-schema** — your result is the wrong shape, including an out-of-range
+  value, since the range is in the schema rather than in a type.
+- **value** — right shape, wrong value.
+- **threw** — your function declined.
+- **property** — a declared invariant did not hold, or the property itself is
+  broken (an unresolvable path is the contract's defect, not yours).
+
+## Two things worth knowing
+
+**Read a property's body, not its name.** A property's name is unchecked prose.
+\`check.ts\` renders each expression as source so you can see what it actually
+checks — and in this repository at least one property has been named for a check it
+did not perform.
+
+**Declining is sometimes correct and still fails the gate.** Read each node's
+\`generated-inputs.md\`: where a field is an opaque string, the generator fills it
+with random text and the only correct response is to throw, which the gate reports
+as \`vacuous\`. Say so rather than returning a value you made up.
+`;
+}
+
+/**
+ * The whole program as one workspace: shared `schemas/`, one directory per node.
+ *
+ * Replaces scaffolding node-by-node for the multi-node case, because that emitted
+ * `NormalizedParcel` three times, byte-identical, once per node that touches it.
+ * `scaffoldFiles` is kept for the single-node case, where a self-contained bundle
+ * is the point rather than a defect.
+ */
+export function scaffoldProgramFiles(nodes: NodeDecl[]): Record<string, string> {
+  const edges: AnyEdgeDef[] = [];
+  for (const node of nodes) {
+    for (const edge of inputEdgesOf(node)) edges.push(edge);
+    const output = node.output;
+    if (output.kind === "oneOf" || output.kind === "allOf") edges.push(...output.edges);
+    else edges.push(output.edge);
+  }
+
+  const files: Record<string, string> = {};
+
+  const schemaModules = emitEdgeModules(edges);
+  for (const [name, source] of Object.entries(schemaModules)) files[`schemas/${name}`] = source;
+  const edgeCount = Object.keys(schemaModules).filter((n) => !n.startsWith("_")).length;
+
+  for (const node of nodes) {
+    const dir = `nodes/${node.name}`;
+    const single = scaffoldFiles(node);
+    files[`${dir}/schema.ts`] = emitNodeSchemaModule(node, "../../schemas");
+    files[`${dir}/${node.name}.ts`] = single[`${node.name}.ts`]!;
+    files[`${dir}/check.ts`] = single["check.ts"]!;
+    files[`${dir}/${node.name}.test.ts`] = single[`${node.name}.test.ts`]!;
+    files[`${dir}/generated-inputs.md`] = generatedInputReport(node);
+  }
+
+  files["package.json"] = PROGRAM_PACKAGE_JSON;
+  files["tsconfig.json"] = PROGRAM_TSCONFIG;
+  files["vitest.config.ts"] = PROGRAM_VITEST_CONFIG;
+  files["README.md"] = programReadme(nodes, edgeCount);
+
+  return files;
 }

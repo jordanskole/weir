@@ -1,5 +1,4 @@
-// GENERATED from the declarations by `weir emit-zod parcelCentroid` — do not edit.
-// Re-run the emitter instead; this file is mechanical output.
+// GENERATED from NormalizedParcel.edge — do not edit. Re-run the scaffold.
 
 import { z } from "zod";
 
@@ -16,21 +15,3 @@ export const NormalizedParcel = z.object({
   "boundaryJson": z.string().min(2).max(2000000).describe("The parcel's polygon boundary, serialized GeoJSON"),
 });
 export type NormalizedParcel = z.infer<typeof NormalizedParcel>;
-
-/** Parcel Centroid */
-export const ParcelCentroid = z.object({
-  "pin": z.string().min(8).max(40).describe("The parcel this point is inside"),
-  "lng": z.number().min(-180).max(180).describe("WGS84 longitude of the parcel's area-weighted centroid"),
-  "lat": z.number().min(-90).max(90).describe("WGS84 latitude of the parcel's area-weighted centroid"),
-});
-export type ParcelCentroid = z.infer<typeof ParcelCentroid>;
-
-/** What `parcelCentroid` receives, after the membrane has asserted it. */
-export const parcelCentroidInput = NormalizedParcel;
-export type parcelCentroidInput = z.infer<typeof parcelCentroidInput>;
-
-/** What `parcelCentroid` must return. Throw to decline. */
-export const parcelCentroidOutput = ParcelCentroid;
-export type parcelCentroidOutput = z.infer<typeof parcelCentroidOutput>;
-
-export type parcelCentroidFn = (p: parcelCentroidInput) => parcelCentroidOutput;

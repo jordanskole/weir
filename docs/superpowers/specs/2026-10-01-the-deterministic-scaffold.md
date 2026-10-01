@@ -414,3 +414,65 @@ makes the opaque field *visible* — `boundaryJson: z.string().min(2).max(200000
 sits directly beneath `lng: z.number().min(-180).max(180)` — but an implementer
 still cannot discover that the generator fills it with `"9r"` without submitting.
 That is the generated-input fixture under "Still unbuilt".
+
+## The per-node form duplicated every shared edge
+
+Caught by reading the output: scaffolding blue-ribbon's four pure nodes emitted
+`NormalizedParcel` **three times**, byte-identical, once per node that touches it
+(`normalizeParcel`, `parcelCentroid`, `resolveIdentity`). Four `package.json`s, four
+installs, four vitest configs.
+
+That contradicts the model. An edge is weir's unit of shared vocabulary — *"the
+complete description of what crosses a wire"* — so a private copy per consumer is
+the drift class this repo keeps finding, emitted by the tool meant to prevent it.
+
+`weir scaffold [dir] --out <dir>` now writes one workspace:
+
+```
+schemas/            one module per edge, 8 for the slice
+  NormalizedParcel.ts     <- one copy, imported by three nodes
+  _keyedBy.ts             <- emitted once, only if some edge needs it
+nodes/<node>/
+  <node>.ts         YOURS
+  schema.ts         this node's input/output, importing ../../schemas/
+  check.ts          examples and properties as source
+  generated-inputs.md
+  <node>.test.ts
+package.json        one install
+vitest.config.ts    one test run
+```
+
+Verified: `npm install && npm test` reports four reds, dropping in the four drafted
+implementations turns all four green.
+
+**`weir scaffold <node>` is kept** and still emits a self-contained bundle. That is
+not an oversight — a single node handed to an isolated agent *should* carry its
+schemas, because the agent does not have the rest of the program. Duplication is the
+point in that form and a defect in the other.
+
+## The generated-input report, and why it is a report
+
+The gap this closes: an implementer could not learn that `boundaryJson` arrives as
+noise without submitting and reading `vacuous`.
+
+Each node gets `generated-inputs.md`, which quotes the gate's real settings (seed
+42, 100 cases — anything else would describe inputs nobody is judged against),
+flags every `utf8` field whose `maxLength` is ≥ 10,000 as one the generator will
+fill with bulk random text, states the `vacuous` verdict that follows, says the
+verdict is about the declaration rather than the code, and tells the implementer
+**not to invent a plausible value** — with four real inputs from the head of the
+same deterministic sequence.
+
+It is a report rather than the inputs themselves because the inputs do not fit.
+Measured at the gate's settings, `parcelCentroid`'s 100 cases are **108 MB**:
+`boundaryJson` is declared `maxLength: 2000000` and the generator samples length
+uniformly, giving a median of 1,157,240 characters and `JSON.parse` succeeding on
+0 of 100. Filed as
+[generated strings are enormous](../../open-questions/generated-strings-are-enormous.md) —
+the numeric generator already emits boundary cases first and samples afterwards,
+and the string generator does not, so 95 of 100 cases are a megabyte of noise
+testing what 20 characters would have tested.
+
+So this piece is built but weaker than specified: the implementer gets an accurate
+description of the generated inputs rather than the inputs. Closing that properly
+needs the generator fixed, not the scaffold.

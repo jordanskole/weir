@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { elaborate } from "./elaborate.js";
-import { scaffoldFiles } from "./scaffold.js";
+import { scaffoldFiles, scaffoldProgramFiles } from "./scaffold.js";
 import type { NodeDecl } from "./types.js";
 
 const REPO = join(import.meta.dirname, "..", "..", "..");
@@ -325,5 +325,115 @@ describe("scaffold — it covers the corpus", () => {
     // falsely (docs/open-questions/no-ordering-over-enum-values.md). A floor
     // rather than an equality, so adding a property does not redden this.
     expect(properties).toBeGreaterThanOrEqual(10);
+  });
+});
+
+/**
+ * The whole-program form. Scaffolding blue-ribbon node-by-node emitted
+ * `NormalizedParcel` three times, byte-identical, once per consuming node — which
+ * contradicts an edge being weir's unit of shared vocabulary and is the drift
+ * class this repo keeps finding.
+ */
+describe("scaffoldProgramFiles — one schema per edge, shared", () => {
+  async function program(app: string): Promise<Record<string, string>> {
+    const elaborated = await elaborate(join(REPO, app));
+    const pure = Object.values(elaborated.nodes).filter(
+      (n) => !(n as { effect?: unknown }).effect && !n.name.includes("/"),
+    ) as NodeDecl[];
+    return scaffoldProgramFiles(pure);
+  }
+
+  /**
+   * BREAK-PROOF: having `scaffoldProgramFiles` write each node's full
+   * `scaffoldFiles().["schema.ts"]` instead of `emitNodeSchemaModule` reddens
+   * this with 3 declarations of NormalizedParcel.
+   */
+  it("declares every edge exactly once, however many nodes touch it", async () => {
+    const files = await program(SLICE);
+
+    const declarations = new Map<string, string[]>();
+    for (const [path, source] of Object.entries(files)) {
+      for (const m of source.matchAll(/^export const ([A-Z][A-Za-z0-9]*) = z\.object/gm)) {
+        const name = m[1]!;
+        declarations.set(name, [...(declarations.get(name) ?? []), path]);
+      }
+    }
+
+    const duplicated = [...declarations].filter(([, paths]) => paths.length > 1);
+    expect(duplicated).toEqual([]);
+
+    // NormalizedParcel is the one three nodes share — the motivating case.
+    expect(declarations.get("NormalizedParcel")).toEqual(["schemas/NormalizedParcel.ts"]);
+    expect(declarations.size).toBeGreaterThan(5);
+  });
+
+  it("puts every edge schema under schemas/ and every node under nodes/", async () => {
+    const files = await program(SLICE);
+    const paths = Object.keys(files);
+    expect(paths).toContain("schemas/NormalizedParcel.ts");
+    expect(paths).toContain("nodes/parcelCentroid/parcelCentroid.ts");
+    expect(paths).toContain("nodes/parcelCentroid/generated-inputs.md");
+    // One install and one test run for the whole program, not one per node.
+    expect(paths.filter((p) => p.endsWith("package.json"))).toEqual(["package.json"]);
+    expect(paths.filter((p) => p.endsWith("vitest.config.ts"))).toEqual(["vitest.config.ts"]);
+  });
+
+  it("has each node's schema import the shared edges rather than redeclare them", async () => {
+    const files = await program(SLICE);
+    const schema = files["nodes/parcelCentroid/schema.ts"]!;
+    expect(schema).toContain('import { NormalizedParcel } from "../../schemas/NormalizedParcel.js";');
+    expect(schema).not.toContain("z.object");
+    expect(schema).toContain("export const parcelCentroidInput = NormalizedParcel;");
+  });
+
+  it("emits a shared keyedBy helper once when any edge needs it", async () => {
+    const files = await program("spikes/blue-ribbon-soil");
+    const helpers = Object.keys(files).filter((p) => p.endsWith("_keyedBy.ts"));
+    expect(helpers.length).toBeLessThanOrEqual(1);
+    if (helpers.length === 1) {
+      expect(files[helpers[0]!]).toContain("export const keyedBy");
+    }
+  });
+
+  /**
+   * The report answers "why did I get `vacuous`?" before submitting rather than
+   * after. It is a report and not embedded data for a measured reason: at the
+   * gate's real settings these inputs come to 108 MB, because `boundaryJson` is
+   * declared `maxLength: 2000000` and the generator samples length uniformly.
+   */
+  it("warns, in the generated-inputs report, about a field that will defeat a parser", async () => {
+    const files = await program(SLICE);
+    const report = files["nodes/parcelCentroid/generated-inputs.md"]!;
+    expect(report).toContain("boundaryJson");
+    expect(report).toContain("maxLength 2,000,000");
+    expect(report).toContain("vacuous");
+    // It must quote the gate's real settings, or it describes inputs nobody is
+    // judged against.
+    expect(report).toContain("100 generated inputs");
+    expect(report).toContain("seed\n42");
+    // And it must not tell the implementer to invent a value.
+    expect(report).toContain("Do not invent a plausible value");
+  });
+
+  it("omits the parser warning for a node with no bulk string field", async () => {
+    const files = await program(SLICE);
+    // routeCounty's fields are all short, so there is nothing to warn about.
+    const report = files["nodes/routeCounty/generated-inputs.md"]!;
+    expect(report).not.toContain("Read this first");
+    expect(report).toContain("The first");
+  });
+
+  it("skips effect nodes, whose implementation is a host handler rather than a gated fn", async () => {
+    const elaborated = await elaborate(join(REPO, SLICE));
+    const all = Object.keys(elaborated.nodes);
+    const files = await program(SLICE);
+    const scaffolded = Object.keys(files)
+      .filter((p) => p.startsWith("nodes/"))
+      .map((p) => p.split("/")[1]!);
+    expect(new Set(scaffolded)).toEqual(
+      new Set(["routeCounty", "normalizeParcel", "parcelCentroid", "resolveIdentity"]),
+    );
+    expect(all).toContain("fetchDirect");
+    expect(scaffolded).not.toContain("fetchDirect");
   });
 });

@@ -18,7 +18,7 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-## Open (29)
+## Open (30)
 
 Live. Ordered alphabetically, not by priority.
 
@@ -34,6 +34,7 @@ Live. Ordered alphabetically, not by priority.
 - [`Failed<In>.input` is typed as validated data it never was](open-questions/failed-input-is-typed-as-valid.md)
 - [Should `Failed<In>` be tagged like `oneOf`'s other branches?](open-questions/failed-tagging.md)
 - [A gather composes with nothing](open-questions/gather-composes-with-nothing.md)
+- [The generator samples string length uniformly, so a generous `maxLength` makes acceptance enormous](open-questions/generated-strings-are-enormous.md)
 - [Should the generator produce `null`, and explore cross-field combinations?](open-questions/generator-coverage.md)
 - [The version pin pins the contract, not the implementation](open-questions/implementation-identity.md)
 - [Classification says what may not go out; nothing says what may not be trusted coming in](open-questions/integrity-inbound.md)
