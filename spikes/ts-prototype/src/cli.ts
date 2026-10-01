@@ -19,13 +19,15 @@
  * on.
  */
 
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { elaborate } from "./elaborate.js";
 import { serializeNetlist } from "./netlist.js";
 import { exportContract } from "./contract.js";
 import { emitZodModule } from "./emit-zod.js";
+import { scaffoldFiles } from "./scaffold.js";
 import { acceptImplementation } from "./accept.js";
 import { runExamples } from "./test-run.js";
 import { analyze, mediation } from "./sys.js";
@@ -52,6 +54,10 @@ usage
   weir contract <node> [dir]    print one node's sealed contract, as an agent receives it
   weir emit-zod <node> [dir]    print the node's edges as a zod module, the typed
                                 form of the same contract
+  weir scaffold <node> [dir] --out <dir> [--force]
+                                write a standalone workspace for one node: schema,
+                                typed stub, declared examples and properties as
+                                runnable tests
   weir run [dir] --impl <dir> --payload <file.json> [--effects <file.ts>]
                  [--log <file>] [--run <id>]
                                 elaborate, resolve implementations, and execute
@@ -891,6 +897,64 @@ async function emitZod(nodeName: string, dir: string): Promise<CliResult> {
   return { code: 0, out: emitZodModule(node) };
 }
 
+/**
+ * Writes a standalone workspace for one node — pieces 2 and 3 of
+ * docs/superpowers/specs/2026-10-01-the-deterministic-scaffold.md.
+ *
+ * The one command here that writes to disk outside an impl tree, so it refuses
+ * to overwrite an existing directory's `fn` unless asked: that file is the only
+ * one a human or agent edits, and clobbering it silently would discard the work
+ * the scaffold exists to collect.
+ */
+async function scaffold(nodeName: string, dir: string, flags: Map<string, string>): Promise<CliResult> {
+  const out = flags.get("out");
+  if (out === undefined) return { code: 1, out: `✗ scaffold needs --out <dir>.\n\n${USAGE}` };
+
+  let elaborated;
+  try {
+    elaborated = await elaborate(dir);
+  } catch (error) {
+    return failure(error, dir);
+  }
+  const node = elaborated.nodes[nodeName];
+  if (node === undefined) {
+    const known = Object.keys(elaborated.nodes).sort().join(", ");
+    return { code: 1, out: `✗ no node named "${nodeName}".\n\n  declared: ${known}` };
+  }
+
+  const root = resolve(out);
+  const files = scaffoldFiles(node);
+  const fnFile = `${nodeName}.ts`;
+  const force = flags.has("force");
+
+  if (!force && existsSync(join(root, fnFile))) {
+    return {
+      code: 1,
+      out:
+        `✗ ${join(root, fnFile)} already exists.\n\n` +
+        `  That is the one file you edit, so this refuses rather than overwrite it.\n` +
+        `  Re-run with --force to replace it, or scaffold into a fresh directory.`,
+    };
+  }
+
+  await mkdir(root, { recursive: true });
+  for (const [name, contents] of Object.entries(files)) {
+    await writeFile(join(root, name), contents, "utf8");
+  }
+
+  const lines = Object.keys(files).sort().map((n) => `  · ${n}`);
+  return {
+    code: 0,
+    out: [
+      `scaffolded ${nodeName} into ${root}`,
+      "",
+      ...lines,
+      "",
+      `  edit ${fnFile}, then: npm install && npm test`,
+    ].join("\n"),
+  };
+}
+
 /** Parses argv (without node/script) and runs the command. Never writes, never exits. */
 export async function runCli(argv: string[], cwd: string): Promise<CliResult> {
   const flags = new Map<string, string>();
@@ -950,6 +1014,10 @@ export async function runCli(argv: string[], cwd: string): Promise<CliResult> {
     case "emit-zod": {
       if (rest[0] === undefined) return { code: 1, out: `✗ emit-zod needs a node name.\n\n${USAGE}` };
       return emitZod(rest[0], rest[1] ?? cwd);
+    }
+    case "scaffold": {
+      if (rest[0] === undefined) return { code: 1, out: `✗ scaffold needs a node name.\n\n${USAGE}` };
+      return scaffold(rest[0], rest[1] ?? cwd, flags);
     }
     case undefined:
     case "help":

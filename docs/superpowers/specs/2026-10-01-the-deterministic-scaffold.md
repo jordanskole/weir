@@ -1,7 +1,8 @@
 # The deterministic scaffold
 
-Status: draft. Piece 1 (the zod emitter) is specified in full below and being
-built; the rest is the shape it is being built toward.
+Status: implemented (pieces 1-3: `weir emit-zod` and `weir scaffold`). The
+workspace files, the typed stub, the examples and the properties are emitted and
+tested; what remains is listed under "Still unbuilt".
 
 ## Motivation
 
@@ -69,12 +70,12 @@ an agent discovers `boundaryJson` arrives as `"9r"` immediately instead of after
 
 | artifact | derived from | status |
 |---|---|---|
-| zod schemas for the input and output edges | the `.edge` files | **piece 1, below** |
-| the typed signature, body `throw new Error("not implemented")` | the node's `input`/`output` kind | piece 2 |
-| the declared examples, as a runnable test file | `examples:` | piece 2 |
-| the declared properties, as runnable tests | `properties:` | piece 3 |
-| a fixture of generated input cases | `generateInputCases` | piece 3 |
-| `package.json` / `tsconfig.json` so it runs standalone | fixed | piece 2 |
+| zod schemas for the input and output edges | the `.edge` files | **built** |
+| the typed signature, body `throw new Error("not implemented")` | the node's `input`/`output` kind | **built** |
+| the declared examples, as a runnable test file | `examples:` | **built** |
+| the declared properties, as runnable tests | `properties:` | **built** |
+| a fixture of generated input cases | `generateInputCases` | still unbuilt |
+| `package.json` / `tsconfig.json` / `vitest.config.ts` | fixed | **built** |
 | the brief | `description`, once split | blocked on [sealed contract length](../../open-questions/sealed-contract-length.md) |
 
 "Pass the gate" then becomes "make these tests green", which is a loop the agent
@@ -235,3 +236,103 @@ places at once.
 **`weir emit-zod <node> [dir]`** is wired into the CLI, because the emitted
 header names it and generated output should not reference a command that does not
 exist.
+
+## Pieces 2 and 3, as built
+
+`weir scaffold <node> [dir] --out <dir> [--force]` writes eight files. The
+implementer edits one.
+
+```
+schema.ts            the input and output edges as zod, validations included
+<node>.ts            the typed stub. Throws. YOURS.
+check.ts             the declared examples and properties, as source
+<node>.test.ts       four lines: expect(check()).toEqual([])
+package.json         zod + vitest
+tsconfig.json        strict
+vitest.config.ts     so the directory tests itself wherever it sits
+README.md            how to read a failure
+```
+
+It refuses to overwrite an existing `<node>.ts` without `--force`, because that is
+the one file holding work the scaffold exists to collect.
+
+### A failure names the artifact at fault
+
+This is the part that answers the pressure test directly. `check()` returns a
+stage per failure:
+
+| stage | what is wrong |
+|---|---|
+| `input-schema` | the example's own `given` is invalid. **A declaration bug; `fn` never ran.** |
+| `output-schema` | the result is the wrong shape — including an out-of-range value, since the range is in the schema |
+| `value` | right shape, wrong value |
+| `threw` | `fn` declined |
+| `property` | an invariant did not hold — or **the property itself is broken**, reported separately |
+
+The last two rows are the findings from this morning, mechanised. `routeCounty`
+failed as *"the property did not hold"* when its path could not resolve for any
+candidate; the scaffold says `"…" is broken: path "output.nope" does not resolve`
+instead, so an implementer is not sent to debug correct code.
+
+### The property, rendered
+
+```ts
+{
+  name: "the centroid lies within the boundary's bounding box",
+  // Weaker than point-in-polygon but checkable without a geometry library, and
+  // it catches the failure that actually happens: a shoelace implementation
+  // that divides by 6*area with the wrong sign…
+  holds: (input, output) => {
+    const read = reader(input, output);
+    return same(read("output.pin"), read("input.pin"));
+  },
+},
+```
+
+The name, the careful description, and a body that compares PINs — four lines
+apart. That is the whole argument for emitting rather than describing.
+
+It compares with `node:util`'s `isDeepStrictEqual`, which is the gate's own
+comparison, rather than vitest's looser `toEqual`. A scaffold that passed what the
+gate rejects would be a new false green in the artifact built to prevent them.
+
+## What the build found
+
+**The scaffold was not standalone, and reading it would not have shown that.**
+Run inside another project, vitest walked up, found the parent's config, applied
+its `include: src/**/*.test.ts`, and reported *"No test files found"* — a green
+exit from a workspace that tested nothing. Fixed by emitting `vitest.config.ts`.
+Found by running a scaffolded directory rather than by inspecting its files.
+
+**Three of the scaffold's tests were vacuous, all three found by break-proofs.**
+
+1. *Removing the input-schema stage entirely reddened nothing* — no example in
+   the corpus has a `given` that violates its own schema, so the stage that most
+   directly answers the misattribution finding was untested. Fixed with a
+   synthesized bad example plus an `fn` that throws loudly if called, so a pass
+   cannot be the stub quietly succeeding.
+2. *Substituting `JSON.stringify` for `isDeepStrictEqual` reddened nothing* — the
+   text assertion caught only that the import survived. Fixed with a result whose
+   fields are in a different order, which the structural comparison must accept
+   and the string comparison must not.
+3. Both are the same shape as the two vacuous tests found while building piece 1,
+   which is now four instances in one day of *a test that cannot see the thing it
+   is named for*. The pattern: an assertion over data a generator produces cannot
+   test behaviour that only non-generated data exercises.
+
+**A test case of mine was wrong, not the code.** A "wrong value" probe returned
+`lat: 99`, which the schema rejected on its declared max of 90 — so it reported
+`output-schema`, not `value`. The range living in the schema rather than in a type
+is precisely this emitter's reason to exist, and it caught my test.
+
+## Still unbuilt
+
+- **A fixture of generated input cases**, so an implementer sees that
+  `boundaryJson` arrives as `"9r"` before submitting rather than after a
+  `vacuous` verdict.
+- **The `description`/`brief` split.** `.describe()` currently carries the full
+  argued prose, including one field's 4,854 characters. Blocked on
+  [sealed contract length](../../open-questions/sealed-contract-length.md).
+- **Scaffolding a whole topology** rather than one node at a time.
+- **Feeding the gate from the scaffold**, so `weir accept` could take a scaffold
+  directory instead of a single source file.
