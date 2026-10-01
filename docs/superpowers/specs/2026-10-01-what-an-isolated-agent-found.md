@@ -94,6 +94,30 @@ So friction #1 causes the false green. The opaque string defeats the generator
 (§1) **and** defeats the property language, and the two compound: the field that
 cannot be generated is the field that cannot be constrained.
 
+### The name is load-bearing even though the expression is not
+
+The rejected implementation (`spikes/blue-ribbon-slice/drafted/parcelCentroid.ts`)
+computes the shoelace centroid with correct sign cancellation for both winding
+orders, handles `Polygon`/`MultiPolygon`/`LineString`, handles the degenerate
+zero-area ring, rejects output that is not a WGS84 coordinate — and clamps its
+result into the bounding box, under this comment:
+
+```ts
+  // Guard the stated property explicitly: float error can push the result a
+  // hair outside the bounding box of a very thin ring.
+```
+
+It wrote defensive code to satisfy a property **that does not check anything of
+the kind**. The property's name steered an implementation that its expression
+could never have constrained.
+
+That is worth noting because it cuts against the obvious reading of a false
+green. The damage is not only that a bad implementation passes; it is that the
+name is read as the specification by the one party who cannot see the
+expression. An agent given a sealed contract treats `name` as binding, because
+from where it sits there is nothing to distinguish a name backed by a real check
+from a name backed by a PIN comparison.
+
 Two things follow, and they are separable:
 
 - `weir check` cannot tell a weak property from a strong one, but it *can* tell
@@ -177,6 +201,49 @@ The contract gives two counties by worked example and says nothing about the
 other three. The agent extended the pattern by analogy, said so in its report,
 and noted that nothing in the gate could detect it. It is right: no schema
 constrains which host is the correct host, and no property can.
+
+It labelled every invention in the source it shipped:
+
+```ts
+  // GUESSED - not stated anywhere in the contract.
+  Manistee:
+    "https://services8.arcgis.com/…/ManisteeCountyParcels_view/FeatureServer/0/query",
+```
+
+Those comments are the agent being scrupulous, and they are worth nothing to the
+gate, which does not read comments and could not act on them if it did.
+
+### The invented value is not the URL, it is the provenance
+
+Worse than the endpoints, and only visible by following the branch downstream.
+`Manistee`, `Roscommon` and `Otsego` appear in the contract **only** inside
+`county`'s `enumValues`. Nothing says which of the two output branches each one
+takes. The agent assigned Manistee and Roscommon to `DirectCountyQuery` and
+Otsego to `ProxiedCountyQuery`, by analogy from the two examples.
+
+That assignment is not a routing detail. It is a data-quality claim:
+
+```
+routeCounty branch → fetchDirect   → sourceTrust: verified   → provenance: verified
+                   → fetchProxied  → sourceTrust: aggregator → provenance: aggregator
+                                                             → resolveIdentity's lattice meet
+```
+
+So the accepted implementation asserts that Manistee's and Roscommon's parcel
+data is `verified` and Otsego's is `aggregator`, on no evidence, and every
+downstream consumer inherits that through `combineProvenance`. A county placed on
+the wrong branch has its data silently promoted to the strongest provenance the
+lattice has.
+
+The provenance lattice is the thing blue-ribbon built most carefully — it has its
+own unit test, and `resolveIdentity` declares a property asserting the meet is
+never stronger than either input. All of that machinery protects the *combination*
+of provenance values and none of it questions where a provenance value came from.
+An invented one enters as ground truth.
+
+This is the sharpest available statement of what the gate does not cover: it
+verifies that values are combined correctly and cannot ask whether a value is
+true.
 
 **This is mechanical evidence for
 [configuration versus ontology](../../open-questions/configuration-versus-ontology.md).**

@@ -98,6 +98,21 @@ gate verifies shape and invariants; "is this the correct host for Manistee
 County" is neither, so a well-formed invention is indistinguishable from the real
 thing. The same is true of a human reviewer skimming a diff of URL constants.
 
+**The invented value that matters is not the URL.** Manistee, Roscommon and
+Otsego appear in the contract only inside `county`'s `enumValues`; nothing says
+which output branch each takes. The agent assigned two to `DirectCountyQuery` and
+one to `ProxiedCountyQuery` by analogy — and that assignment is a provenance
+claim, because the branch determines `sourceTrust`, which determines
+`provenance`, which `resolveIdentity` combines by lattice meet. The accepted
+implementation therefore asserts that two counties' data is `verified` on no
+evidence, and every downstream consumer inherits it.
+
+The provenance lattice is the most carefully built thing in this pipeline and all
+of it protects the *combination* of provenance values. None of it asks where a
+value came from. Configuration elaborated into a node body does not just risk a
+wrong constant — here it fabricates the input to the one piece of machinery whose
+whole job is trustworthiness.
+
 This is the resolved half of this question arriving as a result rather than an
 argument: the endpoint table is configuration, it was elaborated into a node body
 because there was nowhere else to put it, and the consequence is that the
