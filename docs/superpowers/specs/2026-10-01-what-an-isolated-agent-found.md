@@ -213,46 +213,46 @@ It labelled every invention in the source it shipped:
 Those comments are the agent being scrupulous, and they are worth nothing to the
 gate, which does not read comments and could not act on them if it did.
 
-### The invented value is not the URL, it is the provenance
+### CORRECTED 2026-10-01: the provenance was NOT invented
 
-Worse than the endpoints, and only visible by following the branch downstream.
-`Manistee`, `Roscommon` and `Otsego` appear in the contract **only** inside
-`county`'s `enumValues`. Nothing says which of the two output branches each one
-takes. The agent assigned Manistee and Roscommon to `DirectCountyQuery` and
-Otsego to `ProxiedCountyQuery`, by analogy from the two examples.
+This section first claimed the agent had invented a provenance classification for
+three counties. **That was wrong, and the error was mine rather than the
+agent's.** It rested on a search that printed only each county name's first
+occurrence in the contract, which was the input field's `enumValues`.
 
-That assignment is not a routing detail. It is a data-quality claim:
+The contract states the branch assignment, in the output edges' own enums:
 
 ```
-routeCounty branch → fetchDirect   → sourceTrust: verified   → provenance: verified
-                   → fetchProxied  → sourceTrust: aggregator → provenance: aggregator
-                                                             → resolveIdentity's lattice meet
+INPUT  county enum: ["Osceola","Manistee","Roscommon","Iosco","Otsego"]
+DirectCountyQuery    county enum: ["Osceola","Manistee","Roscommon"]
+ProxiedCountyQuery   county enum: ["Iosco","Otsego"]
 ```
 
-So the accepted implementation asserts that Manistee's and Roscommon's parcel
-data is `verified` and Otsego's is `aggregator`, on no evidence, and every
-downstream consumer inherits that through `combineProvenance`. A county placed on
-the wrong branch has its data silently promoted to the strongest provenance the
-lattice has.
+So which counties are `verified` and which are `aggregator` is declared, was
+conveyed, and the agent derived it correctly — its own header comment reads
+*"Direct: Osceola, Manistee, Roscommon … Proxied: Iosco, Otsego"*, and it marked
+only the URLs `GUESSED`, never the routing. The emitted zod made this visible:
+`z.enum(["Iosco", "Otsego"])` on the proxied branch is hard to miss in a way that
+the same fact buried in nested JSON was not.
 
-The provenance lattice is the thing blue-ribbon built most carefully — it has its
-own unit test, and `resolveIdentity` declares a property asserting the meet is
-never stronger than either input. All of that machinery protects the *combination*
-of provenance values and none of it questions where a provenance value came from.
-An invented one enters as ground truth.
+### What does stand: the endpoints
 
-This is the sharpest available statement of what the gate does not cover: it
-verifies that values are combined correctly and cannot ask whether a value is
-true.
+The four URLs are genuinely absent from the contract — that was checked by exact
+string search over the whole document, not by first occurrence. The table above is
+the real finding, and it is narrower and cleaner than the overreach:
 
-**This is mechanical evidence for
-[configuration versus ontology](../../open-questions/configuration-versus-ontology.md).**
-An endpoint table is configuration. It has no business being inside a node body,
-and the fact that an isolated agent put it there — and that the gate blessed it —
-is the argument for that question's position rather than a new problem. The
-acceptance gate verifies shape and invariants; configuration is neither, so
-configuration smuggled into an implementation is accepted silently and
-indistinguishably from the real thing.
+**The part weir modelled as ontology was conveyed correctly. The part it left as
+configuration was fabricated.** The county-to-branch mapping is an enum on an
+edge, so it crossed intact. The county-to-URL mapping is a constant table with
+nowhere to live, so it was invented by analogy and accepted. That is
+configuration-versus-ontology's own thesis demonstrated rather than a failure of
+the contract, and it is a better argument for that question than the one this
+section originally made.
+
+What remains true about the gate: no schema constrains which host is correct, no
+property can, and a well-formed invention is indistinguishable from the real
+thing. The agent labelled each one `// GUESSED - not stated anywhere in the
+contract`, and the gate does not read comments.
 
 ## 6. What the contract spends itself on
 

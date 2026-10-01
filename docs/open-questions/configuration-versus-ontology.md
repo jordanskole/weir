@@ -98,28 +98,25 @@ gate verifies shape and invariants; "is this the correct host for Manistee
 County" is neither, so a well-formed invention is indistinguishable from the real
 thing. The same is true of a human reviewer skimming a diff of URL constants.
 
-**The invented value that matters is not the URL.** Manistee, Roscommon and
-Otsego appear in the contract only inside `county`'s `enumValues`; nothing says
-which output branch each takes. The agent assigned two to `DirectCountyQuery` and
-one to `ProxiedCountyQuery` by analogy — and that assignment is a provenance
-claim, because the branch determines `sourceTrust`, which determines
-`provenance`, which `resolveIdentity` combines by lattice meet. The accepted
-implementation therefore asserts that two counties' data is `verified` on no
-evidence, and every downstream consumer inherits it.
+**Corrected 2026-10-01, same day.** This paragraph first claimed the agent had
+invented a provenance classification for three counties. It had not, and the
+error was in the grounding rather than in the agent: the branch assignment *is*
+declared, in the output edges' own enums — `DirectCountyQuery.county` is
+`["Osceola","Manistee","Roscommon"]` and `ProxiedCountyQuery.county` is
+`["Iosco","Otsego"]`. The agent derived it correctly and marked only the URLs as
+guesses.
 
-The provenance lattice is the most carefully built thing in this pipeline and all
-of it protects the *combination* of provenance values. None of it asks where a
-value came from. Configuration elaborated into a node body does not just risk a
-wrong constant — here it fabricates the input to the one piece of machinery whose
-whole job is trustworthiness.
+The corrected finding is narrower and argues this question's thesis better than
+the overreach did:
 
-This is the resolved half of this question arriving as a result rather than an
-argument: the endpoint table is configuration, it was elaborated into a node body
-because there was nowhere else to put it, and the consequence is that the
-correctness of five production endpoints came to rest on an agent's analogy and
-passed every check weir has. It strengthens the case that configuration must not
-reach a node body at all, rather than being something a node body may hold if the
-gate approves.
+**The part modelled as ontology was conveyed intact. The part left as
+configuration was fabricated.** County-to-branch is an enum on an edge, so it
+crossed the contract boundary and arrived correct. County-to-URL is a constant
+table with nowhere to live, so it was invented by analogy and accepted. The
+boundary this question draws is exactly where the behaviour changed — which is
+the strongest available evidence that the boundary is drawn in the right place,
+and that what falls on the configuration side needs a home rather than a better
+gate.
 
 Status note: this does not reopen the resolved half. It is the first instance
 where the cost of *not* having done it is measured rather than predicted.

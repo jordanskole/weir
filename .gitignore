@@ -4,3 +4,7 @@ dist/
 andre-lindenberg-repos.md
 weir-trace.jsonl
 weir.jsonl
+
+# Emitted zod modules written by emit-zod.test.ts
+spikes/ts-prototype/.emit-zod-test/
+spikes/ts-prototype/.scratch/

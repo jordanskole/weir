@@ -18,7 +18,7 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-## Open (28)
+## Open (29)
 
 Live. Ordered alphabetically, not by priority.
 
@@ -36,6 +36,7 @@ Live. Ordered alphabetically, not by priority.
 - [A gather composes with nothing](open-questions/gather-composes-with-nothing.md)
 - [Should the generator produce `null`, and explore cross-field combinations?](open-questions/generator-coverage.md)
 - [The version pin pins the contract, not the implementation](open-questions/implementation-identity.md)
+- [The declared integer widths are not enforced](open-questions/integer-widths-are-decorative.md)
 - [Classification says what may not go out; nothing says what may not be trusted coming in](open-questions/integrity-inbound.md)
 - [A collection is keyed, and streamed data is ordered](open-questions/keyed-versus-ordered-collections.md)
 - [The membrane bounds behaviour, not control — `fn` is still directly reachable](open-questions/membrane-bounds-behaviour-not-control.md)

@@ -25,6 +25,7 @@ import { pathToFileURL } from "node:url";
 import { elaborate } from "./elaborate.js";
 import { serializeNetlist } from "./netlist.js";
 import { exportContract } from "./contract.js";
+import { emitZodModule } from "./emit-zod.js";
 import { acceptImplementation } from "./accept.js";
 import { runExamples } from "./test-run.js";
 import { analyze, mediation } from "./sys.js";
@@ -49,6 +50,8 @@ usage
   weir check [dir]              elaborate the declarations and report what fails
   weir graph [dir] [--json]     print the topology, or the netlist as JSON
   weir contract <node> [dir]    print one node's sealed contract, as an agent receives it
+  weir emit-zod <node> [dir]    print the node's edges as a zod module, the typed
+                                form of the same contract
   weir run [dir] --impl <dir> --payload <file.json> [--effects <file.ts>]
                  [--log <file>] [--run <id>]
                                 elaborate, resolve implementations, and execute
@@ -864,6 +867,30 @@ async function contract(nodeName: string, dir: string): Promise<CliResult> {
   return { code: 0, out: JSON.stringify(exportContract(node), null, 2) };
 }
 
+/**
+ * Emits the node's input and output edges as a zod module — piece 1 of
+ * docs/superpowers/specs/2026-10-01-the-deterministic-scaffold.md.
+ *
+ * A sealed contract is a JSON document, so an agent drafting against it has no
+ * name to refer to and writes `p: any`. A schema rather than a type because a
+ * type discards the validations: `lng` declaring `min: -180, max: 180` becomes
+ * `lng: number`, and a declared `uint8` becomes `number`.
+ */
+async function emitZod(nodeName: string, dir: string): Promise<CliResult> {
+  let elaborated;
+  try {
+    elaborated = await elaborate(dir);
+  } catch (error) {
+    return failure(error, dir);
+  }
+  const node = elaborated.nodes[nodeName];
+  if (node === undefined) {
+    const known = Object.keys(elaborated.nodes).sort().join(", ");
+    return { code: 1, out: `✗ no node named "${nodeName}".\n\n  declared: ${known}` };
+  }
+  return { code: 0, out: emitZodModule(node) };
+}
+
 /** Parses argv (without node/script) and runs the command. Never writes, never exits. */
 export async function runCli(argv: string[], cwd: string): Promise<CliResult> {
   const flags = new Map<string, string>();
@@ -919,6 +946,10 @@ export async function runCli(argv: string[], cwd: string): Promise<CliResult> {
     case "contract": {
       if (rest[0] === undefined) return { code: 1, out: `✗ contract needs a node name.\n\n${USAGE}` };
       return contract(rest[0], rest[1] ?? cwd);
+    }
+    case "emit-zod": {
+      if (rest[0] === undefined) return { code: 1, out: `✗ emit-zod needs a node name.\n\n${USAGE}` };
+      return emitZod(rest[0], rest[1] ?? cwd);
     }
     case undefined:
     case "help":
