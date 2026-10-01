@@ -26,6 +26,9 @@ routeCounty --oneOf--> directCountyFetch  [zone: county-gis] -----+
                                                    +--> resolveIdentity
 ```
 
+**Diagram:** [trust boundaries, from declarations alone](../../docs/diagrams/blue-ribbon-trust-boundaries.html)
+— the four zones, the six network hops, and what `weir sys` says each one carries.
+
 ## It runs
 
 ```

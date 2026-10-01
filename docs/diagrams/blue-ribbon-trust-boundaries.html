@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trust boundaries, from declarations alone</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --color-paper:       #f5f5f5;
+      --color-ink:         #2d3142;
+      --color-muted:       #4f5d75;
+      --color-soft:        #7a8399;
+      --color-rule:        rgba(45,49,66,0.12);
+      --color-accent:      #eb6c36;
+      --color-link:        #2e5aa8;
+      --font-sans:   'Geist', system-ui, sans-serif;
+      --font-serif:  'Instrument Serif', 'Times New Roman', serif;
+      --font-mono:   'Geist Mono', ui-monospace, Menlo, monospace;
+    }
+
+    body { font-family: var(--font-sans); background: var(--color-paper); min-height: 100vh;
+           padding: 3rem 2rem; color: var(--color-ink); }
+    .container { max-width: 1240px; margin: 0 auto; }
+    .header { margin-bottom: 2.5rem; }
+    .header-eyebrow { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+                      letter-spacing: 0.18em; text-transform: uppercase;
+                      color: var(--color-muted); margin-bottom: 0.75rem; }
+    h1 { font-family: var(--font-serif); font-size: clamp(1.75rem, 3vw + 1rem, 2.5rem);
+         font-weight: 400; letter-spacing: -0.02em; line-height: 1.1; margin-bottom: 0.5rem; }
+    .subtitle { font-size: 1rem; line-height: 1.55; color: var(--color-muted); max-width: 64ch; }
+
+    .diagram-container { background: transparent; border: none; padding: 0; overflow-x: auto; }
+    svg { width: 100%; min-width: 980px; display: block; }
+
+    h2.section { font-family: var(--font-serif); font-size: 1.375rem; font-weight: 400;
+                 margin: 2.5rem 0 0.375rem; }
+    .section-note { font-size: 0.875rem; line-height: 1.55; color: var(--color-muted);
+                    max-width: 70ch; margin-bottom: 1.25rem; }
+
+    .cards { display: grid; grid-template-columns: 1.1fr 1fr 0.95fr; gap: 1rem; }
+    @media (max-width: 920px) { .cards { grid-template-columns: 1fr; } }
+
+    .card { background: #ffffff; border-radius: 6px; border: 1px solid var(--color-rule);
+            padding: 1.25rem; display: flex; flex-direction: column; }
+    .card.open { border-color: rgba(235,108,54,0.45); background: #fffdfb; }
+    .card-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.875rem;
+                   padding-bottom: 0.875rem; border-bottom: 1px solid rgba(45,49,66,0.08); }
+    .card-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .card-dot.ink { background: var(--color-ink); }
+    .card-dot.coral { background: var(--color-accent); }
+    .card-dot.soft { background: var(--color-soft); }
+    .card h3 { font-size: 0.875rem; font-weight: 600; letter-spacing: -0.005em; }
+    .card ul { list-style: none; font-size: 0.8125rem; line-height: 1.55; color: var(--color-muted); }
+    .card li { margin-bottom: 0.35rem; padding-left: 0.875rem; position: relative; }
+    .card li::before { content: '—'; position: absolute; left: 0; color: rgba(45,49,66,0.25);
+                       font-size: 0.75rem; }
+    .quote { margin-top: auto; padding-top: 0.75rem; font-family: var(--font-serif);
+             font-style: italic; font-size: 0.9375rem; line-height: 1.4; color: var(--color-ink);
+             border-top: 1px solid rgba(45,49,66,0.08); }
+
+    .footer { margin-top: 2.5rem; padding-top: 1.5rem; border-top: 1px solid rgba(45,49,66,0.10);
+              font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em;
+              color: var(--color-soft); display: flex; justify-content: space-between;
+              flex-wrap: wrap; gap: 0.5rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <div class="header">
+      <p class="header-eyebrow">weir · blue-ribbon-properties · 2026-10-01</p>
+      <h1>Four parties, six network hops, and what each one carries</h1>
+      <p class="subtitle">Every line below was derived by <code>weir sys</code> from the declarations
+        alone — no run, no implementations. The project it describes had this information in a
+        markdown file, arrived at by hand over two separate investigations.</p>
+    </div>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1180 760" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="brp-trust-title brp-trust-desc">
+        <title id="brp-trust-title">Trust boundaries of a parcel-identity pipeline</title>
+        <desc id="brp-trust-desc">Four zones: the project's own server in the centre, a county GIS service on the left, a commercial proxy below, and a federal soil service on the right. Six network hops leave or enter the server, each annotated with the edge it carries and the classification labels on that edge's fields; the two carrying a county's raw parcel feature are annotated as carrying nothing, because that payload is an opaque JSON string.</desc>
+
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+          </marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/>
+          </marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/>
+          </marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+        <!-- ── Zones (painted first) ───────────────────────────────────────── -->
+
+        <!-- the project's own machine -->
+        <rect x="420" y="200" width="340" height="200" rx="8"
+              fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.28)" stroke-width="1"/>
+        <rect x="444" y="204" width="68" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="448" y="213" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace"
+              letter-spacing="0.14em">SERVER</text>
+
+        <!-- a county government -->
+        <rect x="80" y="220" width="240" height="110" rx="8"
+              fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1" stroke-dasharray="4,4"/>
+        <rect x="104" y="224" width="88" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="108" y="233" fill="rgba(45,49,66,0.50)" font-size="7" font-family="'Geist Mono', monospace"
+              letter-spacing="0.14em">COUNTY-GIS</text>
+
+        <!-- a commercial aggregator. FOCAL: the finding weir surfaced. -->
+        <rect x="460" y="470" width="280" height="110" rx="8"
+              fill="rgba(235,108,54,0.05)" stroke="#eb6c36" stroke-width="1" stroke-dasharray="4,4"/>
+        <rect x="484" y="474" width="136" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="488" y="483" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace"
+              letter-spacing="0.14em">THIRD-PARTY-PROXY</text>
+
+        <!-- a federal service -->
+        <rect x="860" y="220" width="240" height="110" rx="8"
+              fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1" stroke-dasharray="4,4"/>
+        <rect x="884" y="224" width="80" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="888" y="233" fill="rgba(45,49,66,0.50)" font-size="7" font-family="'Geist Mono', monospace"
+              letter-spacing="0.14em">STATE-GIS</text>
+
+        <!-- ── The six crossings. Every one a straight line. ───────────────── -->
+
+        <!-- server → county-gis -->
+        <line x1="420" y1="256" x2="320" y2="256" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <rect x="314" y="224" width="112" height="24" rx="2" fill="#f5f5f5"/>
+        <text x="370" y="233" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
+              text-anchor="middle">DirectCountyQuery</text>
+        <text x="370" y="244" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace"
+              text-anchor="middle" letter-spacing="0.06em">CARRIES LINKABLE</text>
+
+        <!-- county-gis → server -->
+        <line x1="320" y1="292" x2="420" y2="292" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <rect x="314" y="260" width="112" height="24" rx="2" fill="#f5f5f5"/>
+        <text x="370" y="269" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
+              text-anchor="middle">RawParcelFeature</text>
+        <text x="370" y="280" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace"
+              text-anchor="middle" letter-spacing="0.06em">CARRIES NOTHING †</text>
+
+        <!-- server → third-party-proxy -->
+        <line x1="532" y1="400" x2="532" y2="470" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+        <rect x="410" y="423" width="112" height="24" rx="2" fill="#f5f5f5"/>
+        <text x="518" y="432" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
+              text-anchor="end">ProxiedCountyQuery</text>
+        <text x="518" y="443" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace"
+              text-anchor="end" letter-spacing="0.06em">CARRIES LINKABLE</text>
+
+        <!-- third-party-proxy → server -->
+        <line x1="648" y1="470" x2="648" y2="400" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+        <rect x="658" y="423" width="112" height="24" rx="2" fill="#f5f5f5"/>
+        <text x="662" y="432" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace">RawParcelFeature</text>
+        <text x="662" y="443" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace"
+              letter-spacing="0.06em">CARRIES NOTHING †</text>
+
+        <!-- server → state-gis -->
+        <line x1="760" y1="256" x2="860" y2="256" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <rect x="754" y="224" width="112" height="24" rx="2" fill="#f5f5f5"/>
+        <text x="810" y="233" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
+              text-anchor="middle">ParcelCentroid</text>
+        <text x="810" y="244" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace"
+              text-anchor="middle" letter-spacing="0.06em">LINKABLE, LOCATION</text>
+
+        <!-- state-gis → server -->
+        <line x1="860" y1="292" x2="760" y2="292" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <rect x="754" y="260" width="112" height="24" rx="2" fill="#f5f5f5"/>
+        <text x="810" y="269" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
+              text-anchor="middle">TownshipLookup</text>
+        <text x="810" y="280" fill="#7a8399" font-size="7" font-family="'Geist Mono', monospace"
+              text-anchor="middle" letter-spacing="0.06em">FREETEXT, LINKABLE</text>
+
+        <!-- ── Nodes ───────────────────────────────────────────────────────── -->
+
+        <!-- server's four nodes: who is on each end of a hop -->
+        <rect x="452" y="232" width="276" height="32" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="590" y="252" fill="#2d3142" font-size="11" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">routeCounty</text>
+
+        <rect x="452" y="272" width="276" height="32" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="590" y="292" fill="#2d3142" font-size="11" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">normalizeParcel</text>
+
+        <rect x="452" y="312" width="276" height="32" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="590" y="332" fill="#2d3142" font-size="11" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">parcelCentroid</text>
+
+        <rect x="452" y="352" width="276" height="32" rx="4" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="590" y="372" fill="#2d3142" font-size="11" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">resolveIdentity</text>
+
+        <!-- fetchDirect -->
+        <rect x="112" y="252" width="176" height="44" rx="6" fill="#f5f5f5"/>
+        <rect x="112" y="252" width="176" height="44" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+        <text x="200" y="272" fill="#2d3142" font-size="11" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">fetchDirect</text>
+        <text x="200" y="286" fill="#4f5d75" font-size="8"
+              font-family="'Geist Mono', monospace" text-anchor="middle">a county FeatureServer</text>
+
+        <!-- fetchProxied -->
+        <rect x="492" y="502" width="216" height="44" rx="6" fill="#f5f5f5"/>
+        <rect x="492" y="502" width="216" height="44" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+        <text x="600" y="522" fill="#2d3142" font-size="11" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">fetchProxied</text>
+        <text x="600" y="536" fill="#4f5d75" font-size="8"
+              font-family="'Geist Mono', monospace" text-anchor="middle">app.fetchgis.com</text>
+
+        <!-- lookupTownship -->
+        <rect x="892" y="252" width="176" height="44" rx="6" fill="#f5f5f5"/>
+        <rect x="892" y="252" width="176" height="44" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+        <text x="980" y="272" fill="#2d3142" font-size="11" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">lookupTownship</text>
+        <text x="980" y="286" fill="#4f5d75" font-size="8"
+              font-family="'Geist Mono', monospace" text-anchor="middle">statewide MCD layer</text>
+
+        <!-- The finding, stated -->
+        <text x="590" y="622" fill="#2d3142" font-size="14" font-style="italic"
+              font-family="'Instrument Serif', serif" text-anchor="middle">Two county adapters share one interface and one signature. Only one of them</text>
+        <text x="590" y="642" fill="#2d3142" font-size="14" font-style="italic"
+              font-family="'Instrument Serif', serif" text-anchor="middle">talks to the county. Nothing in the types could have told you which.</text>
+
+        <!-- Legend -->
+        <line x1="40" y1="672" x2="1140" y2="672" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+        <text x="40" y="688" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
+              letter-spacing="0.14em">LEGEND</text>
+
+        <line x1="124" y1="684" x2="160" y2="684" stroke="#4f5d75" stroke-width="1.2"/>
+        <text x="168" y="688" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">a network hop</text>
+
+        <line x1="300" y1="684" x2="336" y2="684" stroke="#eb6c36" stroke-width="1.2"/>
+        <text x="344" y="688" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">a hop through a commercial aggregator</text>
+
+        <text x="620" y="688" fill="#eb6c36" font-size="9" font-family="'Geist', sans-serif">†</text>
+        <text x="634" y="688" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">reported as carrying nothing — and that is wrong, see below</text>
+
+        <text x="40" y="724" fill="#7a8399" font-size="9" font-family="'Geist Mono', monospace"
+              letter-spacing="0.06em">CARRIES</text>
+        <text x="108" y="724" fill="#4f5d75" font-size="11" font-family="'Geist', sans-serif">the classification labels on the fields of the edge that crosses — so <tspan font-family="'Geist Mono', monospace" font-size="10">linkable</tspan> is a parcel id, <tspan font-family="'Geist Mono', monospace" font-size="10">location</tspan> a coordinate, <tspan font-family="'Geist Mono', monospace" font-size="10">freetext</tspan> an unconstrained string.</text>
+      </svg>
+    </div>
+
+    <h2 class="section">What this picture is evidence of</h2>
+    <p class="section-note">Three readings, and the third is an open question rather than a win.</p>
+
+    <div class="cards">
+
+      <div class="card">
+        <div class="card-header"><span class="card-dot ink"></span><h3>Derived, not documented</h3></div>
+        <ul>
+          <li>Produced by <code>weir sys</code> with no run and no implementations — only the
+            <code>.edge</code>, <code>.node</code> and <code>.topology</code> files</li>
+          <li>A zone is one line in a topology; a crossing is an edge between differently-zoned nodes</li>
+          <li>The <code>carries</code> annotation is the <code>classification:</code> labels on the
+            crossing edge's own fields</li>
+        </ul>
+        <p class="quote">The same report took two hand investigations in the project it describes.</p>
+      </div>
+
+      <div class="card open">
+        <div class="card-header"><span class="card-dot coral"></span><h3>The proxy became a type</h3></div>
+        <ul>
+          <li>Two of five county adapters route through <code>app.fetchgis.com</code>, behind an
+            interface identical to the direct ones</li>
+          <li>Same signature, same shape, different party on the other end — nothing in the types
+            distinguished them</li>
+          <li>It lived as a sentence in <code>OPEN_ITEMS.md</code>: <em>"a different trust posture
+            than every other adapter"</em></li>
+        </ul>
+        <p class="quote">A zone genuinely cannot be inferred from the data or the contract. It has to be declared by somebody who knows where the code runs.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-dot soft"></span><h3>† And one answer is wrong</h3></div>
+        <ul>
+          <li><code>RawParcelFeature</code> reports carrying <strong>nothing</strong> — while holding
+            a county's entire response, owner names included</li>
+          <li>Because its payload is an opaque JSON string, so no field carries a label</li>
+          <li>A leakage query that under-reports is worse than none; it is a false negative, and
+            <code>weir</code> records it as an open question rather than a feature</li>
+        </ul>
+        <p class="quote">The untyped hop swallowed it — which turned out to be true of serialized fields on typed edges too.</p>
+      </div>
+
+    </div>
+
+    <div class="footer">
+      <span>weir · spikes/blue-ribbon-slice · derived by <code>weir sys</code></span>
+      <span>9 edges · 7 nodes · 4 zones · 6 crossings</span>
+    </div>
+
+  </div>
+</body>
+</html>
