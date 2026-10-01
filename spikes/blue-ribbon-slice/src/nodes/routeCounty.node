@@ -74,5 +74,5 @@ properties:
       would otherwise pass.
     expr:
       eq:
-        - get: output.pin
+        - get: output.payload.pin
         - get: input.pin

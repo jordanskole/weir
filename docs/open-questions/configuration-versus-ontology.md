@@ -1,7 +1,7 @@
 # No way to say "these N things vary only in configuration"
 
 Status: resolved (2026-09-29) for the configuration half. The arithmetic half is open by design.
-Last grounded: 2026-09-29.
+Last grounded: 2026-10-01.
 
 ## The question
 
@@ -81,3 +81,30 @@ declaration into N contracts, one per row.
 - **Edge instantiation** is deliberately out of scope and is the larger half,
   since an edge template's fields vary in *name*, which is what structural
   hashing is most sensitive to.
+
+## 2026-10-01: mechanical evidence from the sealed-contract loop
+
+An isolated agent drafting `routeCounty` from its sealed contract alone was
+**accepted carrying four invented production URLs**
+([what an isolated agent found](../superpowers/specs/2026-10-01-what-an-isolated-agent-found.md) §5). The
+contract gives two of five counties by worked example and says nothing about the
+other three; the agent extended the pattern by analogy, reported that it had, and
+noted that nothing in the gate could detect it. Of seven distinct URLs in the
+accepted source, three ArcGIS endpoints and one proxy referer appear nowhere in
+the contract.
+
+The gate could not catch this and no addition to the gate would. An acceptance
+gate verifies shape and invariants; "is this the correct host for Manistee
+County" is neither, so a well-formed invention is indistinguishable from the real
+thing. The same is true of a human reviewer skimming a diff of URL constants.
+
+This is the resolved half of this question arriving as a result rather than an
+argument: the endpoint table is configuration, it was elaborated into a node body
+because there was nowhere else to put it, and the consequence is that the
+correctness of five production endpoints came to rest on an agent's analogy and
+passed every check weir has. It strengthens the case that configuration must not
+reach a node body at all, rather than being something a node body may hold if the
+gate approves.
+
+Status note: this does not reopen the resolved half. It is the first instance
+where the cost of *not* having done it is measured rather than predicted.

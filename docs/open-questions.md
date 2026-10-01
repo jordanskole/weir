@@ -18,10 +18,11 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-## Open (25)
+## Open (28)
 
 Live. Ordered alphabetically, not by priority.
 
+- [`allOf` generation produces bags the runtime could never deliver](open-questions/allof-generation-ignores-lineage.md)
 - [An origin node can never iterate](open-questions/an-origin-node-can-never-iterate.md)
 - [Can a closure carry a formula, or only a value?](open-questions/can-a-closure-carry-a-formula.md)
 - [Cardinality is invisible to a static crossing query](open-questions/cardinality-is-invisible.md)
@@ -40,6 +41,7 @@ Live. Ordered alphabetically, not by priority.
 - [The membrane bounds behaviour, not control — `fn` is still directly reachable](open-questions/membrane-bounds-behaviour-not-control.md)
 - [Nodes as compiled, distributable units](open-questions/nodes-as-distributable-units.md)
 - [A property cannot quantify over a gathered collection](open-questions/properties-over-collections.md)
+- [Should `weir check` report output fields no property constrains?](open-questions/property-coverage-over-output-fields.md)
 - [Prose blocks on node declarations](open-questions/prose-on-node-declarations.md)
 - [`weir replay` exits zero even when every invocation refused](open-questions/replay-exit-code.md)
 - [Run granularity: a batch job's output has nowhere to live](open-questions/run-granularity.md)
@@ -47,6 +49,7 @@ Live. Ordered alphabetically, not by priority.
 - [Serialization erases classification at exactly the crossing it describes](open-questions/serialization-erases-classification.md)
 - [Serialization format for the netlist and log](open-questions/serialization-format.md)
 - [Sleep / wait](open-questions/sleep-and-wait.md)
+- [The acceptance gate rewards fabrication and rejects refusal](open-questions/the-gate-rewards-fabrication.md)
 
 ## Blocked (1)
 
