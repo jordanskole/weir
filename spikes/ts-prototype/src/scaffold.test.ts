@@ -301,6 +301,7 @@ describe("scaffold — it covers the corpus", () => {
         const files = scaffoldFiles(node);
         expect(Object.keys(files).sort()).toEqual(
           [
+            ".gitignore",
             "README.md",
             "check.ts",
             "package.json",
@@ -556,5 +557,45 @@ export default function parcelCentroid(p: parcelCentroidInput): parcelCentroidOu
     const files = scaffoldFiles(node);
     expect(files[`${node.name}.ts`]).toContain("must stand alone");
     expect(files["README.md"]).toContain("must stand alone");
+  });
+});
+
+/**
+ * A generated scaffold must ignore itself.
+ *
+ * Committing one gave the next run a head start: a scaffold was committed with six
+ * gate-accepted implementations, and the agent asked to implement the next round
+ * restored them from `HEAD` rather than writing them from the stub — reasoning
+ * correctly that the contracts had not moved, and silently making that pass useless
+ * as a test of the loop.
+ */
+describe("scaffold — it ignores itself", () => {
+  /** BREAK-PROOF: removing the `.gitignore` entry from either form reddens this. */
+  it("emits a .gitignore that excludes everything, in both forms", async () => {
+    const node = await nodeOf(SLICE, "parcelCentroid");
+    const single = scaffoldFiles(node);
+    expect(single[".gitignore"]).toBeDefined();
+    expect(single[".gitignore"]!.trimEnd().endsWith("*")).toBe(true);
+
+    const elaborated = await elaborate(join(REPO, SLICE));
+    const pure = Object.values(elaborated.nodes).filter(
+      (n) => !(n as { effect?: unknown }).effect && !n.name.includes("/"),
+    ) as NodeDecl[];
+    const program = scaffoldProgramFiles(pure);
+    expect(program[".gitignore"]).toBeDefined();
+    expect(program[".gitignore"]!.trimEnd().endsWith("*")).toBe(true);
+  });
+
+  /**
+   * It has to say why, because "*" with no explanation reads as tidiness and the
+   * reason is correctness — and because deleting it is a legitimate choice someone
+   * should be able to make knowingly.
+   */
+  it("says why it is ignored, and how to opt out", async () => {
+    const node = await nodeOf(SLICE, "parcelCentroid");
+    const text = scaffoldFiles(node)[".gitignore"]!;
+    expect(text).toContain("weir scaffold");
+    expect(text).toContain("from the stub");
+    expect(text).toContain("Delete this file");
   });
 });

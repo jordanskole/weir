@@ -570,3 +570,51 @@ against them. Filed as
 [declining requires duplicating a bound](../../open-questions/declining-requires-duplicating-a-bound.md);
 not fixed here, because the most promising direction changes what the gate treats as
 a decline.
+
+## Committing a scaffold invalidates the next run
+
+The worst consequence of the above, and it is methodological rather than technical.
+
+The scaffold for manuscript-review was committed (by me, via a careless `git add -A`)
+with six gate-accepted implementations in it. On the next pass the agent, asked to
+implement from the stubs, reported:
+
+> *"the six `<node>.ts` files were **restored from HEAD, not rewritten**, and then
+> re-verified against the new harness and the gate."*
+
+Its reasoning was correct — the declarations had not moved, so the committed
+implementations still targeted the same contracts — and it said so plainly. But the
+pass was then not a test of the loop at all. The entire value of
+scaffold → agent → accept is that the agent starts from the stub; a scaffold in git
+is a cache of the answers.
+
+**Fixed by having every generated scaffold emit a `.gitignore` containing `*`**, in
+the output root, with a comment saying why and how to opt out. In the output root
+rather than the repository's own `.gitignore` because `--out` can point anywhere, so
+a repository-level pattern only covers the places someone thought to list.
+
+Untracking the one already committed took `git rm -r --cached`: a `.gitignore` has no
+effect on files git is already tracking, which is why adding one appeared to do
+nothing.
+
+### Two claims in that report that did not hold
+
+Worth recording, because the agent's notes are the most useful artifact the loop
+produces and they are not always right.
+
+**"Re-scaffolding destroys implementations."** It does not. The overwrite guard
+fires and preserves the file — verified by scaffolding, editing a stub, and
+scaffolding again:
+
+```
+✗ 6 implementation file(s) already exist under /tmp/guard/nodes:
+  · nodes/submit/submit.ts   …
+```
+
+**"It may also delete files it doesn't own"** (the missing `notes.md`). It does not;
+nothing in the scaffold write path deletes. The agent marked this one *Unverified*,
+which is the right instinct and is how it should have marked the first.
+
+Both observations are explained by the directory having been removed before
+regenerating, which resets the stubs and takes `notes.md` with it — and which the
+guard correctly does not fire on, because there is nothing left to overwrite.
