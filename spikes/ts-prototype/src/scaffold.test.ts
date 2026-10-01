@@ -437,3 +437,124 @@ describe("scaffoldProgramFiles — one schema per edge, shared", () => {
     expect(scaffolded).not.toContain("fetchDirect");
   });
 });
+
+/**
+ * The scaffold's local green must mean the gate's green. It did not: `weir accept`
+ * copies the candidate into a draft directory alone, so a *runtime* relative import
+ * cannot resolve — while the scaffold's own vitest loads the file in place, next to
+ * its siblings, and passes it.
+ *
+ * Demonstrated before the fix, on a real scaffold:
+ *   scaffold's vitest   ✓ 1 passed
+ *   the gate            ✗ submit did not load — Cannot find module './schema.js'
+ *
+ * Found by an agent hitting it, not by design.
+ */
+describe("scaffold — a candidate that the gate could not load fails locally too", () => {
+  /**
+   * Each form must be **caught**, by one of two mechanisms, and the distinction is
+   * worth keeping rather than smoothing over:
+   *
+   * - A form the local loader also rejects (`require` in ESM, which does not do the
+   *   `.js` -> `.ts` resolution the ESM loader does) throws at import. Caught, and
+   *   `selfContained` never gets to run.
+   * - A form that loads **locally and not at the gate** — the dangerous one, and the
+   *   actual false green — is caught by `selfContained` as `not-self-contained`.
+   *
+   * BREAK-PROOF: removing `selfContained()` from `check()` leaves the `require` case
+   * green (it still throws) and reddens every other form, which is exactly the set
+   * that was silently passing before.
+   */
+  it("catches a runtime relative import in each of its forms", async () => {
+    const node = await nodeOf(SLICE, "parcelCentroid");
+    const forms: [string, string][] = [
+      ["named import", `import { ParcelCentroid } from "./schema.js";\nconst _u = ParcelCentroid;\n`],
+      ["bare side-effect import", `import "./schema.js";\n`],
+      ["re-export", `export { ParcelCentroid } from "./schema.js";\n`],
+      ["require", `const s = require("./schema.js");\n`],
+      ["dynamic import", `const s = import("./schema.js");\n`],
+      ["parent-relative", `import { z } from "../../schemas/NormalizedParcel.js";\nconst _u = z;\n`],
+    ];
+
+    for (const [label, prelude] of forms) {
+      const impl = `${prelude}
+export default function parcelCentroid(p: any) {
+  const g = JSON.parse(p.boundaryJson);
+  const pts = g.coordinates[0].slice(0, -1);
+  let sx = 0, sy = 0;
+  for (const [x, y] of pts) { sx += x; sy += y; }
+  return { pin: p.pin, lng: sx / pts.length, lat: sy / pts.length };
+}
+`;
+      let failures: Failure[] | undefined;
+      let threw: unknown;
+      try {
+        failures = await checkWith(node, `self-${label.replace(/\W/g, "")}`, impl);
+      } catch (cause) {
+        threw = cause;
+      }
+
+      if (threw !== undefined) {
+        // The local loader refused it too. Caught, by the stricter mechanism.
+        // Either loader voice — node's "Cannot find module" or vite's
+        // "Failed to load url" — means the same thing: it would not load.
+        expect(String((threw as Error).message), label).toMatch(
+          /Cannot find module|Failed to load url/,
+        );
+        continue;
+      }
+
+      const stages = failures!.map((f) => f.stage);
+      expect(stages, label).toContain("not-self-contained");
+      expect(failures!.find((f) => f.stage === "not-self-contained")!.detail, label).toContain(
+        "loads this file",
+      );
+    }
+  });
+
+  /**
+   * `import type` is erased before load, so it must NOT be reported — the scaffold's
+   * own stub uses one, and flagging it would make every untouched scaffold red.
+   */
+  it("does not report an `import type`, which is erased", async () => {
+    const node = await nodeOf(SLICE, "parcelCentroid");
+    const impl = `import type { parcelCentroidInput, parcelCentroidOutput } from "./schema.js";
+
+export default function parcelCentroid(p: parcelCentroidInput): parcelCentroidOutput {
+  const g = JSON.parse((p as any).boundaryJson);
+  const pts = g.coordinates[0].slice(0, -1);
+  let sx = 0, sy = 0;
+  for (const [x, y] of pts) { sx += x; sy += y; }
+  return { pin: p.pin, lng: sx / pts.length, lat: sy / pts.length } as any;
+}
+`;
+    expect(await checkWith(node, "self-importtype", impl)).toEqual([]);
+  });
+
+  /**
+   * BOTH forms, because the first version of this test checked only
+   * `scaffoldFiles` and the program form shipped without `@types/node` for it —
+   * a passing test that did not cover the thing it was written for, caught by
+   * running `tsc` in a regenerated scaffold rather than by the suite.
+   */
+  it("ships @types/node in both scaffold forms, so tsc --noEmit works on the generated check.ts", async () => {
+    const node = await nodeOf(SLICE, "parcelCentroid");
+    const single = scaffoldFiles(node);
+    expect(single["check.ts"]).toContain('from "node:util"');
+    expect(single["check.ts"]).toContain('from "node:fs"');
+    expect(single["package.json"]).toContain("@types/node");
+
+    const elaborated = await elaborate(join(REPO, SLICE));
+    const pure = Object.values(elaborated.nodes).filter(
+      (n) => !(n as { effect?: unknown }).effect && !n.name.includes("/"),
+    ) as NodeDecl[];
+    expect(scaffoldProgramFiles(pure)["package.json"]).toContain("@types/node");
+  });
+
+  it("tells the implementer the file must stand alone, in the stub and the README", async () => {
+    const node = await nodeOf(SLICE, "parcelCentroid");
+    const files = scaffoldFiles(node);
+    expect(files[`${node.name}.ts`]).toContain("must stand alone");
+    expect(files["README.md"]).toContain("must stand alone");
+  });
+});

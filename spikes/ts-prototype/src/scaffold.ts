@@ -109,6 +109,7 @@ ${entries.join("\n")}
 }
 
 const CHECK_PRELUDE = `import { isDeepStrictEqual } from "node:util";
+import { readFileSync } from "node:fs";
 
 export interface PropertyCheck {
   name: string;
@@ -117,7 +118,7 @@ export interface PropertyCheck {
 
 export interface Failure {
   example: number;
-  stage: "input-schema" | "output-schema" | "value" | "threw" | "property";
+  stage: "input-schema" | "output-schema" | "value" | "threw" | "property" | "not-self-contained";
   detail: string;
 }
 
@@ -149,6 +150,55 @@ const reader = (input: unknown, output: unknown) => (path: string): unknown => {
   }
   return current;
 };
+
+/**
+ * A node implementation is loaded as a LONE FILE.
+ *
+ * \`weir accept\` copies the candidate into a fresh draft directory by itself, and
+ * the implementation tree stores it as a single \`<node>/<hash>.ts\` — so a runtime
+ * relative import has no sibling to resolve against and the gate reports
+ * \`<node> did not load: Cannot find module './schema.js'\`.
+ *
+ * Checked here because **vitest does not catch it**: the local run loads this file
+ * in place, next to its siblings, so a runtime import of \`./schema.js\` passes
+ * locally and fails at the gate. That divergence is the one thing this workspace
+ * exists to prevent, and it was found by an agent hitting it rather than by design.
+ *
+ * \`import type\` is fine — type imports are erased before the file is loaded.
+ */
+const RUNTIME_RELATIVE = [
+  // import … from "./x"  /  export … from "../x"   (but not \`import type\`)
+  /^[ \\t]*(?:import|export)[ \\t]+(?!type[ \\t])[^;\\n]*?from[ \\t]*["'](\\.[^"']*)["']/gm,
+  // bare side-effect import "./x"
+  /^[ \\t]*import[ \\t]+["'](\\.[^"']*)["']/gm,
+  // require("./x") and dynamic import("./x")
+  /\\b(?:require|import)[ \\t]*\\([ \\t]*["'](\\.[^"']*)["']/g,
+];
+
+export function selfContained(): Failure[] {
+  let source: string;
+  try {
+    source = readFileSync(new URL(IMPLEMENTATION_FILE, import.meta.url), "utf8");
+  } catch {
+    return [];
+  }
+  const found = new Set<string>();
+  for (const pattern of RUNTIME_RELATIVE) {
+    for (const match of source.matchAll(pattern)) found.add(match[1]!);
+  }
+  if (found.size === 0) return [];
+  const list = [...found].map((f) => '"' + f + '"').join(", ");
+  return [
+    {
+      example: 0,
+      stage: "not-self-contained",
+      detail:
+        IMPLEMENTATION_FILE + " imports " + list + " at runtime, and the gate loads this file " +
+        "alone, so a relative import cannot resolve. Inline what you need, or use an " +
+        "'import type' if you only wanted the types.",
+    },
+  ];
+}
 `;
 
 function checkModule(node: NodeDecl): string {
@@ -161,6 +211,9 @@ function checkModule(node: NodeDecl): string {
 ${CHECK_PRELUDE}
 import fn from "./${node.name}.js";
 import { ${node.name}Input, ${node.name}Output } from "./schema.js";
+
+/** This node's own source, which \`selfContained\` reads. */
+const IMPLEMENTATION_FILE = "./${node.name}.ts";
 
 /** The node's declared examples, in runtime form. */
 export const examples: { given: unknown; expect: unknown }[] = [
@@ -182,7 +235,8 @@ ${propertyBlock((node.properties ?? []) as PropertyDecl[])}
  * - \`property\`      a declared invariant did not hold.
  */
 export function check(): Failure[] {
-  const failures: Failure[] = [];
+  // First, because a file the gate cannot load makes every other result moot.
+  const failures: Failure[] = selfContained();
 
   for (const [i, ex] of examples.entries()) {
     const n = i + 1;
@@ -257,6 +311,12 @@ function stubModule(node: NodeDecl): string {
  * already structurally valid — the type is backed by a runtime assertion rather
  * than being a promise.
  *
+ * **This file must stand alone.** \`weir accept\` copies it into a draft directory
+ * by itself and the implementation tree stores it as a single file, so a *runtime*
+ * relative import — \`import { x } from "./schema.js"\` — cannot resolve and the gate
+ * reports \`did not load\`. The \`import type\` above is fine, because type imports
+ * are erased. Inline any bound you need as a constant.
+ *
  * Decline by throwing. The membrane turns a throw into a \`Failed\` record
  * carrying ${declines} and the reason, which is the right answer for input this
  * cannot handle — but note that the acceptance gate reports a candidate that
@@ -303,8 +363,17 @@ npm test
 - **threw** — your function declined.
 - **property** — a declared invariant did not hold, or the property itself is
   broken (an unresolvable path is the contract's defect, not yours).
+- **not-self-contained** — your file imports something relative at *runtime*. See
+  below.
 
-## Two things worth knowing
+## Three things worth knowing
+
+**Each implementation must stand alone.** \`weir accept\` copies your file into a
+draft directory by itself, and the implementation tree stores it as a single
+\`<node>/<hash>.ts\`, so \`import { x } from "./schema.js"\` cannot resolve there even
+though it resolves here. \`import type\` is fine — types are erased. Inline any bound
+you need as a constant. \`check()\` tests this, because \`npm test\` alone would not:
+it loads your file in place, next to its siblings.
 
 **Read a property's body, not its name.** A property's name is unchecked prose.
 \`check.ts\` renders each expression as source so you can see what it actually
@@ -325,7 +394,7 @@ const PACKAGE_JSON = (name: string): string =>
       type: "module",
       scripts: { test: "vitest run", "test:watch": "vitest" },
       dependencies: { zod: "^4.6.5" },
-      devDependencies: { typescript: "^5.7.2", vitest: "^2.1.0" },
+      devDependencies: { "@types/node": "^26.2.0", typescript: "^5.7.2", vitest: "^2.1.0" },
       engines: { node: ">=24" },
     },
     null,
@@ -517,7 +586,8 @@ const PROGRAM_PACKAGE_JSON = `${JSON.stringify(
     type: "module",
     scripts: { test: "vitest run", "test:watch": "vitest" },
     dependencies: { zod: "^4.6.5" },
-    devDependencies: { typescript: "^5.7.2", vitest: "^2.1.0" },
+    // @types/node because the generated check.ts imports node:util and node:fs.
+    devDependencies: { "@types/node": "^26.2.0", typescript: "^5.7.2", vitest: "^2.1.0" },
     engines: { node: ">=24" },
   },
   null,
@@ -601,8 +671,17 @@ ${rows}
 - **threw** — your function declined.
 - **property** — a declared invariant did not hold, or the property itself is
   broken (an unresolvable path is the contract's defect, not yours).
+- **not-self-contained** — your file imports something relative at *runtime*. See
+  below.
 
-## Two things worth knowing
+## Three things worth knowing
+
+**Each implementation must stand alone.** \`weir accept\` copies your file into a
+draft directory by itself, and the implementation tree stores it as a single
+\`<node>/<hash>.ts\`, so \`import { x } from "./schema.js"\` cannot resolve there even
+though it resolves here. \`import type\` is fine — types are erased. Inline any bound
+you need as a constant. \`check()\` tests this, because \`npm test\` alone would not:
+it loads your file in place, next to its siblings.
 
 **Read a property's body, not its name.** A property's name is unchecked prose.
 \`check.ts\` renders each expression as source so you can see what it actually

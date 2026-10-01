@@ -500,3 +500,73 @@ boundary cases. The remaining option is to ship the ordinary cases and describe 
 boundary ones, which costs the fixture the property that made it worth having: being
 exactly what the gate runs. Left as recorded in that question rather than decided
 here.
+
+## The local green was not the gate's green
+
+This spec claimed the scaffold turns "pass the gate" into "make these green". It did
+not, and an agent implementing manuscript-review from a scaffold found it rather than
+any test here.
+
+`weir accept` copies the candidate into a draft directory **by itself**
+(`accept.ts:148`), and the implementation tree stores it as a single
+`<node>/<hash>.ts`. So a *runtime* relative import has no sibling to resolve against:
+
+```
+✗ submit did not load
+  Cannot find module './schema.js'
+```
+
+While the scaffold's own vitest loads the file **in place**, next to its siblings,
+and passes it. Reproduced on a real scaffold:
+
+```
+scaffold's vitest   ✓ 1 passed
+the gate            ✗ submit did not load — Cannot find module './schema.js'
+```
+
+A green local run the gate rejects — the precise false green this workspace exists to
+prevent, in the workspace built to prevent it.
+
+**Fixed with a `selfContained()` stage in the generated `check.ts`.** It reads the
+implementation's own source and fails on a runtime relative import in any of its
+forms — named, bare side-effect, re-export, `require`, dynamic `import`, and
+parent-relative — while leaving `import type` alone, since type imports are erased
+and the stub itself uses one. The same scaffold now reports locally:
+
+```
+stage:  "not-self-contained"
+detail: "./submit.ts imports "./schema.js" at runtime, and the gate loads this file
+         alone, so a relative import cannot resolve. Inline what you need, or use an
+         'import type' if you only wanted the types."
+```
+
+The stub comment and the README now say it too, because a check that only fires after
+someone has written the wrong thing is worse than saying so first.
+
+One nuance kept rather than smoothed over: `require("./x")` in ESM fails at *load*,
+so it never reaches `selfContained` — caught by the stricter mechanism. Every other
+form loads locally and fails only at the gate, which is the set that was silently
+passing.
+
+## Two more the same agent found
+
+**`@types/node` was missing from the scaffold's `devDependencies`**, so `tsc
+--noEmit` failed in every node directory with `Cannot find module 'node:util'` — the
+generated `check.ts` imports `node:util` and now `node:fs`. Fixed in both scaffold
+forms.
+
+And a test of mine was wrong about it: the assertion checked `scaffoldFiles`
+(single-node) and the **program** form shipped without it anyway. Caught by running
+`tsc` in a regenerated scaffold, not by the suite. The test now covers both forms.
+That is the sixth test this day whose coverage was narrower than its name.
+
+**Declining on a declared bound requires duplicating it.** The agent inlined
+`MAX_ID = 100` and `MAX_TEXT = 2000` by hand and noted they can drift from
+`Revision.edge`. It could not import them, by the constraint above — and it could not
+simply return an over-long value either, because the gate counts an out-of-schema
+return as a *failure* while counting a throw as a legitimate decline. So a
+declaration's numbers end up copied into every implementation that might brush
+against them. Filed as
+[declining requires duplicating a bound](../../open-questions/declining-requires-duplicating-a-bound.md);
+not fixed here, because the most promising direction changes what the gate treats as
+a decline.

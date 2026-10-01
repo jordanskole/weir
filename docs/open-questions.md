@@ -18,7 +18,7 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-## Open (28)
+## Open (29)
 
 Live. Ordered alphabetically, not by priority.
 
@@ -28,6 +28,7 @@ Live. Ordered alphabetically, not by priority.
 - [Where do client/server and PII obfuscation map onto nodes and edges?](open-questions/client-zones-and-obfuscation.md)
 - [`correlation_id` origin and lifetime for multi-invocation threads](open-questions/correlation-id-lifetime.md)
 - [Declarations acceptance gate — required sign-off, loosening undecided](open-questions/declarations-acceptance-gate.md)
+- [An implementation cannot decline on a declared bound without duplicating it](open-questions/declining-requires-duplicating-a-bound.md)
 - [Should a node ever be invoked directly, or is that just a one-node topology?](open-questions/direct-invocation.md)
 - [Which parts of a node declaration are contract, and which are commentary?](open-questions/examples-in-the-contract-hash.md)
 - [`Failed<In>.input` is typed as validated data it never was](open-questions/failed-input-is-typed-as-valid.md)
