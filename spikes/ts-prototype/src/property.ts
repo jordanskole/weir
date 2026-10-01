@@ -294,3 +294,103 @@ export function assertFalsifiable(property: PropertyDecl): void {
   };
   walk(expr);
 }
+
+/**
+ * Two input fields a node's declared properties require to be equal.
+ * `{ edge: "StyleReport", field: "revision_id" }`.
+ */
+export interface InputFieldRef {
+  edge: string;
+  field: string;
+}
+
+/**
+ * Groups of input fields that must carry the same value, derived from the
+ * declared properties alone.
+ *
+ * WHY THIS EXISTS. `generateInputCases` builds an `allOf` bag one edge at a time,
+ * so the fields come out independent — and the runtime never delivers such a bag,
+ * because `allOf` inputs join by nearest common ancestor and therefore share
+ * whatever their common ancestor gave them. The generator was manufacturing inputs
+ * the runtime could not produce and the gate was holding implementations
+ * responsible for them, twice over: blue-ribbon's `resolveIdentity` on `pin`, and
+ * manuscript-review's `verdict` on `revision_id`. Both declarations *say* the
+ * fields must agree, and say it in the property — so nothing new has to be
+ * declared, it only has to be read.
+ *
+ * HOW. Collect every `eq` that the property **unconditionally requires**, union
+ * their two operand paths into equivalence classes, then report each class's
+ * `input.<Edge>.<field>` members where more than one distinct edge appears. The
+ * union-find gives transitivity for free, which is what the real cases need:
+ * `verdict` never compares its two inputs directly — it says each equals
+ * `output.revision_id`, and the correlation follows through the output.
+ *
+ * UNCONDITIONALLY is the load-bearing word. An `eq` under `not` is required to be
+ * *false*; under `or` it may be either; as an `implies` antecedent it is a guard
+ * rather than a requirement. Only `and` preserves "this must hold", so the walk
+ * descends through `and` and stops at everything else. Treating every `eq` as a
+ * requirement would correlate fields a property deliberately allows to differ.
+ */
+export function correlatedInputFields(properties: readonly PropertyDecl[]): InputFieldRef[][] {
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    const seen = parent.get(x);
+    if (seen === undefined || seen === x) {
+      parent.set(x, x);
+      return x;
+    }
+    const root = find(seen);
+    parent.set(x, root);
+    return root;
+  };
+  const union = (a: string, b: string): void => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  };
+
+  /** Only a bare `get` participates; an arithmetic operand is not an alias. */
+  const pathOf = (expr: PropertyExpr): string | undefined =>
+    typeof expr === "object" && expr !== null && "get" in expr ? expr.get : undefined;
+
+  const requiredEqs = (expr: PropertyExpr): void => {
+    if (typeof expr !== "object" || expr === null) return;
+    if ("and" in expr) {
+      for (const operand of expr.and) requiredEqs(operand);
+      return;
+    }
+    if ("eq" in expr) {
+      const a = pathOf(expr.eq[0]);
+      const b = pathOf(expr.eq[1]);
+      if (a !== undefined && b !== undefined) union(a, b);
+    }
+    // Everything else — or, not, implies, comparisons, arithmetic — is not an
+    // unconditional equality and is deliberately not descended into.
+  };
+
+  for (const property of properties) requiredEqs(property.expr);
+
+  const classes = new Map<string, Set<string>>();
+  for (const path of parent.keys()) {
+    const root = find(path);
+    const members = classes.get(root) ?? new Set<string>();
+    members.add(path);
+    classes.set(root, members);
+  }
+
+  const groups: InputFieldRef[][] = [];
+  for (const members of classes.values()) {
+    const refs: InputFieldRef[] = [];
+    for (const path of members) {
+      // `input.<Edge>.<field>` exactly — an allOf bag is one level deep, and a
+      // bare `input.<field>` is a single input with nothing to correlate against.
+      const segments = path.split(".");
+      if (segments.length === 3 && segments[0] === "input") {
+        refs.push({ edge: segments[1]!, field: segments[2]! });
+      }
+    }
+    const edges = new Set(refs.map((r) => r.edge));
+    if (edges.size > 1) groups.push(refs);
+  }
+  return groups;
+}

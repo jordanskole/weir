@@ -8,6 +8,7 @@
 
 import { INTEGER_RANGES } from "./define.js";
 import { isIntegerType } from "./types.js";
+import type { InputFieldRef } from "./property.js";
 import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ScalarType } from "./types.js";
 
 export type Rng = () => number;
@@ -226,7 +227,45 @@ export function generatePayload(edge: AnyEdgeDef, rng: Rng, caseIndex: number): 
  * `allOf` generates a bag keyed by edge name per case, matching
  * InputPayload's own allOf shape (types.ts).
  */
-export function generateInputCases(input: InputSpec, seed: number, count: number): unknown[] {
+/**
+ * Makes an `allOf` bag's correlated fields agree, in place.
+ *
+ * The first edge in each group supplies the value and the rest take it, so the
+ * generated value is still the generator's — this unifies, it does not invent.
+ * A group naming an edge not in this bag, or a field the edge does not carry, is
+ * skipped rather than erroring: the groups come from property paths, and a path
+ * that does not resolve is a declaration bug for `weir check` to report, not
+ * something to crash generation over.
+ */
+function correlate(bag: Record<string, unknown>, groups: readonly InputFieldRef[][]): void {
+  for (const group of groups) {
+    const source = group.find((ref) => {
+      const payload = bag[ref.edge];
+      return payload !== null && typeof payload === "object" && ref.field in (payload as object);
+    });
+    if (source === undefined) continue;
+    const value = (bag[source.edge] as Record<string, unknown>)[source.field];
+    for (const ref of group) {
+      const payload = bag[ref.edge];
+      if (payload === null || typeof payload !== "object") continue;
+      if (!(ref.field in (payload as object))) continue;
+      (payload as Record<string, unknown>)[ref.field] = value;
+    }
+  }
+}
+
+/**
+ * `correlate` carries the fields a node's properties require to agree across an
+ * `allOf` bag — see `correlatedInputFields`. Optional and defaulting to none, so
+ * every existing caller is unchanged; `fuzzNode` is the one that derives and
+ * passes it, which is what puts it in front of the acceptance gate.
+ */
+export function generateInputCases(
+  input: InputSpec,
+  seed: number,
+  count: number,
+  correlations: readonly InputFieldRef[][] = [],
+): unknown[] {
   const rng = createRng(seed);
   const cases: unknown[] = [];
   for (let i = 0; i < count; i++) {
@@ -250,6 +289,9 @@ export function generateInputCases(input: InputSpec, seed: number, count: number
       for (const edge of input.edges) {
         bag[edge.name] = generatePayload(edge, rng, i);
       }
+      // Independent per edge, then unified — so a bag the runtime's
+      // nearest-common-ancestor join could never deliver is not generated.
+      correlate(bag, correlations);
       cases.push(bag);
     }
   }

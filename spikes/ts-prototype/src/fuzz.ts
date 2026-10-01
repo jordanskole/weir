@@ -20,7 +20,7 @@
 import { generateInputCases } from "./generate.js";
 import { invokeWithInput } from "./invoke.js";
 import { assertPayload, assertOutput, assertManyOutput } from "./membrane.js";
-import { checkProperty, PropertyPathError } from "./property.js";
+import { checkProperty, PropertyPathError , correlatedInputFields } from "./property.js";
 import { looksLikeFailed } from "./runtime.js";
 import type { AnyEdgeDef, InputSpec, NodeDef, OutputSpec } from "./types.js";
 
@@ -168,7 +168,14 @@ export async function fuzzNode(
 
   const seed = opts?.seed ?? DEFAULT_SEED;
   const count = opts?.count ?? DEFAULT_COUNT;
-  const cases = generateInputCases(nodeDef.input, seed, count);
+  /**
+   * The fields this node's properties require to agree across an `allOf` bag.
+   * Derived from the declarations rather than declared separately — a property
+   * saying each input's `revision_id` equals the output's already says the two
+   * inputs' must match (docs/open-questions/allof-generation-ignores-lineage.md).
+   */
+  const correlations = correlatedInputFields(nodeDef.properties ?? []);
+  const cases = generateInputCases(nodeDef.input, seed, count, correlations);
 
   const failures: FuzzReport["failures"] = [];
   const propertyFailures: FuzzReport["propertyFailures"] = [];

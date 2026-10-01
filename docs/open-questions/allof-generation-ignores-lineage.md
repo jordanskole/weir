@@ -1,8 +1,8 @@
 # `allOf` generation produces bags the runtime could never deliver
 
-Status: open.
-Last grounded: 2026-10-01 — `generate.ts:208` generates each edge in an `allOf`
-bag independently; confirmed against `resolveIdentity`.
+Status: resolved (2026-10-01 — the correlation is derived from the declared
+properties, no new declaration key).
+Last grounded: 2026-10-01.
 
 ## The observation
 
@@ -40,29 +40,73 @@ generator produces.
 This is the mirror of the `gather … until` finding: a rule that is correct for one
 shape, applied to a shape it was not derived from.
 
-## The hard part
+## RESOLVED: the declaration already said it, in the property
 
-Knowing *which* fields a join would have made equal. Candidates, none settled:
+The four candidate mechanisms below were all weighed and none was built, because a
+fifth was available that none of them is: **read it out of the properties.**
 
-- **Correlate by shared field name and type**, across edges in the bag. Cheap and
-  wrong in general — two edges can legitimately carry different `pin`s.
-- **Correlate by common ancestry in the declarations.** The wiring says which edge
-  both inputs descend from; fields traceable to that ancestor are the ones that
-  must agree. Principled, and needs a notion of field provenance through a node
-  that weir does not currently have — a node body is opaque, so nothing knows
-  that `NormalizedParcel.pin` came from `ParcelRequest.pin`.
-- **Let the declaration say so**, e.g. a `correlate: [pin]` key on the `allOf`
-  input. Honest about the fact that only the author knows, and it is one more
-  declaration key with the four-site write/read problem this project keeps
-  hitting.
-- **Generate the bag by running the graph** rather than synthesizing it — generate
-  one root payload and traverse. Most faithful by construction, since it produces
-  only bags the runtime can produce; costs the gate its independence from
-  implementations of the upstream nodes, which may not exist yet.
+`verdict`'s property, in full:
 
-The last one is interesting precisely because it inverts the current design: the
-gate generates inputs *to* a node, when the invariant it needs is a property of
-the path that reaches the node.
+```yaml
+and:
+  - eq: [get output.revision_id, get input.StyleReport.revision_id]
+  - eq: [get output.revision_id, get input.FactReport.revision_id]
+```
+
+Transitively that requires `input.StyleReport.revision_id ==
+input.FactReport.revision_id`. `resolveIdentity`'s property has the identical shape
+on `pin`. Neither compares its two inputs *directly* — both go through the output —
+so the derivation has to be transitive, which is why `correlatedInputFields`
+(property.ts) unions the operand paths into equivalence classes rather than pairing
+them. Classes containing `input.<Edge>.<field>` members from more than one edge are
+the correlated groups, and `generateInputCases` unifies them after building the bag.
+
+Nothing new is declared. The two real instances were both already stating the
+constraint; it only had to be read.
+
+### The load-bearing subtlety
+
+Only an `eq` the property **unconditionally requires** implies a correlation, so the
+walk descends through `and` and stops everywhere else. An `eq` under `not` is
+required to be *false*; under `or` it may be either; as an `implies` antecedent it is
+a guard rather than a requirement. Correlating on those would make the generator
+unify fields a property deliberately lets differ — and the break-proof for it is in
+`property.test.ts`: recursing into every operand reddens the three cases that assert
+it does not.
+
+An operand that is not a bare `get` is also not an alias: `output.age == input.A.age
++ 1` says nothing about `input.B.age`.
+
+### What it fixed
+
+| node | before | after |
+|---|---|---|
+| `resolveIdentity` (blue-ribbon-slice) | `vacuous` | **accepted** |
+| `verdict` (manuscript-review) | `vacuous` | **accepted** |
+
+On `verdict`, 0 of 50 generated bags had matching `revision_id`s before and 50 of 50
+after.
+
+### Why not the four below
+
+- *Shared field name and type* — wrong in general, and the test for it is in
+  `fuzz.test.ts`: a node with no property gets no correlation, because two edges may
+  legitimately carry different values under one name.
+- *Common ancestry in the declarations* — still the most principled answer, and
+  still needs a notion of field provenance through an opaque node body that weir
+  does not have.
+- *A `correlate:` key* — one more declaration key with the four-site write/read
+  problem this repo keeps hitting, to say something already said.
+- *Generate by running the graph* — the most faithful, and it costs the gate its
+  independence from implementations that may not exist yet.
+
+### What stays open
+
+The derivation only sees what a property states. A node whose inputs must agree but
+which declares no property saying so still gets uncorrelated bags — correctly, since
+nothing declared says otherwise, but it means **the fix is only as good as the
+properties**. A node with a correctness guard and no property is still
+unimplementable-as-gated, and nothing warns about that.
 
 Related: [properties over collections](properties-over-collections.md) asks the
 same question one shape up.

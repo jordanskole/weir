@@ -1,6 +1,6 @@
 import type { PropertyDecl } from "./types.js";
 import { describe, expect, it } from "vitest";
-import { checkProperty, evaluateProperty, PropertyPathError , assertFalsifiable } from "./property.js";
+import { checkProperty, evaluateProperty, PropertyPathError , assertFalsifiable , correlatedInputFields } from "./property.js";
 import type { PropertyDecl, PropertyExpr } from "./types.js";
 
 const scope = {
@@ -322,5 +322,107 @@ describe("assertFalsifiable", () => {
     ]) {
       expect(() => assertFalsifiable(prop(expr)), JSON.stringify(expr)).not.toThrow();
     }
+  });
+});
+
+/**
+ * `correlatedInputFields` — reading, from the declared properties, which fields
+ * an `allOf` bag must hold equal.
+ *
+ * The generator built each edge of a bag independently, so it manufactured bags
+ * the runtime cannot deliver: `allOf` inputs join by nearest common ancestor, so
+ * they share whatever their common ancestor gave them. Two nodes were
+ * unimplementable because of it — blue-ribbon's `resolveIdentity` on `pin` and
+ * manuscript-review's `verdict` on `revision_id` — and both declarations already
+ * said the fields must agree, in their properties.
+ */
+describe("correlatedInputFields", () => {
+  const prop = (name: string, expr: unknown): PropertyDecl => ({ name, expr } as PropertyDecl);
+
+  /** `verdict`'s real shape: neither input is compared to the other directly. */
+  const throughOutput = prop("note names the revision its reports were about", {
+    and: [
+      { eq: [{ get: "output.revision_id" }, { get: "input.StyleReport.revision_id" }] },
+      { eq: [{ get: "output.revision_id" }, { get: "input.FactReport.revision_id" }] },
+    ],
+  });
+
+  /**
+   * BREAK-PROOF: removing the union-find's transitivity (comparing only paths
+   * that appear in the same `eq`) reddens this — which is the whole point, since
+   * no real property compares the two inputs directly.
+   */
+  it("derives a correlation that only holds transitively, through the output", () => {
+    const groups = correlatedInputFields([throughOutput]);
+    expect(groups).toHaveLength(1);
+    expect(new Set(groups[0]!.map((r) => `${r.edge}.${r.field}`))).toEqual(
+      new Set(["StyleReport.revision_id", "FactReport.revision_id"]),
+    );
+  });
+
+  /**
+   * The correctness subtlety, and the reason the walk descends through `and`
+   * only. An `eq` under `not` is required to be FALSE; under `or` it may be
+   * either; as an `implies` antecedent it is a guard. Correlating on those would
+   * make the generator unify fields a property deliberately lets differ.
+   *
+   * BREAK-PROOF: making `requiredEqs` recurse into every operand reddens all
+   * three cases here.
+   */
+  it("ignores an eq that the property does not unconditionally require", () => {
+    const inner = { eq: [{ get: "input.A.id" }, { get: "input.B.id" }] };
+    for (const [label, expr] of [
+      ["not", { not: inner }],
+      ["or", { or: [inner, { lit: true }] }],
+      ["implies antecedent", { implies: [inner, { lit: true }] }],
+    ] as [string, unknown][]) {
+      expect(correlatedInputFields([prop(label, expr)]), label).toEqual([]);
+    }
+  });
+
+  it("still derives through nested and", () => {
+    const groups = correlatedInputFields([
+      prop("nested", {
+        and: [
+          { gt: [{ get: "output.n" }, { lit: 0 }] },
+          { and: [{ eq: [{ get: "input.A.id" }, { get: "input.B.id" }] }] },
+        ],
+      }),
+    ]);
+    expect(groups).toHaveLength(1);
+  });
+
+  it("ignores an operand that is not a bare path, so arithmetic is not an alias", () => {
+    // output.age == input.A.age + 1 says nothing about input.B.
+    const groups = correlatedInputFields([
+      prop("increments", {
+        and: [
+          { eq: [{ get: "output.age" }, { add: [{ get: "input.A.age" }, { lit: 1 }] }] },
+          { eq: [{ get: "output.age" }, { get: "input.B.age" }] },
+        ],
+      }),
+    ]);
+    expect(groups).toEqual([]);
+  });
+
+  it("produces nothing for a single input, which has nothing to correlate against", () => {
+    expect(
+      correlatedInputFields([prop("p", { eq: [{ get: "output.pin" }, { get: "input.pin" }] })]),
+    ).toEqual([]);
+  });
+
+  it("produces nothing when both paths are on the same edge", () => {
+    expect(
+      correlatedInputFields([prop("p", { eq: [{ get: "input.A.x" }, { get: "input.A.y" }] })]),
+    ).toEqual([]);
+  });
+
+  it("unions across separate properties, not only within one", () => {
+    const groups = correlatedInputFields([
+      prop("one", { eq: [{ get: "output.id" }, { get: "input.A.id" }] }),
+      prop("two", { eq: [{ get: "output.id" }, { get: "input.B.id" }] }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(2);
   });
 });

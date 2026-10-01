@@ -18,11 +18,10 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-## Open (29)
+## Open (28)
 
 Live. Ordered alphabetically, not by priority.
 
-- [`allOf` generation produces bags the runtime could never deliver](open-questions/allof-generation-ignores-lineage.md)
 - [An origin node can never iterate](open-questions/an-origin-node-can-never-iterate.md)
 - [Can a closure carry a formula, or only a value?](open-questions/can-a-closure-carry-a-formula.md)
 - [Cardinality is invisible to a static crossing query](open-questions/cardinality-is-invisible.md)
@@ -58,10 +57,11 @@ Cannot be built as stated — the reason is in the file.
 
 - [Positional identity: `birthday.then.birthday` should run twice](open-questions/positional-identity.md) — **blocked** — two shipped things use the same syntax with opposite
 
-## Resolved (21)
+## Resolved (22)
 
 Kept because the reasoning is worth more than the answer, and because several specs and code comments cite them.
 
+- [`allOf` generation produces bags the runtime could never deliver](open-questions/allof-generation-ignores-lineage.md) — resolved (2026-10-01 — derived from the declared properties)
 - [The idiomatic way to branch makes every such run red](open-questions/branching-makes-every-run-red.md) — resolved (2026-09-29)
 - [No way to say "these N things vary only in configuration"](open-questions/configuration-versus-ontology.md) — resolved (2026-09-29) for the configuration half. The arithmetic half is open by design
 - [Drift at a boundary, and forking a run to act on it](open-questions/drift-and-fork.md) — resolved (2026-09-29). Two sub-questions inside it stay open

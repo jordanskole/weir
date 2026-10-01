@@ -418,3 +418,109 @@ describe("fuzzNode — integration seams for property paths (Finding 10)", () =>
     expect(report.realOutputs).toBe(10);
   });
 });
+
+/**
+ * The generator must not manufacture an `allOf` bag the runtime cannot deliver.
+ * Joins form by nearest common ancestor, so the instances in a bag share what
+ * their common ancestor gave them; building each edge independently produced bags
+ * whose shared identifier differed, which no runtime firing can produce.
+ */
+describe("fuzzNode — allOf bags are correlated from the declared properties", () => {
+  const Report = defineEdge({
+    name: "Report",
+    label: "Report",
+    description: "One check's result",
+    fields: {
+      // minLength matters here: with no bound, the generator's first boundary case
+      // is length 0 for BOTH edges, and two empty strings match by coincidence —
+      // which made the uncorrelated control below report 1 real output instead of 0.
+      revision_id: defineField({
+        type: "utf8", label: "Revision", description: "d", nullable: false,
+        validations: { minLength: 4, maxLength: 12 },
+      }),
+      note: defineField({ type: "utf8", label: "Note", description: "d", nullable: false }),
+    },
+  });
+  const Other = defineEdge({
+    name: "Other",
+    label: "Other",
+    description: "The other check's result",
+    fields: {
+      revision_id: defineField({
+        type: "utf8", label: "Revision", description: "d", nullable: false,
+        validations: { minLength: 4, maxLength: 12 },
+      }),
+      note: defineField({ type: "utf8", label: "Note", description: "d", nullable: false }),
+    },
+  });
+  const Joined = defineEdge({
+    name: "Joined",
+    label: "Joined",
+    description: "Both",
+    fields: {
+      revision_id: defineField({
+        type: "utf8", label: "Revision", description: "d", nullable: false,
+        validations: { minLength: 4, maxLength: 12 },
+      }),
+    },
+  });
+
+  /** The real shape: neither input is compared to the other directly. */
+  const namesItsRevision = {
+    name: "the output names the revision its inputs were about",
+    expr: {
+      and: [
+        { eq: [{ get: "output.revision_id" }, { get: "input.Report.revision_id" }] },
+        { eq: [{ get: "output.revision_id" }, { get: "input.Other.revision_id" }] },
+      ],
+    },
+  } as const;
+
+  /**
+   * BREAK-PROOF: dropping the `correlate(bag, correlations)` call in
+   * generateInputCases reddens this with 20 declines and realOutputs 0 — which is
+   * precisely the `vacuous` verdict that made two real nodes unimplementable.
+   */
+  it("produces bags a correctness guard can accept, instead of only mismatched ones", async () => {
+    const join = defineNode({
+      name: "join",
+      input: { kind: "allOf", edges: [Report, Other] },
+      output: single(Joined),
+      properties: [namesItsRevision],
+      fn: (bag: any) => {
+        if (bag.Report.revision_id !== bag.Other.revision_id) {
+          throw new Error("join: inputs are about different revisions");
+        }
+        return { revision_id: bag.Report.revision_id };
+      },
+    });
+
+    const report = await fuzzNode(join, { count: 20 });
+    expect(report.propertyFailures).toEqual([]);
+    expect(report.failures).toEqual([]);
+    expect(report.realOutputs).toBe(20);
+  });
+
+  /**
+   * The counterpart: a node with no property gets no correlation, because nothing
+   * declared says the fields agree. Guards against correlating by field name,
+   * which would be wrong in general — two edges may legitimately carry different
+   * values under one name.
+   */
+  it("does not correlate a bag when no property requires it", async () => {
+    const naive = defineNode({
+      name: "naive",
+      input: { kind: "allOf", edges: [Report, Other] },
+      output: single(Joined),
+      fn: (bag: any) => {
+        if (bag.Report.revision_id !== bag.Other.revision_id) {
+          throw new Error("naive: inputs are about different revisions");
+        }
+        return { revision_id: bag.Report.revision_id };
+      },
+    });
+
+    const report = await fuzzNode(naive, { count: 20 });
+    expect(report.realOutputs).toBe(0);
+  });
+});
