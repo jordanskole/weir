@@ -26,8 +26,11 @@ routeCounty --oneOf--> directCountyFetch  [zone: county-gis] -----+
                                                    +--> resolveIdentity
 ```
 
-**Diagram:** [trust boundaries, from declarations alone](../../docs/diagrams/blue-ribbon-trust-boundaries.html)
-— the four zones, the six network hops, and what `weir sys` says each one carries.
+**Diagrams.** [The program, as weir sees it](../../docs/diagrams/blue-ribbon-topologies.html) — one
+figure per topology, rectangles for nodes and ellipses for edges, because the execution model is a
+Petri net and those are its transitions and places. And
+[trust boundaries](../../docs/diagrams/blue-ribbon-trust-boundaries.html) — the same program read as
+four parties and six network hops, with what `weir sys` says each hop carries.
 
 ## It runs
 
