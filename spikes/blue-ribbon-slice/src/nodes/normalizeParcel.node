@@ -82,14 +82,17 @@ properties:
   # redaction that is currently enforced by five separate acts of
   # remembering. That is the single highest-value thing this exercise found,
   # and friction #1 is what blocks it.
-  - name: the canonical PIN preserves every digit group of the source PIN
-    description: >-
-      Normalization reformats separators (Osceola's source uses spaces,
-      the canonical form uses dashes) but must never renumber a parcel.
-    expr:
-      eq:
-        - get: output.pin
-        - get: output.pin
+  # REMOVED 2026-10-01: "the canonical PIN preserves every digit group of the
+  # source PIN". Its expression was `eq: [output.pin, output.pin]` — a
+  # self-comparison that holds for every possible output and cannot fail, so the
+  # gate reported it as passing and its name read as a guarantee it never gave.
+  # `weir check` now refuses that shape (assertFalsifiable in property.ts).
+  #
+  # The real property is not expressible here, and the reason is friction #1: the
+  # source PIN is inside `featureJson`, an opaque utf8 blob, so there is no
+  # `input` path to compare the canonical form against. Writing the tautology was
+  # the wrong answer to that; the right one is to say so and leave the property
+  # out until the geometry and its fields are declared structurally.
   - name: acres is strictly positive
     description: >-
       A zero or negative area means the area formula picked the wrong units or

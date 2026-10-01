@@ -18,6 +18,7 @@
 import { glob, readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { parse } from "yaml";
+import { assertFalsifiable } from "./property.js";
 import { defineEdge, defineField } from "./define.js";
 import { assertDeclaration } from "./schema.js";
 import { failedEdgeName, failedAllOfEdgeName, failedGatherEdgeName, gatherKey, inputEdgeNames } from "./types.js";
@@ -1509,9 +1510,24 @@ function inFile<T>(file: string, run: () => T): T {
   }
 }
 
+/**
+ * Directories a declaration glob must never descend into.
+ *
+ * `.node` is weir's node-declaration extension *and* Node.js's native-addon
+ * extension, so a recursive `.node` glob over a root containing `node_modules` picks up
+ * binaries: scaffolding into a declaration root produced
+ * `Duplicate node name "fsevents"` from
+ * `scaffold/resolveIdentity/node_modules/fsevents/fsevents.node`. Any weir
+ * project with an npm dependency hits this, so the exclusion belongs here rather
+ * than in whatever wrote the files.
+ */
+const NOT_DECLARATIONS = (path: string): boolean =>
+  path.split("/").some((segment) => segment === "node_modules" || segment === "dist" || segment.startsWith("."));
+
 export async function elaborate(root: string): Promise<Elaborated> {
   const fields: Record<string, FieldDef> = {};
   for await (const file of glob("**/*.field", { cwd: root })) {
+    if (NOT_DECLARATIONS(file)) continue;
     const name = basename(file, ".field");
     if (name in fields) {
       throw new Error(`Duplicate field name "${name}" (also declared in "${file}").`);
@@ -1522,6 +1538,7 @@ export async function elaborate(root: string): Promise<Elaborated> {
 
   const rawEdgeTextByName = new Map<string, { text: string; file: string }>();
   for await (const file of glob("**/*.edge", { cwd: root })) {
+    if (NOT_DECLARATIONS(file)) continue;
     const name = basename(file, ".edge");
     if (rawEdgeTextByName.has(name)) {
       throw new Error(`Duplicate edge name "${name}" (already declared elsewhere).`);
@@ -1531,6 +1548,7 @@ export async function elaborate(root: string): Promise<Elaborated> {
 
   const rawEnvelopeTextByName = new Map<string, { text: string; file: string }>();
   for await (const file of glob("**/*.envelope", { cwd: root })) {
+    if (NOT_DECLARATIONS(file)) continue;
     const name = basename(file, ".envelope");
     if (rawEnvelopeTextByName.has(name) || rawEdgeTextByName.has(name)) {
       throw new Error(`Duplicate declaration name "${name}" (already declared as an edge or envelope).`);
@@ -1574,6 +1592,7 @@ export async function elaborate(root: string): Promise<Elaborated> {
 
   const nodeTextByName = new Map<string, { text: string; file: string }>();
   for await (const file of glob("**/*.node", { cwd: root })) {
+    if (NOT_DECLARATIONS(file)) continue;
     const name = basename(file, ".node");
     if (nodeTextByName.has(name)) {
       throw new Error(`Duplicate node name "${name}" (also declared in "${file}").`);
@@ -1675,6 +1694,7 @@ export async function elaborate(root: string): Promise<Elaborated> {
   const compositeNames = new Set<string>();
   const topologyFiles: { file: string; text: string }[] = [];
   for await (const file of glob("**/*.topology", { cwd: root })) {
+    if (NOT_DECLARATIONS(file)) continue;
     const text = await readFile(`${root}/${file}`, "utf8");
     // Every `.topology` is a named, contracted topology now, so every name is
     // referenceable — which is what makes "entry" derivable from reference
@@ -1748,6 +1768,24 @@ export async function elaborate(root: string): Promise<Elaborated> {
   }));
   assertTopologyContracts(nodes, expanded.map((e) => ({ kind: "Topology", ...e })));
   assertTriggerCoverage(nodes, wiring, expanded);
+
+  /**
+   * Every declared property can actually fail. A self-comparing `eq` holds for
+   * every input, so the gate reports it as passing and its name is read as a
+   * guarantee it does not provide — found three times in one slice
+   * (docs/superpowers/specs/2026-10-01-the-deterministic-scaffold.md).
+   *
+   * Here rather than in the acceptance gate, because it is a defect in the
+   * declaration and `weir check` is where declaration defects are reported. The
+   * gate would only ever report it as a pass.
+   */
+  for (const node of Object.values(nodes)) {
+    for (const property of node.properties ?? []) {
+      inFile(nodeTextByName.get(node.name)?.file ?? `${node.name}.node`, () => {
+        assertFalsifiable(property);
+      });
+    }
+  }
 
   assertWiringTypes(nodes, wiring, anyOfAliases);
 

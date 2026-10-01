@@ -1,8 +1,8 @@
 # Should `weir check` report output fields no property constrains?
 
 Status: open.
-Last grounded: 2026-10-01 — raised by `parcelCentroid`, whose only property never
-reads either of the two fields the node exists to compute.
+Last grounded: 2026-10-01 — raised by `parcelCentroid`; sharpened the same day by
+two tautologies the proposed check would have missed.
 
 ## The observation
 
@@ -63,3 +63,26 @@ ignore it.
   output (`property "the centroid lies within the boundary's bounding box" did
   not hold`) reads as though the named check ran. No mechanism suggests itself
   that does not amount to checking prose against code.
+
+## 2026-10-01: coverage would have missed the worse instances
+
+Rendering the slice's properties as source turned up two **tautologies** —
+`eq: [output.provenance, output.provenance]` and `eq: [output.pin, output.pin]` —
+which hold for every possible output and cannot fail.
+
+**The coverage check proposed above would have reported both as covered**, because
+`output.provenance` and `output.pin` are mentioned. So coverage is a weaker signal
+than it looked: it detects a field no property *names*, not a field no property
+*constrains*, and the gap between those is where both real defects lived.
+
+What did catch them is narrower and decidable in one comparison: an `eq`/`ne` whose
+two operands are syntactically identical. That is now refused at elaboration
+(`assertFalsifiable` in `property.ts`), and it is a different check from this one
+rather than a replacement — a property can be non-tautological and still constrain
+nothing the name implies, which is `parcelCentroid`'s case and still open.
+
+A third candidate, between the two in strength: **a property that reads no
+`input.*` path at all** cannot relate output to input. Both tautologies and
+`parcelCentroid`'s PIN check would be flagged — but so would `acres is strictly
+positive`, which is a legitimate output-only invariant. So it is a warning at best,
+and it needs a way to say "this one really is output-only."

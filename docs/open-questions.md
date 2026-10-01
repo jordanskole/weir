@@ -18,7 +18,7 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-## Open (28)
+## Open (29)
 
 Live. Ordered alphabetically, not by priority.
 
@@ -39,6 +39,7 @@ Live. Ordered alphabetically, not by priority.
 - [Classification says what may not go out; nothing says what may not be trusted coming in](open-questions/integrity-inbound.md)
 - [A collection is keyed, and streamed data is ordered](open-questions/keyed-versus-ordered-collections.md)
 - [The membrane bounds behaviour, not control — `fn` is still directly reachable](open-questions/membrane-bounds-behaviour-not-control.md)
+- [The expression language has no ordering over `enumValues`](open-questions/no-ordering-over-enum-values.md)
 - [Nodes as compiled, distributable units](open-questions/nodes-as-distributable-units.md)
 - [A property cannot quantify over a gathered collection](open-questions/properties-over-collections.md)
 - [Should `weir check` report output fields no property constrains?](open-questions/property-coverage-over-output-fields.md)

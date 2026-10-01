@@ -336,3 +336,81 @@ is precisely this emitter's reason to exist, and it caught my test.
 - **Scaffolding a whole topology** rather than one node at a time.
 - **Feeding the gate from the scaffold**, so `weir accept` could take a scaffold
   directory instead of a single source file.
+
+## Running it on blue-ribbon, which is where it earned its keep
+
+Scaffolded all four pure nodes into `spikes/blue-ribbon-slice/scaffold/`. The loop
+works: `npm install`, `npm test` reports both examples as
+`threw: routeCounty: not implemented`, drop in the drafted implementation, green.
+
+Then reading the generated `check.ts` files found three things, none of which was
+visible in the declarations or in the sealed contract.
+
+### Two of the slice's six properties were tautologies
+
+```ts
+name: "combined provenance is never stronger than either input",
+holds: (input, output) => same(read("output.provenance"), read("output.provenance")),
+```
+
+```ts
+name: "the canonical PIN preserves every digit group of the source PIN",
+holds: (input, output) => same(read("output.pin"), read("output.pin")),
+```
+
+Both compare a value with itself, so both hold for **every** possible output.
+Demonstrated on the first: with both inputs at `listing claim` (the weakest
+provenance) and the output claiming `verified` (the strongest), it returned `true`,
+as it does for every value of the enum. The single property guarding this
+pipeline's provenance lattice could not fail, and the acceptance gate reported it
+as passing.
+
+Tallying the slice: `routeCounty`'s is real (after this morning's path fix),
+`normalizeParcel`'s `acres > 0` is real, `resolveIdentity`'s cross-parcel check is
+real, two were tautologies, and `parcelCentroid`'s is a real check under a name
+describing a different one. **Half the properties did not do what their names
+said.**
+
+The cause is the same in every case and it is friction #1 again: the source PIN is
+inside the opaque `featureJson`, so there is no `input` path to compare the
+canonical form against, and the provenance lattice needs an ordering over
+`enumValues` that the evaluator does not have. In both cases the real property was
+inexpressible and a tautology looked like the least-bad option.
+
+**`weir check` now refuses the shape.** `assertFalsifiable` (property.ts) rejects an
+`eq`/`ne` whose operands are syntactically identical, recursing through
+`and`/`or`/`not`/`implies`. Deliberately narrow — it does not attempt to decide
+tautology in general — because this is the shape that actually occurred, twice, and
+it is decidable in one comparison. Both properties were removed from the slice with
+the reasoning recorded in the declarations, and
+[no ordering over enumValues](../../open-questions/no-ordering-over-enum-values.md)
+captures what would be needed to write the provenance one for real.
+
+Worth noting against the earlier proposal: **the property-coverage check would have
+missed both.** `output.provenance` and `output.pin` are mentioned, so coverage would
+have called them covered. Coverage detects a field no property *names*, not one no
+property *constrains*.
+
+### `elaborate` parsed a native binary as a node declaration
+
+Scaffolding into a declaration root and running `npm install` produced:
+
+```
+✗ ../blue-ribbon-slice
+  Duplicate node name "fsevents" (also declared in
+    "scaffold/resolveIdentity/node_modules/fsevents/fsevents.node").
+```
+
+`.node` is weir's node-declaration extension **and** Node.js's native-addon
+extension, so a recursive `.node` glob descends into `node_modules` and finds
+binaries. Any weir project with an npm dependency hits this, independently of
+scaffolding — so all five declaration globs now skip `node_modules`, `dist`, and
+dot-directories.
+
+### What it did not find
+
+The `vacuous` problem is untouched, as this spec said it would be. The scaffold
+makes the opaque field *visible* — `boundaryJson: z.string().min(2).max(2000000)`
+sits directly beneath `lng: z.number().min(-180).max(180)` — but an implementer
+still cannot discover that the generator fills it with `"9r"` without submitting.
+That is the generated-input fixture under "Still unbuilt".

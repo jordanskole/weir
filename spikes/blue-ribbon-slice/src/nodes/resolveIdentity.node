@@ -102,26 +102,24 @@ properties:
         - eq:
             - get: output.pin
             - get: input.TownshipLookup.pin
-  - name: combined provenance is never stronger than either input
-    description: >-
-      The lattice meet, asserted. This is the property blue-ribbon's
-      combineProvenance has a unit test for; here it is a contract obligation
-      on every implementation instead.
-
-      CORRECTED 2026-09-29. I wrote that "the property language has
-      eq/gt/and/not over paths and literals" and built friction #12 on it.
-      That was inferred from an Ajv error message, not from documentation,
-      and it understates the language. The real operator set is `lit` `get`
-      `eq` `ne` `lt` `lte` `gt` `gte` `add` `sub` `and` `or` `not` `implies`
-      -- readme.md now documents it.
-
-      So `lte` and `implies` both exist, and the gap is narrower than I
-      claimed: it is ONLY that there is no ordering over `enumValues`. Rank
-      the provenance enum as an ordinal and this property becomes a one-line
-      `lte`. What I want is an `ordinal: true` on an enumValues field, not a
-      general escape hatch into arbitrary functions -- which would break the
-      decidable-and-hashable property the current set is designed around.
-    expr:
-      eq:
-        - get: output.provenance
-        - get: output.provenance
+  # REMOVED 2026-10-01: "combined provenance is never stronger than either
+  # input". Its expression was `eq: [output.provenance, output.provenance]` — a
+  # self-comparison holding for every possible output. Demonstrated: with BOTH
+  # inputs at "listing claim" (weakest) and the output claiming "verified"
+  # (strongest), it returned true. The one property guarding the provenance
+  # lattice could not fail, which is the worst place in this pipeline for a
+  # property that cannot fail. `weir check` now refuses the shape.
+  #
+  # The note that was here argued the gap is "ONLY that there is no ordering over
+  # enumValues", and that `ordinal: true` plus a one-line `lte` would fix it.
+  # Half right. `ordinal?: boolean` does exist on a field, but `evaluateProperty`
+  # compares the resolved values directly, so `lte` on these strings is
+  # lexicographic:
+  #
+  #   lattice order : listing claim < aggregator < inferred < verified
+  #   string order  : aggregator < inferred < listing claim < verified
+  #
+  # Different orders, so `lte` would assert the wrong thing rather than nothing.
+  # The gap is in the expression *evaluator*, which has no notion of an ordinal
+  # enum's rank — see docs/open-questions/no-ordering-over-enum-values.md. Left
+  # out until that exists, rather than asserted falsely.

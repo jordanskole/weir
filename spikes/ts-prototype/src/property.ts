@@ -228,3 +228,69 @@ export function checkProperty(property: PropertyDecl, scope: PropertyScope): boo
   }
   return result;
 }
+
+/**
+ * Structural equality of two expressions, for the falsifiability check below.
+ * JSON order-insensitivity is not needed: both operands come from the same
+ * parser, so identical expressions serialize identically.
+ */
+function sameExpr(a: PropertyExpr, b: PropertyExpr): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * Refuses a property that cannot fail (or cannot pass) because an `eq`/`ne`
+ * compares an expression with itself.
+ *
+ * Found by rendering the blue-ribbon slice's properties as source
+ * (docs/superpowers/specs/2026-10-01-the-deterministic-scaffold.md): two of its
+ * six were self-comparisons —
+ *
+ *   "combined provenance is never stronger than either input"
+ *      eq: [get output.provenance, get output.provenance]
+ *   "the canonical PIN preserves every digit group of the source PIN"
+ *      eq: [get output.pin, get output.pin]
+ *
+ * Both hold for every possible output, including one that claims the strongest
+ * provenance in the lattice while both inputs carry the weakest. A property that
+ * cannot fail is worse than no property, because the gate reports it as passing
+ * and the name is read as a guarantee.
+ *
+ * Why it happens, and why refusing is the right answer rather than a nuisance:
+ * in both cases the real property was inexpressible — the source PIN is inside an
+ * opaque JSON string so there is no `input` path to compare against, and the
+ * provenance lattice needs an ordering over `enumValues` that does not exist. The
+ * author wrote a tautology rather than omit the property. Refusing it turns a
+ * silent false green into a `weir check` failure that says which property, and
+ * leaves the author to either express it or drop it.
+ *
+ * Deliberately narrow: only syntactically identical `eq`/`ne` operands. It does
+ * not attempt to decide tautology in general, which is not the point — this is
+ * the shape that actually occurred, three times, and it is decidable in one
+ * comparison.
+ */
+export function assertFalsifiable(property: PropertyDecl): void {
+  const expr = property.expr;
+  const walk = (node: PropertyExpr): void => {
+    if (typeof node !== "object" || node === null) return;
+
+    if ("eq" in node && sameExpr(node.eq[0], node.eq[1])) {
+      throw new Error(
+        `property "${property.name}": \`eq\` compares an expression with itself, so it holds for every ` +
+          `input and cannot fail. If the property you want is not expressible, drop it rather than ` +
+          `asserting a tautology the gate will report as passing.`,
+      );
+    }
+    if ("ne" in node && sameExpr(node.ne[0], node.ne[1])) {
+      throw new Error(
+        `property "${property.name}": \`ne\` compares an expression with itself, so it never holds.`,
+      );
+    }
+
+    for (const value of Object.values(node as Record<string, unknown>)) {
+      if (Array.isArray(value)) value.forEach((v) => walk(v as PropertyExpr));
+      else if (typeof value === "object" && value !== null) walk(value as PropertyExpr);
+    }
+  };
+  walk(expr);
+}

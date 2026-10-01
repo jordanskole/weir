@@ -1,5 +1,6 @@
+import type { PropertyDecl } from "./types.js";
 import { describe, expect, it } from "vitest";
-import { checkProperty, evaluateProperty, PropertyPathError } from "./property.js";
+import { checkProperty, evaluateProperty, PropertyPathError , assertFalsifiable } from "./property.js";
 import type { PropertyDecl, PropertyExpr } from "./types.js";
 
 const scope = {
@@ -254,5 +255,72 @@ describe("a fan-in property must relate the output to every input", () => {
     });
     expect(checkProperty(conjoined, crossed)).toBe(false);
     expect(checkProperty(conjoined, coherent)).toBe(true);
+  });
+});
+
+/**
+ * `assertFalsifiable` — refusing a property that cannot fail.
+ *
+ * Found by rendering the blue-ribbon slice's properties as source: two of its six
+ * were self-comparisons, including the only property guarding its provenance
+ * lattice. Both were reported as passing by the acceptance gate.
+ */
+describe("assertFalsifiable", () => {
+  const prop = (expr: unknown): PropertyDecl => ({ name: "p", expr } as PropertyDecl);
+
+  /**
+   * BREAK-PROOF: removing the `eq` branch reddens this. Removing the recursive
+   * `walk` over sub-expressions reddens only the nested case below, which is why
+   * that case is separate.
+   */
+  it("refuses an `eq` comparing an expression with itself", () => {
+    expect(() => assertFalsifiable(prop({ eq: [{ get: "output.pin" }, { get: "output.pin" }] }))).toThrow(
+      /compares an expression with itself/,
+    );
+    // The real instance, from resolveIdentity.
+    expect(() =>
+      assertFalsifiable(prop({ eq: [{ get: "output.provenance" }, { get: "output.provenance" }] })),
+    ).toThrow(/cannot fail/);
+    // Literals too, not only paths.
+    expect(() => assertFalsifiable(prop({ eq: [{ lit: 1 }, { lit: 1 }] }))).toThrow();
+  });
+
+  it("refuses an `ne` comparing an expression with itself, which never holds", () => {
+    expect(() => assertFalsifiable(prop({ ne: [{ get: "output.pin" }, { get: "output.pin" }] }))).toThrow(
+      /never holds/,
+    );
+  });
+
+  /** BREAK-PROOF: dropping the recursion in `walk` reddens this and nothing else. */
+  it("finds a self-comparison nested inside and/or/not/implies", () => {
+    const inner = { eq: [{ get: "output.pin" }, { get: "output.pin" }] };
+    for (const wrapped of [
+      { and: [{ gt: [{ get: "output.acres" }, { lit: 0 }] }, inner] },
+      { or: [inner, { lit: true }] },
+      { not: inner },
+      { implies: [{ lit: true }, inner] },
+    ]) {
+      expect(() => assertFalsifiable(prop(wrapped)), JSON.stringify(wrapped)).toThrow();
+    }
+  });
+
+  /**
+   * The properties that must keep working — the three real ones in the slice, and
+   * a comparison of two *different* paths that happen to share a field name.
+   */
+  it("accepts a property that can actually fail", () => {
+    for (const expr of [
+      { eq: [{ get: "output.payload.pin" }, { get: "input.pin" }] },
+      { gt: [{ get: "output.acres" }, { lit: 0 }] },
+      {
+        and: [
+          { eq: [{ get: "output.pin" }, { get: "input.NormalizedParcel.pin" }] },
+          { eq: [{ get: "output.pin" }, { get: "input.TownshipLookup.pin" }] },
+        ],
+      },
+      { eq: [{ get: "output.age" }, { add: [{ get: "input.age" }, { lit: 1 }] }] },
+    ]) {
+      expect(() => assertFalsifiable(prop(expr)), JSON.stringify(expr)).not.toThrow();
+    }
   });
 });

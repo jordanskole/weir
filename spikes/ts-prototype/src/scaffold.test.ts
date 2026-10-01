@@ -320,6 +320,10 @@ describe("scaffold — it covers the corpus", () => {
       }
     }
     expect(nodes).toBeGreaterThan(20);
-    expect(properties).toBeGreaterThan(10);
+    // 10 at the time of writing, down from 12: two of the blue-ribbon slice's
+    // properties were self-comparisons and were removed rather than asserted
+    // falsely (docs/open-questions/no-ordering-over-enum-values.md). A floor
+    // rather than an equality, so adding a property does not redden this.
+    expect(properties).toBeGreaterThanOrEqual(10);
   });
 });
