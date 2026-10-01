@@ -70,13 +70,14 @@
 
     <!-- ════════════════════════ 1. main ════════════════════════ -->
     <h2 class="fig">main.topology <span class="zone">· zone: server · ParcelRequest → ParcelIdentity</span></h2>
-    <p class="fig-note">The entry point. Three of its seven boxes are <em>other topologies</em>
-      referenced where a node would go — each inlined at elaboration, each running in a different
-      zone, drawn dashed. <code>routeCounty</code> is the only branch; <code>resolveIdentity</code>
+    <p class="fig-note">The entry point. Three of its nodes run somewhere else, and each sits inside a
+      <strong>zone</strong> — a dashed boundary around the node, not a box in place of it. Every
+      arrow crossing one of those boundaries is a network hop, which is exactly what
+      <code>weir sys</code> reports as a crossing. <code>routeCounty</code> is the only branch; <code>resolveIdentity</code>
       is the only fan-in, and it waits for two edges that are nine steps apart in lineage.</p>
 
     <div class="wide">
-      <svg viewBox="0 0 980 860" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="brp-main-title brp-main-desc">
+      <svg viewBox="0 0 980 960" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="brp-main-title brp-main-desc">
         <title id="brp-main-title">main.topology</title>
         <desc id="brp-main-desc">A parcel request enters routeCounty, which chooses between a direct county query and a proxied one. Each goes to its own referenced topology, both of which produce a raw parcel feature. That is normalized, and the normalized parcel both feeds a centroid calculation — which goes out to a state service for a township lookup — and waits at resolveIdentity to be joined with the township result, producing a parcel identity.</desc>
 
@@ -105,42 +106,70 @@
         <path d="M 365,156 V 170 Q 365,178 373,178 H 462 Q 470,178 470,186"
               fill="none" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#m-arrow-accent)"/>
 
-        <!-- queries ↓ their topologies -->
-        <line x1="210" y1="222" x2="210" y2="252" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
-        <line x1="470" y1="222" x2="470" y2="252" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#m-arrow-accent)"/>
+        <!-- queries ↓ into the zones, landing on the node inside each -->
+        <line x1="210" y1="222" x2="210" y2="272" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
+        <line x1="470" y1="222" x2="470" y2="272" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#m-arrow-accent)"/>
 
-        <!-- both topologies ↓ RawParcelFeature -->
-        <path d="M 210,300 V 312 Q 210,320 218,320 H 316 Q 324,320 324,328 V 338"
+        <!-- out of the zones ↓ RawParcelFeature -->
+        <path d="M 210,316 V 336 Q 210,344 218,344 H 316 Q 324,344 324,352 V 362"
               fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
-        <path d="M 470,300 V 312 Q 470,320 462,320 H 364 Q 356,320 356,328 V 338"
+        <path d="M 470,316 V 336 Q 470,344 462,344 H 364 Q 356,344 356,352 V 362"
               fill="none" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#m-arrow-accent)"/>
 
         <!-- RawParcelFeature ↓ normalizeParcel ↓ NormalizedParcel -->
-        <line x1="340" y1="374" x2="340" y2="396" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
-        <line x1="340" y1="440" x2="340" y2="470" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
+        <line x1="340" y1="398" x2="340" y2="420" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
+        <line x1="340" y1="464" x2="340" y2="494" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
 
         <!-- NormalizedParcel → parcelCentroid (the detour) -->
-        <line x1="422" y1="488" x2="685" y2="488" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
+        <line x1="422" y1="512" x2="685" y2="512" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
 
         <!-- NormalizedParcel ↓ resolveIdentity (the other arm of the join) -->
-        <line x1="340" y1="506" x2="340" y2="640" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
-        <rect x="248" y="556" width="84" height="12" rx="2" fill="#f5f5f5"/>
-        <text x="330" y="565" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace"
+        <line x1="340" y1="530" x2="340" y2="716" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
+        <rect x="248" y="608" width="84" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="330" y="617" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace"
               text-anchor="end" letter-spacing="0.06em">ARM 1 OF 2</text>
 
-        <!-- the detour, straight down -->
-        <line x1="760" y1="510" x2="760" y2="534" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
-        <line x1="760" y1="570" x2="760" y2="590" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
-        <line x1="760" y1="638" x2="760" y2="646" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
+        <!-- the detour, straight down and through the state-gis zone -->
+        <line x1="760" y1="534" x2="760" y2="558" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
+        <line x1="760" y1="594" x2="760" y2="646" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
+        <line x1="760" y1="690" x2="760" y2="722" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
 
         <!-- TownshipLookup → resolveIdentity -->
-        <line x1="682" y1="664" x2="430" y2="664" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
-        <rect x="474" y="632" width="84" height="12" rx="2" fill="#f5f5f5"/>
-        <text x="516" y="641" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace"
+        <line x1="682" y1="740" x2="430" y2="740" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
+        <rect x="474" y="708" width="84" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="516" y="717" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace"
               text-anchor="middle" letter-spacing="0.06em">ARM 2 OF 2</text>
 
         <!-- resolveIdentity ↓ ParcelIdentity -->
-        <line x1="340" y1="688" x2="340" y2="738" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
+        <line x1="340" y1="764" x2="340" y2="814" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#m-arrow)"/>
+
+        <!-- ── zones: containers around the nodes that run elsewhere ──────
+             Drawn after the arcs so an arc entering a zone reads as crossing
+             into it, which is exactly what a zone crossing is. -->
+
+        <rect x="122" y="240" width="176" height="92" rx="8"
+              fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.45)" stroke-width="1" stroke-dasharray="5,4"/>
+        <rect x="140" y="244" width="88" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="144" y="253" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace"
+              letter-spacing="0.14em">COUNTY-GIS</text>
+        <text x="288" y="327" fill="rgba(45,49,66,0.45)" font-size="7" font-family="'Geist Mono', monospace"
+              text-anchor="end">directCountyFetch</text>
+
+        <rect x="382" y="240" width="176" height="92" rx="8"
+              fill="rgba(235,108,54,0.05)" stroke="#eb6c36" stroke-width="1" stroke-dasharray="5,4"/>
+        <rect x="400" y="244" width="136" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="404" y="253" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace"
+              letter-spacing="0.14em">THIRD-PARTY-PROXY</text>
+        <text x="548" y="327" fill="rgba(235,108,54,0.75)" font-size="7" font-family="'Geist Mono', monospace"
+              text-anchor="end">proxiedCountyFetch</text>
+
+        <rect x="672" y="614" width="176" height="92" rx="8"
+              fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.45)" stroke-width="1" stroke-dasharray="5,4"/>
+        <rect x="690" y="618" width="80" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="694" y="627" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace"
+              letter-spacing="0.14em">STATE-GIS</text>
+        <text x="838" y="701" fill="rgba(45,49,66,0.45)" font-size="7" font-family="'Geist Mono', monospace"
+              text-anchor="end">townshipResolution</text>
 
         <!-- ── edges: places ──────────────────────────────────────────── -->
 
@@ -156,117 +185,107 @@
         <text x="470" y="208" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace"
               text-anchor="middle">ProxiedCountyQuery</text>
 
-        <ellipse cx="340" cy="356" rx="82" ry="18" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
-        <text x="340" y="360" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace"
+        <ellipse cx="340" cy="380" rx="82" ry="18" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+        <text x="340" y="384" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace"
               text-anchor="middle">RawParcelFeature</text>
 
-        <ellipse cx="340" cy="488" rx="82" ry="18" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
-        <text x="340" y="492" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace"
+        <ellipse cx="340" cy="512" rx="82" ry="18" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+        <text x="340" y="516" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace"
               text-anchor="middle">NormalizedParcel</text>
 
-        <ellipse cx="760" cy="552" rx="76" ry="18" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
-        <text x="760" y="556" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace"
+        <ellipse cx="760" cy="576" rx="76" ry="18" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+        <text x="760" y="580" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace"
               text-anchor="middle">ParcelCentroid</text>
 
-        <ellipse cx="760" cy="664" rx="76" ry="18" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
-        <text x="760" y="668" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace"
+        <ellipse cx="760" cy="740" rx="76" ry="18" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+        <text x="760" y="744" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace"
               text-anchor="middle">TownshipLookup</text>
 
-        <ellipse cx="340" cy="756" rx="76" ry="18" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
-        <text x="340" y="760" fill="#2d3142" font-size="10" font-family="'Geist Mono', monospace"
+        <ellipse cx="340" cy="832" rx="76" ry="18" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
+        <text x="340" y="836" fill="#2d3142" font-size="10" font-family="'Geist Mono', monospace"
               text-anchor="middle">ParcelIdentity</text>
 
         <!-- ── nodes: transitions ─────────────────────────────────────── -->
 
-        <!-- routeCounty -->
-        <rect x="265" y="112" width="150" height="44" rx="6" fill="#f5f5f5"/>
         <rect x="265" y="112" width="150" height="44" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
         <text x="340" y="130" fill="#2d3142" font-size="11" font-weight="600"
               font-family="'Geist', sans-serif" text-anchor="middle">routeCounty</text>
         <text x="340" y="146" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
               text-anchor="middle">oneOf — the only branch</text>
 
-        <!-- directCountyFetch (a referenced topology) -->
-        <rect x="130" y="252" width="160" height="48" rx="6" fill="#f5f5f5"/>
-        <rect x="130" y="252" width="160" height="48" rx="6" fill="rgba(45,49,66,0.03)"
-              stroke="rgba(45,49,66,0.45)" stroke-width="1" stroke-dasharray="5,4"/>
-        <text x="210" y="272" fill="#2d3142" font-size="11" font-weight="600"
-              font-family="'Geist', sans-serif" text-anchor="middle">directCountyFetch</text>
-        <text x="210" y="288" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
-              text-anchor="middle">zone: county-gis</text>
+        <!-- fetchDirect, inside county-gis -->
+        <rect x="146" y="272" width="128" height="44" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <rect x="154" y="278" width="34" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+        <text x="171" y="287" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace"
+              text-anchor="middle" letter-spacing="0.08em">HTTP</text>
+        <text x="210" y="309" fill="#2d3142" font-size="11" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">fetchDirect</text>
 
-        <!-- proxiedCountyFetch (a referenced topology). FOCAL. -->
-        <rect x="390" y="252" width="160" height="48" rx="6" fill="#f5f5f5"/>
-        <rect x="390" y="252" width="160" height="48" rx="6" fill="rgba(235,108,54,0.08)"
-              stroke="#eb6c36" stroke-width="1" stroke-dasharray="5,4"/>
-        <text x="470" y="272" fill="#2d3142" font-size="11" font-weight="600"
-              font-family="'Geist', sans-serif" text-anchor="middle">proxiedCountyFetch</text>
-        <text x="470" y="288" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace"
-              text-anchor="middle">zone: third-party-proxy</text>
+        <!-- fetchProxied, inside third-party-proxy. FOCAL. -->
+        <rect x="406" y="272" width="128" height="44" rx="6" fill="#ffffff" stroke="#eb6c36" stroke-width="1"/>
+        <rect x="414" y="278" width="34" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.55)" stroke-width="0.8"/>
+        <text x="431" y="287" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace"
+              text-anchor="middle" letter-spacing="0.08em">HTTP</text>
+        <text x="470" y="309" fill="#2d3142" font-size="11" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">fetchProxied</text>
 
-        <!-- normalizeParcel -->
-        <rect x="265" y="396" width="150" height="44" rx="6" fill="#f5f5f5"/>
-        <rect x="265" y="396" width="150" height="44" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
-        <text x="340" y="414" fill="#2d3142" font-size="11" font-weight="600"
+        <rect x="265" y="420" width="150" height="44" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="340" y="438" fill="#2d3142" font-size="11" font-weight="600"
               font-family="'Geist', sans-serif" text-anchor="middle">normalizeParcel</text>
-        <text x="340" y="430" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
+        <text x="340" y="454" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
               text-anchor="middle">drops the owner name</text>
 
-        <!-- parcelCentroid -->
-        <rect x="685" y="466" width="150" height="44" rx="6" fill="#f5f5f5"/>
-        <rect x="685" y="466" width="150" height="44" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
-        <text x="760" y="492" fill="#2d3142" font-size="11" font-weight="600"
+        <rect x="685" y="490" width="150" height="44" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="760" y="516" fill="#2d3142" font-size="11" font-weight="600"
               font-family="'Geist', sans-serif" text-anchor="middle">parcelCentroid</text>
 
-        <!-- townshipResolution (a referenced topology) -->
-        <rect x="680" y="590" width="160" height="48" rx="6" fill="#f5f5f5"/>
-        <rect x="680" y="590" width="160" height="48" rx="6" fill="rgba(45,49,66,0.03)"
-              stroke="rgba(45,49,66,0.45)" stroke-width="1" stroke-dasharray="5,4"/>
-        <text x="760" y="610" fill="#2d3142" font-size="11" font-weight="600"
-              font-family="'Geist', sans-serif" text-anchor="middle">townshipResolution</text>
-        <text x="760" y="626" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
-              text-anchor="middle">zone: state-gis</text>
+        <!-- lookupTownship, inside state-gis -->
+        <rect x="696" y="646" width="128" height="44" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <rect x="704" y="652" width="34" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+        <text x="721" y="661" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace"
+              text-anchor="middle" letter-spacing="0.08em">HTTP</text>
+        <text x="760" y="683" fill="#2d3142" font-size="11" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">lookupTownship</text>
 
         <!-- resolveIdentity — the terminal -->
-        <rect x="250" y="640" width="180" height="48" rx="6" fill="#f5f5f5"/>
-        <rect x="250" y="640" width="180" height="48" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.6"/>
-        <text x="340" y="660" fill="#2d3142" font-size="11" font-weight="600"
+        <rect x="250" y="716" width="180" height="48" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.6"/>
+        <text x="340" y="736" fill="#2d3142" font-size="11" font-weight="600"
               font-family="'Geist', sans-serif" text-anchor="middle">resolveIdentity</text>
-        <text x="340" y="676" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
+        <text x="340" y="752" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
               text-anchor="middle">allOf — the only fan-in</text>
 
         <!-- Legend -->
-        <line x1="40" y1="800" x2="940" y2="800" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
-        <text x="40" y="816" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
+        <line x1="40" y1="876" x2="940" y2="876" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+        <text x="40" y="892" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace"
               letter-spacing="0.14em">LEGEND</text>
 
-        <rect x="124" y="806" width="30" height="14" rx="3" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
-        <text x="162" y="816" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">node — a transition</text>
+        <rect x="124" y="882" width="30" height="14" rx="3" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="162" y="892" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">node — a transition</text>
 
-        <ellipse cx="320" cy="813" rx="17" ry="7" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
-        <text x="346" y="816" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">edge — a place that holds tokens</text>
+        <ellipse cx="320" cy="889" rx="17" ry="7" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+        <text x="346" y="892" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">edge — a place that holds tokens</text>
 
-        <rect x="574" y="806" width="30" height="14" rx="3" fill="rgba(45,49,66,0.03)"
+        <rect x="574" y="882" width="30" height="14" rx="3" fill="rgba(45,49,66,0.03)"
               stroke="rgba(45,49,66,0.45)" stroke-width="1" stroke-dasharray="5,4"/>
-        <text x="612" y="816" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">another topology, referenced here</text>
+        <text x="612" y="892" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">a zone — the nodes inside it run elsewhere</text>
 
-        <text x="40" y="848" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif">A thicker outline marks the declared <tspan font-family="'Geist Mono', monospace" font-size="9">terminal</tspan> and the declared <tspan font-family="'Geist Mono', monospace" font-size="9">output</tspan> — what this topology says finishing looks like.</text>
+        <text x="40" y="924" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif">Everything outside a dashed boundary runs in <tspan font-family="'Geist Mono', monospace" font-size="9">zone: server</tspan>. A thicker outline marks the declared <tspan font-family="'Geist Mono', monospace" font-size="9">terminal</tspan> and <tspan font-family="'Geist Mono', monospace" font-size="9">output</tspan>.</text>
       </svg>
     </div>
 
     <!-- ════════════════════════ 2–4. the leaves ════════════════════════ -->
     <h2 class="fig">the three referenced topologies <span class="zone">· one effect node each</span></h2>
-    <p class="fig-note">Each is one node wide. That is the whole point of them: a topology is the unit
-      of <em>placement</em>, so a single node that runs somewhere else needs its own topology to say
-      so. All three have identical shape and three different counterparties — and two of them talk to
-      a county's own server while the third talks to a commercial aggregator standing in front of one.</p>
+    <p class="fig-note">Each is one node wide, and the zone wraps the node — the declared
+      <code>input</code> and <code>output</code> edges sit <em>outside</em> it, which is what makes
+      them the contract rather than the contents. A topology is the unit of <em>placement</em>, so a
+      single node that runs somewhere else needs its own topology to say so.</p>
 
     <div class="leaves">
 
       <div class="leaf">
         <h3>directCountyFetch.topology</h3>
         <p>zone: <code>county-gis</code></p>
-        <svg viewBox="0 0 300 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="brp-direct-title brp-direct-desc">
+        <svg viewBox="0 0 300 226" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="brp-direct-title brp-direct-desc">
           <title id="brp-direct-title">directCountyFetch.topology</title>
           <desc id="brp-direct-desc">A direct county query enters a single http effect node, fetchDirect, which produces a raw parcel feature.</desc>
           <defs>
@@ -275,24 +294,28 @@
             </marker>
           </defs>
           <rect width="100%" height="100%" fill="#f5f5f5"/>
-          <line x1="150" y1="52" x2="150" y2="84" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d-arrow)"/>
-          <line x1="150" y1="140" x2="150" y2="172" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d-arrow)"/>
-          <ellipse cx="150" cy="34" rx="86" ry="17" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
-          <text x="150" y="38" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">DirectCountyQuery</text>
-          <rect x="54" y="84" width="192" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
-          <rect x="62" y="90" width="34" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
-          <text x="79" y="99" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HTTP</text>
-          <text x="150" y="118" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">fetchDirect</text>
-          <text x="150" y="132" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">a county FeatureServer</text>
-          <ellipse cx="150" cy="190" rx="86" ry="17" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
-          <text x="150" y="194" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">RawParcelFeature</text>
-        </svg>
+          <line x1="150" y1="47" x2="150" y2="98" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d-arrow)"/>
+          <line x1="150" y1="142" x2="150" y2="179" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#d-arrow)"/>
+          <rect x="30" y="66" width="240" height="92" rx="8" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.45)" stroke-width="1" stroke-dasharray="5,4"/>
+          <rect x="46" y="70" width="68" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="50" y="79" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" letter-spacing="0.14em">COUNTY-GIS</text>
+          <text x="260" y="153" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="end">directCountyFetch</text>
+          <ellipse cx="150" cy="30" rx="86" ry="17" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+          <text x="150" y="34" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">DirectCountyQuery</text>
+          <rect x="54" y="98" width="192" height="44" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <rect x="62" y="104" width="34" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+          <text x="79" y="113" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HTTP</text>
+          <text x="162" y="118" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">fetchDirect</text>
+          <text x="150" y="134" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">a county FeatureServer</text>
+          <ellipse cx="150" cy="196" rx="86" ry="17" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
+          <text x="150" y="200" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">RawParcelFeature</text>
+</svg>
       </div>
 
       <div class="leaf">
         <h3>proxiedCountyFetch.topology</h3>
         <p>zone: <code>third-party-proxy</code></p>
-        <svg viewBox="0 0 300 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="brp-proxied-title brp-proxied-desc">
+        <svg viewBox="0 0 300 226" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="brp-proxied-title brp-proxied-desc">
           <title id="brp-proxied-title">proxiedCountyFetch.topology</title>
           <desc id="brp-proxied-desc">A proxied county query enters a single http effect node, fetchProxied, which reaches a commercial aggregator and produces the same raw parcel feature edge as the direct topology.</desc>
           <defs>
@@ -301,24 +324,28 @@
             </marker>
           </defs>
           <rect width="100%" height="100%" fill="#f5f5f5"/>
-          <line x1="150" y1="52" x2="150" y2="84" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#p-arrow)"/>
-          <line x1="150" y1="140" x2="150" y2="172" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#p-arrow)"/>
-          <ellipse cx="150" cy="34" rx="90" ry="17" fill="#ffffff" stroke="#eb6c36" stroke-width="1"/>
-          <text x="150" y="38" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">ProxiedCountyQuery</text>
-          <rect x="54" y="84" width="192" height="56" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
-          <rect x="62" y="90" width="34" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.55)" stroke-width="0.8"/>
-          <text x="79" y="99" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HTTP</text>
-          <text x="150" y="118" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">fetchProxied</text>
-          <text x="150" y="132" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">app.fetchgis.com</text>
-          <ellipse cx="150" cy="190" rx="86" ry="17" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
-          <text x="150" y="194" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">RawParcelFeature</text>
-        </svg>
+          <line x1="150" y1="47" x2="150" y2="98" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#p-arrow)"/>
+          <line x1="150" y1="142" x2="150" y2="179" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#p-arrow)"/>
+          <rect x="30" y="66" width="240" height="92" rx="8" fill="rgba(235,108,54,0.05)" stroke="#eb6c36" stroke-width="1" stroke-dasharray="5,4"/>
+          <rect x="46" y="70" width="108" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="50" y="79" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" letter-spacing="0.14em">THIRD-PARTY-PROXY</text>
+          <text x="260" y="153" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="end">proxiedCountyFetch</text>
+          <ellipse cx="150" cy="30" rx="90" ry="17" fill="#ffffff" stroke="#eb6c36" stroke-width="1"/>
+          <text x="150" y="34" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">ProxiedCountyQuery</text>
+          <rect x="54" y="98" width="192" height="44" rx="6" fill="#ffffff" stroke="#eb6c36" stroke-width="1"/>
+          <rect x="62" y="104" width="34" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.55)" stroke-width="0.8"/>
+          <text x="79" y="113" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HTTP</text>
+          <text x="162" y="118" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">fetchProxied</text>
+          <text x="150" y="134" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">app.fetchgis.com</text>
+          <ellipse cx="150" cy="196" rx="86" ry="17" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
+          <text x="150" y="200" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">RawParcelFeature</text>
+</svg>
       </div>
 
       <div class="leaf">
         <h3>townshipResolution.topology</h3>
         <p>zone: <code>state-gis</code></p>
-        <svg viewBox="0 0 300 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="brp-township-title brp-township-desc">
+        <svg viewBox="0 0 300 226" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="brp-township-title brp-township-desc">
           <title id="brp-township-title">townshipResolution.topology</title>
           <desc id="brp-township-desc">A parcel centroid enters a single http effect node, lookupTownship, which asks the statewide layer which township contains that point and produces a township lookup.</desc>
           <defs>
@@ -327,18 +354,22 @@
             </marker>
           </defs>
           <rect width="100%" height="100%" fill="#f5f5f5"/>
-          <line x1="150" y1="52" x2="150" y2="84" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#t-arrow)"/>
-          <line x1="150" y1="140" x2="150" y2="172" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#t-arrow)"/>
-          <ellipse cx="150" cy="34" rx="80" ry="17" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
-          <text x="150" y="38" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">ParcelCentroid</text>
-          <rect x="54" y="84" width="192" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
-          <rect x="62" y="90" width="34" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
-          <text x="79" y="99" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HTTP</text>
-          <text x="150" y="118" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">lookupTownship</text>
-          <text x="150" y="132" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">statewide MCD layer</text>
-          <ellipse cx="150" cy="190" rx="80" ry="17" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
-          <text x="150" y="194" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">TownshipLookup</text>
-        </svg>
+          <line x1="150" y1="47" x2="150" y2="98" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#t-arrow)"/>
+          <line x1="150" y1="142" x2="150" y2="179" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#t-arrow)"/>
+          <rect x="30" y="66" width="240" height="92" rx="8" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.45)" stroke-width="1" stroke-dasharray="5,4"/>
+          <rect x="46" y="70" width="62" height="12" rx="2" fill="#f5f5f5"/>
+          <text x="50" y="79" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" letter-spacing="0.14em">STATE-GIS</text>
+          <text x="260" y="153" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="end">townshipResolution</text>
+          <ellipse cx="150" cy="30" rx="80" ry="17" fill="#ffffff" stroke="#4f5d75" stroke-width="1"/>
+          <text x="150" y="34" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">ParcelCentroid</text>
+          <rect x="54" y="98" width="192" height="44" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+          <rect x="62" y="104" width="34" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+          <text x="79" y="113" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HTTP</text>
+          <text x="162" y="118" fill="#2d3142" font-size="11" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">lookupTownship</text>
+          <text x="150" y="134" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">statewide MCD layer</text>
+          <ellipse cx="150" cy="196" rx="80" ry="17" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>
+          <text x="150" y="200" fill="#2d3142" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">TownshipLookup</text>
+</svg>
       </div>
 
     </div>
