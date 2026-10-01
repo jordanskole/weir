@@ -120,15 +120,78 @@ describe("generateFieldValue", () => {
     expect(Number.isFinite(value)).toBe(true);
   });
 
-  it("hits string-length boundaries (minLength, maxLength)", () => {
+  /**
+   * Asserted as a set rather than per index, because the boundary lengths grew
+   * from {minLength, maxLength} to {minLength, minLength+1, maxLength-1,
+   * maxLength} and the old test pinned case 1 to maxLength specifically. The
+   * intent was always "the boundaries get generated", so this says that.
+   *
+   * Uses a field whose bounds are wider than the ordinary span, deliberately.
+   * A first version used nameField (minLength 2 / maxLength 4) and passed under a
+   * break that removed two of the four boundaries — because with a 3-wide range the
+   * ordinary random draw reaches the "missing" boundary by chance. The upper
+   * boundaries here (99, 100) sit above the ordinary span, so only the boundary
+   * path can produce them.
+   */
+  it("hits every string-length boundary, and stays in range afterwards", () => {
+    const wide = {
+      type: "utf8",
+      label: "Wide",
+      description: "bounds wider than the ordinary span",
+      nullable: false,
+      validations: { minLength: 2, maxLength: 100 },
+    } as unknown as typeof nameField;
+
     const rng = createRng(2);
-    expect((generateFieldValue("name", nameField, rng, 0) as string).length).toBe(2);
-    expect((generateFieldValue("name", nameField, rng, 1) as string).length).toBe(4);
-    for (let i = 2; i < 10; i++) {
-      const value = generateFieldValue("name", nameField, rng, i) as string;
+    const first = Array.from({ length: 4 }, (_, i) =>
+      (generateFieldValue("wide", wide, rng, i) as string).length,
+    );
+    expect(new Set(first)).toEqual(new Set([2, 3, 99, 100]));
+
+    for (let i = 4; i < 20; i++) {
+      const value = generateFieldValue("wide", wide, rng, i) as string;
       expect(value.length).toBeGreaterThanOrEqual(2);
-      expect(value.length).toBeLessThanOrEqual(4);
+      expect(value.length).toBeLessThanOrEqual(100);
     }
+  });
+
+  /**
+   * The reason the length distribution changed at all.
+   *
+   * A generous `maxLength` used to make every non-boundary case average half of
+   * it: blue-ribbon's `boundaryJson` (maxLength 2,000,000) produced a median of
+   * 1,157,240 characters and 108 MB over the gate's 100 cases. The bound is still
+   * exercised — once at the maximum and once just below — and everything else is
+   * an ordinary length near the floor.
+   *
+   * BREAK-PROOF: reverting the `ordinaryMax` clamp to `maxLength` reddens this on
+   * the median, and reddens nothing else in the suite — which is why this test
+   * has to exist rather than relying on the boundary test above.
+   */
+  it("does not pay for a generous maxLength on every case", () => {
+    const bulk = {
+      type: "utf8",
+      label: "Bulk",
+      description: "a field with a generous bound",
+      nullable: false,
+      validations: { minLength: 2, maxLength: 2_000_000 },
+    } as unknown as typeof nameField;
+
+    const rng = createRng(42);
+    const lengths = Array.from({ length: 100 }, (_, i) =>
+      (generateFieldValue("bulk", bulk, rng, i) as string).length,
+    );
+    const sorted = [...lengths].sort((a, b) => a - b);
+
+    // Both ends of the declared bound are still reached, exactly once each.
+    expect(lengths.filter((n) => n === 2_000_000)).toHaveLength(1);
+    expect(lengths.filter((n) => n === 1_999_999)).toHaveLength(1);
+    expect(sorted[0]).toBe(2);
+
+    // And the typical case is ordinary rather than a megabyte.
+    expect(sorted[50]).toBeLessThan(100);
+    const total = lengths.reduce((a, b) => a + b, 0);
+    expect(total).toBeLessThan(5_000_000);
   });
 
   it("cycles through every enumValues entry within one enumValues.length-sized batch", () => {

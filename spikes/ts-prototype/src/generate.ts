@@ -35,6 +35,16 @@ function randomInt(rng: Rng, min: number, max: number): number {
 /** A pragmatic sampling range for f32/f64 fields — these have no representable-range check (INTEGER_RANGES has no entry for them), but generation still needs *some* concrete domain to sample uniform-random fill from. Not a spec requirement, an implementation default. */
 const DEFAULT_FLOAT_BOUND = 1_000_000;
 
+/** The length a `utf8` field gets when it declares no `maxLength`. */
+const DEFAULT_MAX_LENGTH = 64;
+
+/**
+ * How far above `minLength` an ordinary generated string reaches, once the
+ * boundary lengths have been emitted. Matches `DEFAULT_MAX_LENGTH`, so a field
+ * with no declared bound behaves exactly as it did before this split existed.
+ */
+const ORDINARY_LENGTH_SPAN = 64;
+
 function numericBounds(field: FieldDef): [number, number] {
   const v = field.validations as { min?: number; max?: number } | undefined;
   const range = INTEGER_RANGES[field.type];
@@ -92,9 +102,43 @@ function generateStringValue(fieldKey: string, field: FieldDef, rng: Rng, caseIn
     );
   }
   const minLength = v?.minLength ?? 0;
-  const maxLength = v?.maxLength ?? 64;
-  const boundaryLengths = Array.from(new Set([minLength, maxLength]));
-  const length = caseIndex < boundaryLengths.length ? boundaryLengths[caseIndex] : randomInt(rng, minLength, maxLength);
+  const maxLength = v?.maxLength ?? DEFAULT_MAX_LENGTH;
+
+  /**
+   * Boundary lengths first, then *ordinary* lengths — not uniform over the whole
+   * range, which is the one place this differs from `generateNumericValue` and the
+   * reason is that a uniform length is not free the way a uniform number is.
+   *
+   * blue-ribbon's `boundaryJson` is declared `maxLength: 2000000`. Sampling the
+   * length uniformly gave, over the gate's real 100 cases, a median of 1,157,240
+   * characters and **107,972,852 characters in total** — 108 MB of random text to
+   * reach a verdict the first case already determined, and 95 of those cases were a
+   * megabyte of noise testing exactly what 60 characters would have tested
+   * (docs/open-questions/generated-strings-are-enormous.md).
+   *
+   * So: `minLength`, `minLength + 1`, `maxLength - 1` and `maxLength` are each
+   * generated **once**, which is what a declared bound is owed — the declaration
+   * promises to carry 2 MB, so something should carry 2 MB — and every remaining
+   * case gets an ordinary length near the floor. Same boundary coverage, a
+   * thousandth of the bytes.
+   *
+   * What this deliberately gives up: the range of lengths *between* the boundaries
+   * and the ordinary span is no longer sampled. A bug that needs a 600,000-character
+   * string specifically, and that neither 2,000,000 nor 66 provokes, is not reachable
+   * from here. That is the trade, taken knowingly.
+   */
+  const boundaryLengths = Array.from(
+    new Set(
+      [minLength, minLength + 1, maxLength - 1, maxLength].filter(
+        (n) => n >= minLength && n <= maxLength,
+      ),
+    ),
+  );
+  const ordinaryMax = Math.min(maxLength, minLength + ORDINARY_LENGTH_SPAN);
+  const length =
+    caseIndex < boundaryLengths.length
+      ? boundaryLengths[caseIndex]
+      : randomInt(rng, minLength, ordinaryMax);
   let result = "";
   for (let i = 0; i < length; i++) {
     result += PRINTABLE_CHARS[randomInt(rng, 0, PRINTABLE_CHARS.length - 1)];

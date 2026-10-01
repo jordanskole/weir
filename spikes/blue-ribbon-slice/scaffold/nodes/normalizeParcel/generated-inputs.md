@@ -34,19 +34,19 @@ sourceTrust: "verified"
 featureJson: "lH"
 
 // case 2
-county: "rN2Dp3UtmFRMaD0dLbqd"
+county: "rN2Dp"
 sourceTrust: "aggregator"
-featureJson: "lXHbk1EYuCcdJLpOntU2GmrsePQR6f7B7igawEM4eT6rSlGZh J5BKvLuTsC1R 4BIsgRtX5fDZi9lSSoAkPvnN3u… (2000002 chars)
+featureJson: "3Ut"
 
 // case 3
-county: "ruzE62qp2OSr30w3cnZZ"
+county: "mFRMaD0dLbqdlXHbk1E"
 sourceTrust: "verified"
-featureJson: "nKs0ZdO9V5 UXBACOoA4AX3n2Vw kjov109SQeLq8dEb1yRtf29WxjxfA0KYoJUJrB1LBuWO 2U0VIeNKn4nqXW0f… (430135 chars)
+featureJson: "YuCcdJLpOntU2GmrsePQR6f7B7igawEM4eT6rSlGZh J5BKvLuTsC1R 4BIsgRtX5fDZi9lSSoAkPvnN3uXyi2xaU… (2000001 chars)
 
 // case 4
-county: "WlJCI2eS8FLKN7w4ga2"
+county: "2qp2OSr30w3cnZZnnKs0"
 sourceTrust: "aggregator"
-featureJson: "aJN6SlkguBF8gnoWZiiyDYDRmcFtNL5Ju8a oRYTG91eKKolP2EbyOVCw7u5rYXJG87Y 5TQNYGvUNjdnHoxpUS11… (1023386 chars)
+featureJson: "ZdO9V5 UXBACOoA4AX3n2Vw kjov109SQeLq8dEb1yRtf29WxjxfA0KYoJUJrB1LBuWO 2U0VIeNKn4nqXW0f7w6R… (2000002 chars)
 
 ```
 

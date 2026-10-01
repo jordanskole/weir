@@ -18,7 +18,7 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-## Open (30)
+## Open (29)
 
 Live. Ordered alphabetically, not by priority.
 
@@ -34,7 +34,6 @@ Live. Ordered alphabetically, not by priority.
 - [`Failed<In>.input` is typed as validated data it never was](open-questions/failed-input-is-typed-as-valid.md)
 - [Should `Failed<In>` be tagged like `oneOf`'s other branches?](open-questions/failed-tagging.md)
 - [A gather composes with nothing](open-questions/gather-composes-with-nothing.md)
-- [The generator samples string length uniformly, so a generous `maxLength` makes acceptance enormous](open-questions/generated-strings-are-enormous.md)
 - [Should the generator produce `null`, and explore cross-field combinations?](open-questions/generator-coverage.md)
 - [The version pin pins the contract, not the implementation](open-questions/implementation-identity.md)
 - [Classification says what may not go out; nothing says what may not be trusted coming in](open-questions/integrity-inbound.md)
@@ -59,7 +58,7 @@ Cannot be built as stated — the reason is in the file.
 
 - [Positional identity: `birthday.then.birthday` should run twice](open-questions/positional-identity.md) — **blocked** — two shipped things use the same syntax with opposite
 
-## Resolved (20)
+## Resolved (21)
 
 Kept because the reasoning is worth more than the answer, and because several specs and code comments cite them.
 
@@ -72,6 +71,7 @@ Kept because the reasoning is worth more than the answer, and because several sp
 - [A fan-in fed by two independent origin nodes never fires](open-questions/fan-in-fed-by-two-independent-origins.md) — resolved (2026-09-25, the run root)
 - [Is `many` a compositional type, or only a one-way fan-out?](open-questions/gather-and-the-vectorized-consumer.md) — resolved (2026-09-27, `gather`). One half deliberately still unbuilt
 - [A gather is all-or-nothing, and a batch wants partial success](open-questions/gather-is-all-or-nothing.md) — resolved (2026-10-01)
+- [The generator samples string length uniformly, so a generous `maxLength` makes acceptance enormous](open-questions/generated-strings-are-enormous.md) — resolved (2026-10-01 — 108 MB to 4 MB, boundaries intact)
 - [Which host language elaborates](open-questions/host-language.md) — resolved (2026-09-28 — TypeScript for v1)
 - [The declared integer widths are not enforced](open-questions/integer-widths-are-decorative.md) — resolved (2026-10-01 — enforced, and it found a live overflow)
 - [Iteration, and the "no loop construct" claim](open-questions/iteration-and-the-loop-construct.md) — resolved (2026-09-26, in four specs)

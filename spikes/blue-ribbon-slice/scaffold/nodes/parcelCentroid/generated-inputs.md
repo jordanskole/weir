@@ -43,34 +43,34 @@ boundaryJson: "Lb"
 provenance: "inferred"
 vintageAsOf: "dlXHbk1EYu"
 vintageSourceType: "periodic"
-vintageNote: "CcdJLpOntU2GmrsePQR6f7B7igawEM4eT6rSlGZh J5BKvLuTsC1R 4BIsgRtX5fDZi9lSSoAkPvnN3uXyi2xaUO3… (502 chars)
-pin: "pNxO9zXUbR3qL4Dy1NtDH kLeOYBL0yLk9lQSJIN"
-county: "4Wadg5acHdUNaz0vmUPd"
-townshipFromSource: "NL1KALzLmiSUr67BLvP94Rv5G5oju9F9bPM p8o7tGyns7NtGwClJ4PI3L1BNCLPNzkaSyubhOrcCSiSnrNvwMDZf… (102 chars)
+vintageNote: "C"
+pin: "cdJLpOntU"
+county: "2Gmrs"
+townshipFromSource: "e"
 acres: 100000
-boundaryJson: "zxk4Kkc2fHGL9HQH43fo5ySHBuxvO23pLFGTKz nBcjdhvWHCx TBvVsKqh1xh7cVKeN3l1n9CAbydyEzb8WohlRX… (2000002 chars)
+boundaryJson: "PQR"
 
 // case 3
 provenance: "aggregator"
-vintageAsOf: "tP4VvGh79m"
+vintageAsOf: "f7B7igawEM"
 vintageSourceType: "continuous"
-vintageNote: "TwrOBRagTCVzN1YVphEQVfdRWGLSJZ14jC3nIdjk1UCIHA6p nGoGimnkVbaA38xq75rXMNsnNpgfVV5KKz8Km KT… (311 chars)
-pin: "2uufUWDzSGL2mu ch7BSAhPAL"
-county: "VvLjbQhTuMrqLutStP"
-townshipFromSource: "tcDOFSsUh789hXDmHJqRA938VDjHB7QwaxJsnPoCQuhJhUIhYsrOtjXr"
+vintageNote: "4eT6rSlGZh J5BKvLuTsC1R 4BIsgRtX5fDZi9lSSoAkPvnN3uXyi2xaUO35nMElcSSsrvbn K kkJsyBARzv4uFM… (501 chars)
+pin: "0yLk9lQSJIN4Wadg5acHdUNaz0vmUPdNL1KALzL"
+county: "miSUr67BLvP94Rv5G5o"
+townshipFromSource: "ju9F9bPM p8o7tGyns7NtGwClJ4PI3L1BNCLPNzkaSyubhOrcCSiSnrNvwMDZfmv328DkPMV7zxk4Kkc2fHGL9HQH… (101 chars)
 acres: 1
-boundaryJson: "fk2YTNum4xB4Bjxc6tAaaL8joH6QlqLWjHhFqHmm TIa0oGK7HssoVOKuuQAeCgAPNPQKAldnOXDpN3i8 FPuPYGR… (1258935 chars)
+boundaryJson: "xvO23pLFGTKz nBcjdhvWHCx TBvVsKqh1xh7cVKeN3l1n9CAbydyEzb8WohlRX913pSGZna156oia8QNfNRXa1oH… (2000001 chars)
 
 // case 4
 provenance: "listing claim"
-vintageAsOf: "yT9EMRknv8"
+vintageAsOf: "YVphEQVfdR"
 vintageSourceType: "manual-confirmation"
-vintageNote: "UUN3H9rPfNO8K31AGDm359eijpSFJJEshaIlbUH GoamkX1bWibZxLl1m1NS8sEq7lOwhkgk3kpqf6B7Dapgzv7Wm… (499 chars)
-pin: "ojhQrRBOkQWniOfmrXzixpp"
-county: "V9aiGninwyjTG05X"
-townshipFromSource: "aa 7RwrtZwWLgA VB9maodXi5a6X7TbagQdzKJF"
+vintageNote: "WGLSJZ14jC3nIdjk1UCIHA6p nGoGimnkVbaA38xq75rXMNsnNpgfVV5KKz8Km KTtixnxahVtvVbGYqKhH  9nN0… (502 chars)
+pin: "665HVU6qfHh2F5hALuLbflk8zTasQiqK76r7ZffX"
+county: "TDVcusQox0PYppNXIaw5"
+townshipFromSource: "Gsci9HZ erEH2IfkwU0mn7sOCiy7dVZnESDhJWzLDv8u2nbjKdHS h86UhlAoVUnrCfzvBAQu4x04nvU2OVX 7Bpl… (102 chars)
 acres: 99999
-boundaryJson: "Oui9xLddH53VRPyWPYJE5RD4Pq9OQJUHaxHzPVlBFt5JnGQ rj5vRX6gQ2g6e0WEZk04yt94vkMo7lpzIxzdhTpUq… (928473 chars)
+boundaryJson: "qmoelvgn8vmrZmsF7xVSumVzzoL324Mcref2KpcGK1LlWNXB08EMcaabTm3n3cji4dg458hmEBvHvPzncDMp8SN1U… (2000002 chars)
 
 ```
 

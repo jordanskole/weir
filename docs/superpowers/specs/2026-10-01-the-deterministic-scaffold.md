@@ -476,3 +476,27 @@ testing what 20 characters would have tested.
 So this piece is built but weaker than specified: the implementer gets an accurate
 description of the generated inputs rather than the inputs. Closing that properly
 needs the generator fixed, not the scaffold.
+
+## The generator fix, after the fact
+
+[Generated strings are enormous](../../open-questions/generated-strings-are-enormous.md)
+is resolved, so the report above is less of a compromise than when it was written.
+`generateStringValue` now emits `minLength`, `minLength + 1`, `maxLength - 1` and
+`maxLength` once each and draws everything else from an ordinary span near the floor:
+
+```
+boundaryJson over 100 generated cases
+  before   min 2   median 1,157,240   max 2,000,000   total 107,972,852
+  after    min 2   median 41          max 2,000,000   total   4,033,864
+```
+
+Both ends of the declared bound are still reached, 27× less work, and the samples
+in each `generated-inputs.md` are now short enough to read — which is most of what
+the report is for.
+
+It is **still a report rather than the inputs**, because 4 MB of random noise does
+not belong in a git-tracked workspace and nearly all of it is the two deliberate
+boundary cases. The remaining option is to ship the ordinary cases and describe the
+boundary ones, which costs the fixture the property that made it worth having: being
+exactly what the gate runs. Left as recorded in that question rather than decided
+here.

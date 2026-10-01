@@ -13,15 +13,15 @@ pin: "LC1QlHrN"
 county: "Osceola"
 
 // case 2
-pin: "2Dp3UtmFRMaD0dLbqdlXHbk1EYuCcdJLpOntU2Gm"
+pin: "2Dp3UtmFR"
 county: "Manistee"
 
 // case 3
-pin: "sePQR6f7B7igawEM4"
+pin: "MaD0dLbqdlXHbk1EYuCcdJLpOntU2GmrsePQR6f"
 county: "Roscommon"
 
 // case 4
-pin: "T6rSlGZh J"
+pin: "7B7igawEM4eT6rSlGZh J5BKvLuTsC1R 4BIsgRt"
 county: "Iosco"
 
 ```

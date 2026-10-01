@@ -33,16 +33,16 @@ NormalizedParcel: {"provenance":"verified","vintageAsOf":"LC1QlHrN2D","vintageSo
 TownshipLookup: {"provenance":"verified","vintageAsOf":"qdlXHbk1EY","vintageSourceType":"static","vintageN… (131 chars)
 
 // case 2
-NormalizedParcel: {"provenance":"inferred","vintageAsOf":"2GmrsePQR6","vintageSourceType":"periodic","vintag… (2000838 chars)
-TownshipLookup: {"provenance":"inferred","vintageAsOf":"CVzN1YVphE","vintageSourceType":"periodic","vintag… (763 chars)
+NormalizedParcel: {"provenance":"inferred","vintageAsOf":"2GmrsePQR6","vintageSourceType":"periodic","vintag… (197 chars)
+TownshipLookup: {"provenance":"inferred","vintageAsOf":" J5BKvLuTs","vintageSourceType":"periodic","vintag… (136 chars)
 
 // case 3
-NormalizedParcel: {"provenance":"aggregator","vintageAsOf":"4nvU2OVX 7","vintageSourceType":"continuous","vi… (1588463 chars)
-TownshipLookup: {"provenance":"aggregator","vintageAsOf":"wf WjjfMlF","vintageSourceType":"continuous","vi… (531 chars)
+NormalizedParcel: {"provenance":"aggregator","vintageAsOf":"DZi9lSSoAk","vintageSourceType":"continuous","vi… (2000832 chars)
+TownshipLookup: {"provenance":"aggregator","vintageAsOf":"baA38xq75r","vintageSourceType":"continuous","vi… (764 chars)
 
 // case 4
-NormalizedParcel: {"provenance":"listing claim","vintageAsOf":"wkpWkXFJex","vintageSourceType":"manual-confi… (1377987 chars)
-TownshipLookup: {"provenance":"listing claim","vintageAsOf":"67rzqh9wAx","vintageSourceType":"manual-confi… (627 chars)
+NormalizedParcel: {"provenance":"listing claim","vintageAsOf":"VzzoL324Mc","vintageSourceType":"manual-confi… (2000853 chars)
+TownshipLookup: {"provenance":"listing claim","vintageAsOf":"THizSTgIhw","vintageSourceType":"manual-confi… (779 chars)
 
 ```
 
