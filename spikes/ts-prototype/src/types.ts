@@ -391,6 +391,26 @@ export type InputSpec =
        * Absent for an ordinary gather, which keeps the count-based barrier.
        */
       until?: AnyEdgeDef;
+      /**
+       * Other outcomes that also count as an element having **resolved**
+       * (docs/superpowers/specs/2026-10-01-gather-settled.md).
+       *
+       * A gather's barrier is *"every element resolved"*, and "resolved" has
+       * always meant "produced an instance of the gathered edge" — a declared
+       * set of exactly one. Widening that set is the whole feature; today's
+       * all-or-nothing behaviour is the degenerate case with `settled` absent,
+       * not a parallel mechanism.
+       *
+       * **This widens the barrier, never the payload.** `Fn` still receives a
+       * collection of `edge` alone — a node takes a single input, and the
+       * partition lives in the topology as a second gather on the other wire.
+       *
+       * Named rather than implied: there is no threshold and no automatic
+       * tolerance of `Failed_*`, because a gather that silently absorbed
+       * failures makes "3,264 of 3,265 succeeded" indistinguishable from
+       * "3,265 succeeded".
+       */
+      settled?: AnyEdgeDef[];
     };
 
 /**
@@ -524,6 +544,30 @@ export function failedAllOfEdgeName(edges: AnyEdgeDef[]): string {
  * `failedGatherEdgeName` below composes it. Three copies of the literal
  * `Many_` would be three places for it to drift.
  */
+/**
+ * How a gathered edge's entries are keyed, or `undefined` if they cannot be.
+ *
+ * An ordinary edge is keyed by its own declared `index`. A **synthesized failure
+ * edge** has none — `Failed_X`'s fields are `{ input: X, reason }` — and yet
+ * gathering one is exactly how a spread's failures get collected
+ * (docs/superpowers/specs/2026-10-01-gather-settled.md §4). It is keyed by the
+ * **failed element's** index, read through `input`.
+ *
+ * Better than keying by instance id, which was the alternative: it makes
+ * `reportFailures`' collection use the *same keys* as `summarizeCorridor`'s, so
+ * a reader can line the two up and ask which parcels failed. Keying by id would
+ * answer "how many" and nothing else.
+ */
+export function gatherKey(edge: AnyEdgeDef): { via: "self" | "input"; field: string } | undefined {
+  if (typeof edge.index === "string") return { via: "self", field: edge.index };
+  const wrapped = (edge.fields as Record<string, unknown>).input;
+  if (wrapped !== null && typeof wrapped === "object" && "fields" in wrapped) {
+    const index = (wrapped as AnyEdgeDef).index;
+    if (typeof index === "string") return { via: "input", field: index };
+  }
+  return undefined;
+}
+
 export function manyEdgeName(edgeName: string): string {
   return `Many_${edgeName}`;
 }

@@ -54,11 +54,7 @@ Cannot be built as stated — the reason is in the file.
 
 - [Positional identity: `birthday.then.birthday` should run twice](open-questions/positional-identity.md) — **blocked** — two shipped things use the same syntax with opposite
 
-## Specced, not built (1)
-
-- [A gather is all-or-nothing, and a batch wants partial success](open-questions/gather-is-all-or-nothing.md) — specced, not built — `2026-10-01-gather-settled.md`, status draft
-
-## Resolved (18)
+## Resolved (19)
 
 Kept because the reasoning is worth more than the answer, and because several specs and code comments cite them.
 
@@ -70,6 +66,7 @@ Kept because the reasoning is worth more than the answer, and because several sp
 - [No extensible envelope, so cross-cutting metadata is an edit to every edge](open-questions/extensible-envelope.md) — resolved (2026-09-29). Dynamic contribution stays out by design
 - [A fan-in fed by two independent origin nodes never fires](open-questions/fan-in-fed-by-two-independent-origins.md) — resolved (2026-09-25, the run root)
 - [Is `many` a compositional type, or only a one-way fan-out?](open-questions/gather-and-the-vectorized-consumer.md) — resolved (2026-09-27, `gather`). One half deliberately still unbuilt
+- [A gather is all-or-nothing, and a batch wants partial success](open-questions/gather-is-all-or-nothing.md) — resolved (2026-10-01)
 - [Which host language elaborates](open-questions/host-language.md) — resolved (2026-09-28 — TypeScript for v1)
 - [Iteration, and the "no loop construct" claim](open-questions/iteration-and-the-loop-construct.md) — resolved (2026-09-26, in four specs)
 - [`Log` is doing two jobs under one interface](open-questions/log-does-two-jobs.md) — resolved (2026-09-28)

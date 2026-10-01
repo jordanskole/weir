@@ -20,7 +20,7 @@ import { basename } from "node:path";
 import { parse } from "yaml";
 import { defineEdge, defineField } from "./define.js";
 import { assertDeclaration } from "./schema.js";
-import { failedEdgeName, failedAllOfEdgeName, failedGatherEdgeName, inputEdgeNames } from "./types.js";
+import { failedEdgeName, failedAllOfEdgeName, failedGatherEdgeName, gatherKey, inputEdgeNames } from "./types.js";
 import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
 
 /**
@@ -392,13 +392,32 @@ function resolveInputSpec(input: unknown, resolveEdge: EdgeResolver): InputSpec 
     // no index has no key to be collected under. Checked here rather than left
     // to the membrane so a gather of an index-less edge fails at `weir check`
     // instead of three pulses into a run.
-    requireIndex(edge, `"input.gather"`);
+    // A synthesized failure edge has no `index` of its own and is still
+    // gatherable, keyed by the failed element's index (`gatherKey`). Checked
+    // through that helper rather than `requireIndex` directly, so the rule the
+    // runtime keys by and the rule elaboration enforces are the same one.
+    if (gatherKey(edge) === undefined) requireIndex(edge, `"input.gather"`);
+    const settledRefs = (input as { settled?: unknown }).settled;
+    const settled =
+      settledRefs === undefined
+        ? undefined
+        : resolveEdgeNameList(settledRefs, "input.settled", resolveEdge);
+    if (settled !== undefined && settled.some((other) => other.name === edge.name)) {
+      throw new Error(
+        `"input.settled" may not name "${edge.name}" — it is already the gathered edge, so listing it says nothing.`,
+      );
+    }
     const untilRef = (input as { until?: unknown }).until;
-    if (untilRef === undefined) return { kind: "gather", edge };
+    if (untilRef === undefined) return { kind: "gather", edge, ...(settled !== undefined && { settled }) };
     if (typeof untilRef !== "string" || untilRef.length === 0) {
       throw new Error(`"input.until" must be a bare edge-name reference.`);
     }
-    return { kind: "gather", edge, until: resolveEdge(untilRef) };
+    return {
+      kind: "gather",
+      edge,
+      until: resolveEdge(untilRef),
+      ...(settled !== undefined && { settled }),
+    };
   }
   throw new Error(`Unrecognized "input" shape: ${JSON.stringify(input)}.`);
 }

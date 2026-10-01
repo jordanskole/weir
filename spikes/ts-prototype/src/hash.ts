@@ -214,7 +214,20 @@ interface NodeFingerprint {
 type InputSpecFingerprint =
   | { kind: "single"; edge: EdgeFingerprint }
   | { kind: "allOf"; edges: EdgeFingerprint[] }
-  | { kind: "gather"; edge: EdgeFingerprint };
+  | {
+      kind: "gather";
+      edge: EdgeFingerprint;
+      /**
+       * Both declared **after** the plain-gather form shipped, and both were
+       * briefly missing from here while being present on `InputSpec` — so two
+       * gathers differing only in `until` hashed identically, and an accepted
+       * implementation stayed valid across a changed barrier. Caught adding
+       * `settled` 2026-10-01; TypeScript did not catch it, because an excess
+       * property arriving through a conditional spread is not checked.
+       */
+      settled?: EdgeFingerprint[];
+      until?: EdgeFingerprint;
+    };
 
 type OutputSpecFingerprint =
   | { kind: "single"; edge: EdgeFingerprint }
@@ -229,7 +242,16 @@ function fingerprintEdgeList(edges: AnyEdgeDef[]): EdgeFingerprint[] {
 
 function fingerprintInput(input: InputSpec): InputSpecFingerprint {
   if (input.kind === "single") return { kind: "single", edge: fingerprint(input.edge) };
-  if (input.kind === "gather") return { kind: "gather", edge: fingerprint(input.edge) };
+  if (input.kind === "gather") {
+    return {
+      kind: "gather",
+      edge: fingerprint(input.edge),
+      // Behavioural: it decides when this node becomes ready, so two nodes
+      // settling on different sets are different contracts.
+      ...(input.settled !== undefined && { settled: fingerprintEdgeList(input.settled) }),
+      ...(input.until !== undefined && { until: fingerprint(input.until) }),
+    };
+  }
   return { kind: "allOf", edges: fingerprintEdgeList(input.edges) };
 }
 

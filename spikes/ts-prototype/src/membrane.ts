@@ -45,7 +45,7 @@
  */
 
 import { hashNode } from "./hash.js";
-import { Identity } from "./types.js";
+import { Identity, gatherKey } from "./types.js";
 import type {
   AnyEdgeDef,
   Envelope,
@@ -870,12 +870,23 @@ export async function membrane<In extends InputSpec, O extends OutputSpec>(
         // anywhere enforces — and the runtime keys it correctly, so the only
         // caller this can catch is a direct one (`invokeWithInput`, a test),
         // which is exactly the caller with no other check on it.
-        if (gatheredEdge.index === undefined) {
+        // Asked through `gatherKey`, which is the same rule elaboration
+        // validates and the runtime keys by — a synthesized failure edge has no
+        // index of its own and is keyed by the failed element's, read through
+        // `input` (docs/superpowers/specs/2026-10-01-gather-settled.md §4).
+        // This was the **third** place the index rule lived, and the only one
+        // that still said "no index" after the other two learned otherwise.
+        const entryKey = gatherKey(gatheredEdge);
+        if (entryKey === undefined) {
           errors.push(`["${key}"]: "${gatheredEdge.name}" declares no index — a collection needs a real key`);
-        } else if (String(validated[gatheredEdge.index]) !== key) {
-          errors.push(
-            `["${key}"]: keyed by "${key}" but its own "${gatheredEdge.index}" is "${String(validated[gatheredEdge.index])}"`,
-          );
+        } else {
+          const actual =
+            entryKey.via === "self"
+              ? validated[entryKey.field]
+              : (validated.input as Record<string, unknown> | undefined)?.[entryKey.field];
+          if (String(actual) !== key) {
+            errors.push(`["${key}"]: keyed by "${key}" but its own "${entryKey.field}" is "${String(actual)}"`);
+          }
         }
       } catch (cause) {
         errors.push(`["${key}"]: ${reasonOf(cause)}`);

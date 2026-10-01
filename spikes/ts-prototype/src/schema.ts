@@ -451,7 +451,14 @@ export function nodeSchema(): object {
             // gather over a **cycle** rather than a spread
             // (docs/superpowers/specs/2026-09-29-gather-until.md). Optional:
             // without it a gather keeps the spread's count-based barrier.
-            properties: { gather: edgeName, until: edgeName },
+            properties: {
+              gather: edgeName,
+              until: edgeName,
+              // Other outcomes that also resolve an element
+              // (docs/superpowers/specs/2026-10-01-gather-settled.md). Widens
+              // the barrier, never the payload.
+              settled: { type: "array", minItems: 1, items: edgeName },
+            },
             required: ["gather"],
             additionalProperties: false,
           },

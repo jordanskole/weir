@@ -90,7 +90,7 @@ import type { Meta } from "./envelope.js";
 import type { GatherGroup } from "./lineage.js";
 import type { Program } from "./implementation.js";
 import type { AnyEdgeDef, Envelope, Failed, InputSpec, NodeDef, OutputSpec, PayloadOf } from "./types.js";
-import { Identity, failedEdgeName, failedAllOfEdgeName, failedGatherEdgeName, inputEdgeNames, manyEdgeName } from "./types.js";
+import { Identity, failedEdgeName, failedAllOfEdgeName, failedGatherEdgeName, gatherKey, inputEdgeNames, manyEdgeName } from "./types.js";
 import { hashEdge } from "./hash.js";
 import type { Trace } from "./trace.js";
 
@@ -797,6 +797,11 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
       // exists only for a directly constructed `NodeDef` that skipped it, and
       // the membrane rejects that collection anyway rather than inventing a
       // key convention of its own.
+      // Keyed through `gatherKey`, the same rule elaboration validated — so a
+      // gathered failure edge keys by the *failed element's* index rather than
+      // by instance id, and `reportFailures`' collection lines up with
+      // `summarizeCorridor`'s (docs/superpowers/specs/2026-10-01-gather-settled.md §4).
+      const memberKey = gatherKey(gatheredEdge);
       const collection: Record<string, unknown> = {};
       // The collection token first, then the members. Citing the barrier as
       // well as its contents is what puts the gather's output *downstream of
@@ -807,7 +812,13 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
       const causationIds: string[] = [group.collection.id];
       for (const member of group.members) {
         const payload = member.payload as Record<string, unknown>;
-        collection[gatheredEdge.index === undefined ? member.id : String(payload[gatheredEdge.index])] = payload;
+        const key =
+          memberKey === undefined
+            ? member.id
+            : memberKey.via === "self"
+              ? String(payload[memberKey.field])
+              : String((payload.input as Record<string, unknown> | undefined)?.[memberKey.field]);
+        collection[key] = payload;
         causationIds.push(member.id);
       }
       input = collection;
@@ -1217,7 +1228,45 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
         // a fired barrier re-forming.
         const eaten = consumedBy(nodeName);
         const members = eligibleForEdge(program, log, eaten, nodeName, nodeDef.input.edge.name, correlationId);
-        const failed = failedEdgeNames.flatMap((edgeName) => log.instances(edgeName, correlationId));
+        /**
+         * The node's other declared outcomes — `settled:`
+         * (docs/superpowers/specs/2026-10-01-gather-settled.md).
+         *
+         * Read straight from the log rather than through `eligibleForEdge`,
+         * for the same reason a collection token is: these are not on an arc
+         * *to* this node. Nothing consumes them here — they resolve an element
+         * without being handed over, and the node that does consume them is a
+         * separate gather on their own wire.
+         */
+        const settledNames = (nodeDef.input.settled ?? []).map((edge) => edge.name);
+        const settledInstances = settledNames.flatMap((edgeName) => log.instances(edgeName, correlationId));
+        /**
+         * **A declared outcome is not a cause of death**, and the declared set
+         * is `{edge} ∪ settled` — both halves, which a first version got wrong.
+         *
+         * Excluding only `settled` left a node that *gathers* a failure edge
+         * with its own members counted as failures. The gathered edge is the
+         * most declared outcome there is.
+         *
+         * **Including the gathered edge here is currently unreachable, and is
+         * kept because it is correct rather than because a test needs it.**
+         * `isDead` is gated on `resolved < size`, and a complete group is never
+         * dead whatever failed inside it — so the difference only shows for a
+         * group that is incomplete *and* still able to complete. The pulse loop
+         * assesses every element of a spread in one pulse, so that state does
+         * not arise: by the time a gather is offered, each element has either
+         * resolved or never will. Two attempts to build a fixture for it both
+         * came back green, which is why this says so instead of implying
+         * otherwise.
+         *
+         * Without this filter at all, a `Failed_X` named in `settled:` would
+         * still kill the group it was declared to be tolerated in, and widening
+         * the barrier would change nothing.
+         */
+        const declaredOutcomes = [nodeDef.input.edge.name, ...settledNames];
+        const failed = failedEdgeNames
+          .filter((edgeName) => !declaredOutcomes.includes(edgeName))
+          .flatMap((edgeName) => log.instances(edgeName, correlationId));
         // **Two barriers, because there are two shapes**
         // (docs/superpowers/specs/2026-09-29-gather-until.md). A spread's is a
         // count the collection token records; a cycle's is the arrival of its
@@ -1232,6 +1281,7 @@ export async function runNetlist(program: Program, run: Run, host: Host): Promis
                 ),
                 members,
                 failed,
+                settledInstances,
               )
             : gatherUntilGroups(
                 log,

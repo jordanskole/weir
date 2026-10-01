@@ -689,3 +689,237 @@ describe("gather … until — a barrier for a set discovered by running", () =>
     }
   });
 });
+
+describe("gather … settled — partition, beside sequence", () => {
+  const f = (l: string) => defineField({ type: "utf8", label: l, description: "d", nullable: false });
+  const keyed = (name: string) =>
+    defineEdge({ name, label: name, description: "d", index: "pin", fields: { pin: f("I") } });
+  const Corridor = defineEdge({ name: "Corridor", label: "C", description: "d", fields: { v: f("V") } });
+  const Parcel = keyed("Parcel");
+  const Card = keyed("Card");
+  /**
+   * The **real** synthesized shape: `{ input: <edge>, reason }`, with no index
+   * of its own. A first version of this fixture gave it `index: pin` and a
+   * `pin` field, which keyed fine and then failed the membrane's assertion —
+   * the group formed correctly and the firing died after, which is a confusing
+   * place to debug from. `gatherKey` keys it by the failed element's index,
+   * read through `input`.
+   */
+  const FailedParcel = defineEdge({
+    name: "Failed_Parcel",
+    label: "F",
+    description: "d",
+    fields: { input: Parcel, reason: f("R") },
+  });
+  const Sum = defineEdge({ name: "Sum", label: "S", description: "d", fields: { n: f("N") } });
+  const Rep = defineEdge({ name: "Rep", label: "R", description: "d", fields: { n: f("N") } });
+
+  /** Four parcels; `fails` names the ones whose assessment throws. */
+  const corridorProgram = (fails: string[], settled: unknown[] | undefined, extra: Record<string, unknown> = {}) => {
+    const spread = defineNode({
+      name: "spreadParcels",
+      input: single(Corridor),
+      output: many(Parcel),
+      fn: () => ({ a: { pin: "a" }, b: { pin: "b" }, c: { pin: "c" }, d: { pin: "d" } }),
+    });
+    const assess = defineNode({
+      name: "assessParcel",
+      input: single(Parcel),
+      output: single(Card),
+      fn: (p: { pin: string }) => {
+        if (fails.includes(p.pin)) throw new Error("county server timed out");
+        return { pin: p.pin };
+      },
+    });
+    const summarize = {
+      name: "summarizeCorridor",
+      output: single(Sum),
+      input: { kind: "gather" as const, edge: Card, ...(settled !== undefined && { settled }) },
+      fn: (c: Record<string, unknown>) => ({ n: Object.keys(c).sort().join(",") }),
+    };
+    return {
+      fields: {},
+      // `Failed_Parcel` is declared because `elaborate` synthesizes one per
+      // edge. Omitting it logs the failure with no envelope — and therefore no
+      // lineage — so it descends from no collection and resolves nothing. That
+      // is a hand-built-fixture artifact, not a behaviour, and it cost a
+      // debugging round to find.
+      edges: { Corridor, Parcel, Card, Failed_Parcel: FailedParcel, Sum, Rep },
+      nodes: { spreadParcels: spread, assessParcel: assess, summarizeCorridor: summarize, ...extra },
+      wiring: {
+        origins: ["spreadParcels"],
+        feeds: {
+          spreadParcels: ["assessParcel", "summarizeCorridor", ...Object.keys(extra)],
+          assessParcel: ["summarizeCorridor", ...Object.keys(extra)],
+        },
+      },
+    } as never;
+  };
+
+  const run = async (program: never, id: string) => {
+    const log = new InMemoryLog();
+    const result = await runNetlist(program, { correlationId: id, originPayloads: { spreadParcels: { v: "c" } } }, { log, maxPulses: 24 });
+    return { log, result };
+  };
+
+  /**
+   * **Spec Testing #1 — the motivating case.** One failure in 3,265 currently
+   * produces nothing at all, because the count never reaches N and the group is
+   * marked dead. The corridor summary is the whole deliverable.
+   *
+   * Break-proof: dropping `settledInstances` from `gatherGroups`' completeness
+   * sum leaves `resolved` at three of four and nothing fires — which is exactly
+   * today's behaviour, and the bug.
+   */
+  it("fires with the successes when one element failed", async () => {
+    const { log, result } = await run(corridorProgram(["c"], [FailedParcel]), "x");
+
+    expect(log.instances("Card", "x").map((i) => (i.payload as { pin: string }).pin)).toEqual(["a", "b", "d"]);
+    expect(log.instances("Failed_Parcel", "x")).toHaveLength(1);
+    // The node received the three cards, and nothing else.
+    expect(log.instances("Sum", "x").map((i) => i.payload)).toEqual([{ n: "a,b,d" }]);
+    expect(log.instances("Failed_Many_Card", "x")).toHaveLength(0);
+    expect(result.residue).toEqual([]);
+  });
+
+  /**
+   * **Spec Testing #2 — today's rule is the degenerate case, not a casualty.**
+   * With no `settled:` the declared set is `{Card}`, a `Failed_Parcel` falls
+   * outside it, and the group dies exactly as it does now. The guard against
+   * this feature quietly replacing all-or-nothing.
+   */
+  it("still dies with no `settled:` declared", async () => {
+    const { log } = await run(corridorProgram(["c"], undefined), "y");
+
+    expect(log.instances("Sum", "y")).toHaveLength(0);
+    expect(log.instances("Failed_Many_Card", "y")).toHaveLength(1);
+  });
+
+  /**
+   * **Spec Testing #3 — the correction that changed the design.** A first draft
+   * handed the node a bag of successes *and* failures, which puts the branch
+   * inside the node. `settled:` widens what closes the barrier, never what the
+   * node receives.
+   *
+   * Break-proof: there is nothing to break here, which is the point — the
+   * payload path was never touched, so this asserts an absence. Stated plainly
+   * rather than dressed as proof.
+   */
+  it("hands the node a collection of its own edge, never a bag", async () => {
+    const seen: unknown[] = [];
+    const program = corridorProgram(["c"], [FailedParcel]) as unknown as {
+      nodes: { summarizeCorridor: { fn: (c: unknown) => unknown } };
+    };
+    const original = program.nodes.summarizeCorridor.fn;
+    program.nodes.summarizeCorridor.fn = (c: unknown) => {
+      seen.push(c);
+      return original(c);
+    };
+
+    await run(program as never, "z");
+
+    expect(seen).toHaveLength(1);
+    // Keyed by each card's own index — no `Card` / `Failed_Parcel` tier.
+    expect(Object.keys(seen[0] as object).sort()).toEqual(["a", "b", "d"]);
+  });
+
+  /**
+   * **Spec Testing #4.** Three of four resolved is not a barrier closing. A
+   * barrier that fires on "some elements exist" is a race, not a barrier.
+   */
+  it("does not fire while an element is still unresolved", async () => {
+    // Stopped by firing budget, not by pulses: a spread's elements are all
+    // offered in the same pulse, so only a firing cap leaves some unassessed.
+    const log = new InMemoryLog();
+    const result = await runNetlist(
+      corridorProgram([], [FailedParcel]),
+      { correlationId: "w", originPayloads: { spreadParcels: { v: "c" } } },
+      { log, budget: 3 },
+    );
+
+    expect(result.stopped).toBe("budget");
+    // Some elements resolved, not all — so the barrier is still open.
+    expect(log.instances("Card", "w").length).toBeGreaterThan(0);
+    expect(log.instances("Card", "w").length).toBeLessThan(4);
+    expect(log.instances("Sum", "w")).toHaveLength(0);
+  });
+
+  /**
+   * **Spec Testing #5.** Every element failing now fires with an **empty**
+   * collection rather than `Failed_Many_X`. The honest answer: nothing
+   * succeeded, and the run says so instead of refusing to answer.
+   */
+  it("fires with an empty collection when every element failed", async () => {
+    const { log } = await run(corridorProgram(["a", "b", "c", "d"], [FailedParcel]), "v");
+
+    expect(log.instances("Card", "v")).toHaveLength(0);
+    expect(log.instances("Sum", "v").map((i) => i.payload)).toEqual([{ n: "" }]);
+    expect(log.instances("Failed_Many_Card", "v")).toHaveLength(0);
+  });
+
+  /**
+   * **Spec Testing #11, and the assertion the corrected diagram rests on.**
+   *
+   * Two single-input gathers over the same spread, each receiving only its own
+   * edge. This is the topology-level partition — and the first diagram of this
+   * drew a box implying the pair was the unit, which it is not: the test below
+   * shows one works alone.
+   */
+  it("lets two gathers over one spread each fire with their own edge", async () => {
+    const reportFailures = {
+      name: "reportFailures",
+      output: single(Rep),
+      input: { kind: "gather" as const, edge: FailedParcel, settled: [Card] },
+      fn: (c: Record<string, unknown>) => ({ n: String(Object.keys(c).length) }),
+    };
+    const { log } = await run(corridorProgram(["c"], [FailedParcel], { reportFailures }), "u");
+
+    expect(log.instances("Sum", "u").map((i) => i.payload)).toEqual([{ n: "a,b,d" }]);
+    expect(log.instances("Rep", "u").map((i) => i.payload)).toEqual([{ n: "1" }]);
+  });
+
+  /**
+   * **The claim the corrected diagram makes, and the reason the "shared
+   * barrier" box was wrong.** Each gather evaluates its own barrier against the
+   * same collection token — convergence, not coordination — so one works with
+   * no sibling in the program at all.
+   *
+   * Break-proof: none available, because there is no coupling to remove. What
+   * this guards is a future implementation that *introduces* coupling, which
+   * would redden it.
+   */
+  it("works with no sibling gather in the program", async () => {
+    const { log, result } = await run(corridorProgram(["c"], [FailedParcel]), "t");
+
+    expect(Object.keys((await corridorProgram(["c"], [FailedParcel])) as object)).toContain("nodes");
+    expect(log.instances("Sum", "t").map((i) => i.payload)).toEqual([{ n: "a,b,d" }]);
+    expect(result.residue).toEqual([]);
+  });
+
+  /**
+   * **A test that is deliberately absent, recorded so the gap is intentional.**
+   *
+   * `runtime.ts` excludes the *gathered* edge from the failure set as well as
+   * `settled`, so a node gathering `Failed_Parcel` cannot be killed by the very
+   * instances it exists to collect. Removing that exclusion reddens **nothing**,
+   * and two fixtures were written trying to make it redden before concluding it
+   * is unreachable: `isDead` is gated on `resolved < size`, a complete group is
+   * never dead whatever failed inside it, and the pulse loop assesses every
+   * element of a spread in one pulse — so by the time a gather is offered, each
+   * element has either resolved or never will.
+   *
+   * The code is labelled as unreachable at the site. Noted here too because a
+   * reader of these tests would otherwise reasonably assume the exclusion is
+   * covered.
+   */
+
+  /** Spec Testing #9: two settled sets are two contracts. */
+  it("fingerprints `settled`", async () => {
+    const { hashNode } = await import("./hash.js");
+    const base = { name: "g", output: single(Sum) };
+    const plain = await hashNode({ ...base, input: { kind: "gather", edge: Card } } as never);
+    const settled = await hashNode({ ...base, input: { kind: "gather", edge: Card, settled: [FailedParcel] } } as never);
+
+    expect(plain.hash).not.toBe(settled.hash);
+  });
+});

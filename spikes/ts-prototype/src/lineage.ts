@@ -103,6 +103,20 @@ export function gatherGroups(
   collections: LoggedInstance[],
   candidates: LoggedInstance[],
   failures: LoggedInstance[],
+  /**
+   * Instances of the node's other **declared outcomes** — `settled:`
+   * (docs/superpowers/specs/2026-10-01-gather-settled.md).
+   *
+   * These count toward completeness and are **not** handed to the node. A
+   * gather's barrier is "every element resolved", and resolved has always meant
+   * "produced an instance of the gathered edge" — a declared set of one.
+   * Widening the set is the feature; the payload is untouched, because a node
+   * takes a single input and the partition lives in the topology.
+   *
+   * The caller also removes these from `failures`, so a `Failed_X` named here
+   * stops killing the group — which is the whole point for a batch.
+   */
+  settledInstances: LoggedInstance[] = [],
 ): GatherGroup[] {
   if (collections.length === 0) return [];
   const collectionById = new Map(collections.map((collection) => [collection.id, collection]));
@@ -136,18 +150,30 @@ export function gatherGroups(
     if (collection !== undefined) dead.add(collection.id);
   }
 
+  // Same nearest-ancestor walk, for the outcomes that resolve an element
+  // without being handed to the node.
+  const settledByCollection = new Map<string, number>();
+  for (const instance of settledInstances) {
+    const collection = nearestCollection(instance);
+    if (collection === undefined) continue;
+    settledByCollection.set(collection.id, (settledByCollection.get(collection.id) ?? 0) + 1);
+  }
+
   const groups: GatherGroup[] = [];
   for (const collection of collections) {
     const members = [...(membersByCollection.get(collection.id) ?? [])].sort((a, b) => a.seq - b.seq);
     const size = entryCount(collection.payload);
+    // **Resolved, not received.** The node gets `members`; the barrier counts
+    // every element that reached a declared outcome.
+    const resolved = members.length + (settledByCollection.get(collection.id) ?? 0);
     // An empty collection fires immediately with an empty collection, never
     // waits for the first of zero things (spec §5): `traverse` over an empty
     // structure yields an empty structure, and `extractEntities` finding
     // nothing recognizable in an alert is an ordinary outcome rather than a
     // hypothetical. It falls out of the count rather than needing a case —
     // `0 === 0` — which is the check this comment exists to keep honest.
-    const isDead = dead.has(collection.id) && members.length < size;
-    if (!isDead && members.length !== size) continue;
+    const isDead = dead.has(collection.id) && resolved < size;
+    if (!isDead && resolved !== size) continue;
     groups.push({ collection, size, members, dead: isDead });
   }
   return groups;

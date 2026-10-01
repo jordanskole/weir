@@ -1,6 +1,6 @@
 # A gather is all-or-nothing, and a batch wants partial success
 
-Status: specced, not built — `2026-10-01-gather-settled.md`, status draft.
+Status: resolved (2026-10-01).
 Last grounded: 2026-10-01 — split out of
 [run granularity](run-granularity.md), whose other two blockers both shipped.
 

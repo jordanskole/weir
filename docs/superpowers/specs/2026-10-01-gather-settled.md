@@ -1,6 +1,6 @@
 # `gather … accepting`: partition, beside sequence
 
-Status: draft.
+Status: implemented.
 
 ## Motivation
 
@@ -218,3 +218,40 @@ break-proof showed — including breaks that do **not** redden.
     receiving only its own — the topology-level partition, which is the shape
     this is actually for.
 12. Every existing example still elaborates and runs, and no contract hash moves.
+
+## What the build found
+
+**`until` was never fingerprinted.** Shipped 2026-09-29 and caught adding
+`settled` here: `fingerprintInput` returned `{ kind, edge }` for a gather and
+nothing else, so two gathers differing only in their barrier hashed identically
+and an accepted implementation stayed valid across a changed one. TypeScript did
+not catch it either, because an excess property arriving through a conditional
+spread is not checked. Both are fingerprinted now, and the fingerprint *type*
+carries them so the next addition cannot repeat it.
+
+**The two-node partition this spec draws could not be declared.** `reportFailures:
+gather Failed_Parcel` was rejected at elaboration — *"`Failed_Parcel` declares no
+index"* — because a synthesized failure edge's fields are `{ input, reason }` and
+it has no index of its own. The design in §4 was unbuildable as written.
+
+Fixed by keying a gathered failure collection on the **failed element's** index,
+read through `input`, in a shared `gatherKey` helper. That is better than the
+alternative of keying by instance id, and for a reason worth keeping: it makes
+`reportFailures`' collection use the *same keys* as `summarizeCorridor`'s, so a
+reader can line the two up and ask which parcels failed. Keying by id would
+answer "how many" and nothing else.
+
+**The index rule lived in three places.** Elaboration, the runtime's keying, and
+the membrane's collection assertion each enforced it separately, and the membrane
+was still rejecting what the other two had learned to accept — so the group formed
+correctly and the firing died afterwards, which is a confusing place to debug
+from. All three now ask `gatherKey`.
+
+**One correction is unreachable and is labelled as such.** Excluding the
+*gathered* edge from the failure set — so a node gathering `Failed_X` is not
+killed by its own members — reddens nothing. `isDead` is gated on
+`resolved < size`, a complete group is never dead whatever failed inside it, and
+the pulse loop assesses every element of a spread in one pulse, so the state that
+would distinguish them does not arise. Two fixtures were written trying to make
+it redden before concluding that. Kept because it is correct; labelled at the
+site and in the test file so it does not read as covered.
