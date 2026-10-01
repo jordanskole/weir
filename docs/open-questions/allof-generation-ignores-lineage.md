@@ -40,6 +40,25 @@ generator produces.
 This is the mirror of the `gather … until` finding: a rule that is correct for one
 shape, applied to a shape it was not derived from.
 
+**The sharpest statement of it**, from manuscript-review's own README, which
+documents the runtime hazard this example exists for. The fact arm is one hop longer
+than the style arm, so there is a real pulse where `StyleReport#2` and `FactReport#1`
+are both unclaimed:
+
+```
+pulse 3   Revision#3   StyleReport#2   FactFinding#2   FactReport#1
+                           ^                               ^
+                           +---- latest-wins pairs these ---+     wrong
+```
+
+> *"Grouping by **nearest common ancestor** pairs `StyleReport#1` with `FactReport#1`
+> instead, because both descend from `Revision#1`."*
+
+So the generator was producing exactly the bag that **latest-wins** would have
+produced — the join bug that nearest-common-ancestor was built to prevent — and then
+failing the implementation for refusing it. The runtime was fixed and the generator
+was still simulating the old defect.
+
 ## RESOLVED: the declaration already said it, in the property
 
 The four candidate mechanisms below were all weighed and none was built, because a

@@ -17,3 +17,20 @@ fields:
     validations:
       minLength: 1
       maxLength: 500
+  # ADDED 2026-10-01. `Revision` carries `round` and `checkFacts` used to drop it,
+  # so by the time `confirmCitations` needed the round the only surviving copy was
+  # inside `claim`'s prose -- the example's "claim at round 1". Any implementation
+  # satisfying that example had to parse the round back out of a utf8 field
+  # declared only as 1..500 characters, and then decline every generated claim,
+  # which the acceptance gate reports as `vacuous`.
+  #
+  # That is friction #1 in miniature: structured data smuggled through an opaque
+  # string. Declared here instead, so the round crosses the wire as itself.
+  round:
+    type: uint8
+    label: round
+    description: Which review round this finding is from, carried through from the revision
+    nullable: false
+    validations:
+      min: 1
+      max: 10

@@ -2845,8 +2845,14 @@ describe("the example topologies for iteration and lineage", () => {
           : { edge: "Revision", payload: { id: r.id.replace(/-r\\d+$/, "") + "-r" + (r.round + 1), text: r.text + " (revised)", round: r.round + 1 } };
       }`,
       checkStyle: `export default function checkStyle(r) { return { revision_id: r.id, note: "style ok at round " + r.round }; }`,
-      checkFacts: `export default function checkFacts(r) { return { revision_id: r.id, claim: "claim at round " + r.round }; }`,
-      confirmCitations: `export default function confirmCitations(f) { return { revision_id: f.revision_id, note: "facts ok at round " + f.claim.slice(-1) }; }`,
+      // `FactFinding` carries `round` since 2026-10-01. Before that it did not, and
+      // this fixture recovered the round with `f.claim.slice(-1)` — the last
+      // character of a prose string — which silently yields "0" at round 10, the
+      // declared maximum. Jordan's agent, scaffolded from the same declarations,
+      // independently reached for a regex over the same field and then declined
+      // every generated claim. Two implementers, same smuggling, one latent bug.
+      checkFacts: `export default function checkFacts(r) { return { revision_id: r.id, claim: "claim at round " + r.round, round: r.round }; }`,
+      confirmCitations: `export default function confirmCitations(f) { return { revision_id: f.revision_id, note: "facts ok at round " + f.round }; }`,
       verdict: `export default function verdict(b) { return { revision_id: b.StyleReport.revision_id, combined: b.StyleReport.note + " | " + b.FactReport.note }; }`,
     });
     const log = new InMemoryLog();

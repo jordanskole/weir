@@ -9,6 +9,12 @@ fields:
     validations:
       minLength: 1
       maxLength: 100
+  # maxLength was 1000, which is 3 short of what this edge promises to carry:
+  # StyleReport.note and FactReport.note are each maxLength 500 and the example's
+  # format joins them with " | ", so the maximal output is 1003. The node was
+  # unimplementable at its own bounds -- found once the allOf generator started
+  # producing bags whose revision_ids match, which is what let a correct
+  # implementation get far enough to overflow.
   combined:
     type: utf8
     label: combined
@@ -16,4 +22,4 @@ fields:
     nullable: false
     validations:
       minLength: 1
-      maxLength: 1000
+      maxLength: 1003
