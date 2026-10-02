@@ -46,13 +46,45 @@ round looks obligatory. A `weir check` or `weir sys` line reporting *"edge X dec
 question to the author rather than to an implementer. **This is the real residue and
 is what this question is now about.**
 
-**2. A pure node cannot mint an identity.** If an author genuinely does need a natural
-key unique per instance produced inside a cycle, it has to be a deterministic function
-of the node's input, so it must encode whatever distinguishes the instances — there is
-no surrogate escape, because a UUID or counter is nondeterminism and Principle 0 keeps
-it out of a node. weir already mints `LoggedInstance.id` and does not expose it, and
-`Identity` is the caller's JWT (`{sub, iss}`), not that. Worth knowing; not a defect
-until somebody needs it, and the case that prompted this did not.
+**2. A pure node cannot mint a *random* identity** — and that is weaker than what I
+first wrote here, which was "cannot mint an identity". A pure node can derive one
+perfectly well: a hash, a counter read off its input. What it cannot do is invent a
+fresh random one, because a UUID is nondeterminism and Principle 0 keeps that out of a
+node.
+
+**RESOLVED 2026-10-01, by somebody needing it.** `todo-list`'s `CreateTodo` takes
+`NewTodo` and must produce a `Todo`, whose `id` is declared *"unique within its list"*.
+Jordan removed `id` from `NewTodo`, and the node then had nothing to derive an id from.
+
+Two things fell out, and the second is the answer:
+
+**The mismatch is a uniqueness scope the node cannot observe.** `Todo.id` promises
+list-uniqueness and `CreateTodo` never sees a list. That is the defect, and it is
+independent of uuid-versus-derived: a content hash does not satisfy
+"unique within its list" either, since two identical titles in one list collide. Only a
+node that sees the list can honour that scope — or the caller can, by supplying the id.
+
+**With persistence, the database mints it, and that is an effect.** Asked "what if we
+wanted to save the todo to a db?", the shape becomes:
+
+```
+NewTodo      → CreateTodo [pure]   → UnsavedTodo    (no id; nothing has assigned one)
+UnsavedTodo  → saveTodo   [effect] → Todo           (id from the database)
+```
+
+`SERIAL`, `uuid_generate_v4()`, `RETURNING id` — identity minting is exactly the kind
+of nondeterminism weir already has a home for, and it is the effect boundary. So this
+is not a weir gap at all: **effects exist for precisely this, and the example simply has
+none.** `todo-list` declares five nodes and zero effects, pure end to end, which is why
+the id had nowhere to come from.
+
+The payoff is better than a workaround. `UnsavedTodo` and `Todo` become distinct edges
+meaning "not yet persisted" and "persisted", and the id's presence is the type-level
+record that persistence happened — weir's own "a decision becomes a type" claim,
+applied to identity.
+
+Third time today a finding resolved to *you were holding it wrong* rather than to new
+machinery, after the invented provenance and the packed `Revision.id`.
 
 ########################################################################
 # THE ORIGINAL ARGUMENT, PRESERVED. THE "FORCED" CLAIM IS WRONG.       #
