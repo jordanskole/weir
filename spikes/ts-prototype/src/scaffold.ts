@@ -531,9 +531,20 @@ function generatedInputReport(node: NodeDecl): string {
     samples = [];
   }
 
+  /**
+   * The reported size is the **value's** length, not the JSON's.
+   *
+   * It used to be `JSON.stringify(v).length`, which counts the surrounding quotes
+   * and any escapes — so a field capped at 200 characters reported "(202 chars)" and
+   * sent an implementer looking for a validation bug that was not there. Caught by
+   * an agent noticing 201/202 against a declared max of 200 and flagging it as
+   * unconfirmed rather than assuming either way.
+   */
   const trunc = (v: unknown): string => {
     const text = JSON.stringify(v) ?? "undefined";
-    return text.length <= 90 ? text : `${text.slice(0, 90)}… (${text.length} chars)`;
+    if (text.length <= 90) return text;
+    const size = typeof v === "string" ? `${v.length} characters` : `${text.length} bytes of JSON`;
+    return `${text.slice(0, 90)}… (${size})`;
   };
 
   const bulk: string[] = [];
