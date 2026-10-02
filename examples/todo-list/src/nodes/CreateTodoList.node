@@ -1,0 +1,14 @@
+label: Create todo list
+description: Creates a new todo list
+input: ListInput
+output: TodoList
+examples:
+  - given:
+      ListInput:
+        title: "Grocery List"
+        description: "A list of groceries to buy"
+    expect:
+      TodoList:
+        title: "Grocery List"
+        description: "A list of groceries to buy"
+        tasks: {}

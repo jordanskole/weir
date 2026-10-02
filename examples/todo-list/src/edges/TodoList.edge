@@ -1,6 +1,10 @@
 label: Todo List
 description: A list of todos a person needs to do, or has done
 fields:
+  id:
+    minted: uuid
+    label: ID
+    description: A stable identifier for this todo list, unique within its owner
   title: 
     type: utf8    
     label: Title

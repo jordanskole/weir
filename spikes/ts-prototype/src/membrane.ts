@@ -838,17 +838,31 @@ function fillMinted(
    * membrane copies and the `fn` still never supplies it, so "never suppliable" holds
    * for a transform exactly as it does for a creation.
    */
-  const carried = (key: string): string | undefined => {
+  /**
+   * Carried only from an input of the **same edge**, never merely a field of the same
+   * name.
+   *
+   * CORRECTED 2026-10-01 after matching on the field name alone, which was wrong in a
+   * way `todo-list` showed immediately: `StartList: Todo -> TodoList` has a minted `id`
+   * on *both* edges, so starting a list gave the list **the todo's identity**. Two
+   * different entities, one id. Verified before and after.
+   *
+   * Matching the edge is the right test because a minted field is an identity, and an
+   * identity belongs to a kind of thing. `CompleteTodo: Todo -> Todo` and
+   * `EditTodo: allOf[Todo, TodoInput] -> Todo` are the same `Todo` coming out as went
+   * in, so the id carries. `AddTodoToList: allOf[Todo, TodoList] -> TodoList` carries
+   * the **list's** id and not the todo's, which name-matching could pick either way
+   * depending on declaration order. `StartList` and `AnalyzeList` produce a different
+   * edge than they consume, so they mint.
+   */
+  const carried = (edge: AnyEdgeDef, key: string): string | undefined => {
     if (input.kind === "single") {
-      const declares = mintedKeysOf(input.edge).includes(key);
-      if (!declares) return undefined;
+      if (input.edge.name !== edge.name) return undefined;
       const value = (inputPayload as Record<string, unknown> | null)?.[key];
       return typeof value === "string" ? value : undefined;
     }
     if (input.kind === "allOf") {
-      const sources = input.edges.filter((e) => mintedKeysOf(e).includes(key));
-      // Ambiguity is refused at elaboration, so one source at most reaches here.
-      const source = sources[0];
+      const source = input.edges.find((e) => e.name === edge.name);
       if (source === undefined) return undefined;
       const bag = inputPayload as Record<string, Record<string, unknown>> | null;
       const value = bag?.[source.name]?.[key];
@@ -869,7 +883,7 @@ function fillMinted(
             `omit it; the membrane mints it, or carries it from the input that already has one.`,
         );
       }
-      record[key] = supplied?.[`${edge.name}.${key}`] ?? carried(key) ?? crypto.randomUUID();
+      record[key] = supplied?.[`${edge.name}.${key}`] ?? carried(edge, key) ?? crypto.randomUUID();
     }
   };
 

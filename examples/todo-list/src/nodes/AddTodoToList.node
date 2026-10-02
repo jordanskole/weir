@@ -9,6 +9,7 @@ output:
 examples:
   - given:
       TodoList:
+        id: "list-1"
         title: "Grocery List"
         description: "A list of groceries to buy"
         tasks: {}

@@ -1,0 +1,15 @@
+label: Analyzed List
+description: The current status for a given list, how many todos have been completed and how many remain
+fields: 
+    "...TodoList":
+    completed: 
+      type: uint16
+      label: Completed todos
+      description: How many todos in the list have been completed
+      nullable: false
+    incomplete: 
+      type: uint16
+      label: Incomplete todos
+      description: How many todos in the list still need to be completed
+      nullable: false
+

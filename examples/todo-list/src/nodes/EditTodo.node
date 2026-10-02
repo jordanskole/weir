@@ -1,9 +1,17 @@
-label: Create Todo
-description: Creates a new task
-input: TodoInput
+label: Edit Todo
+description: Edits an existing task
+input: 
+  allOf:
+    - Todo
+    - TodoInput
 output: Todo
 examples:
   - given:
+      Todo:
+        id: "todo-1"
+        title: "Buy milk and egg"
+        description: "Get 2% milk from the store"
+        is_complete: false
       TodoInput:
         title: "Buy milk and eggs"
         description: "Get 2% milk from the store"

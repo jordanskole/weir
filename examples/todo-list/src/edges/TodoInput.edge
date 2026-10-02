@@ -1,0 +1,19 @@
+label: Todo Input
+description: What a caller provides to update a task
+fields:
+  title:
+    type: utf8
+    label: Title
+    description: The title of the task
+    nullable: true
+    validations:
+      minLength: 10
+      maxLength: 200
+  description:
+    type: utf8
+    nullable: true
+    label: Description
+    description: A longer explanation of the task
+    validations:
+      minLength: 10
+      maxLength: 2000

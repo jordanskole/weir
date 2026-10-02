@@ -1,5 +1,9 @@
 label: New Todo
-description: What a caller provides to create a task — is_complete always starts false, callers can't override it
+description: What a caller provides to create a task
 fields:
-  "...Todo":
-  is_complete: false
+  "...TodoInput":
+  title:
+    type: utf8
+    label: Title
+    description: The title of the task
+    nullable: false

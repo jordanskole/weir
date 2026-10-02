@@ -719,7 +719,7 @@ describe("runNetlist", () => {
    * was undefined — a dead node recorded as expected behaviour. Nothing
    * produced `TodoList`, so the allOf could never be satisfied; the only
    * test where it fired staged `TodoList` into the log by hand.
-   * `startList` now gives the join a real second arm, and both arms descend
+   * `StartList` now gives the join a real second arm, and both arms descend
    * from CreateTodo's one `Todo` instance, so the lineage group forms.
    * The arms are deliberately different lengths — `Todo` reaches the join in
    * one hop, `TodoList` in two — so the join is exercised on ordering rather
@@ -731,15 +731,23 @@ describe("runNetlist", () => {
       const raw = await elaborate(TODO_LIST_SRC);
 
       for (const [name, fn] of [
-        ["CreateTodo", `export default function CreateTodo(payload) { return payload; }`],
-        ["CompleteTodo", `export default function CompleteTodo(payload) { return { ...payload, is_complete: true }; }`],
+        // The three nodes Jordan added on 2026-10-01. Present because
+        // `elaborateWithImplementations` needs one per declared node, not because the
+        // diamond this test is about touches them — none is wired into the topology yet.
+        ["EditTodo", `export default function EditTodo(bag) { return { title: bag.TodoInput.title, description: bag.TodoInput.description, is_complete: bag.Todo.is_complete }; }`],
+        ["AnalyzeList", `export default function AnalyzeList(l) { const t = Object.values(l.tasks); const done = t.filter((x) => x.is_complete).length; return { title: l.title, description: l.description, tasks: l.tasks, completed: done, incomplete: t.length - done }; }`],
+        ["CreateTodoList", `export default function CreateTodoList(p) { return { title: p.title, description: p.description, tasks: {} }; }`],
+        // `Todo.id` is host-minted since 2026-10-01, so no implementation returns it:
+        // `CreateTodo` has the membrane mint one, and the others let it carry.
+        ["CreateTodo", `export default function CreateTodo(p) { return { title: p.title, description: p.description, is_complete: false }; }`],
+        ["CompleteTodo", `export default function CompleteTodo(p) { return { title: p.title, description: p.description, is_complete: true }; }`],
         [
-          "startList",
-          `export default function startList(todo) { return { title: todo.title, description: todo.description, tasks: {} }; }`,
+          "StartList",
+          `export default function StartList(todo) { return { title: todo.title, description: todo.description, tasks: {} }; }`,
         ],
         [
           "AddTodoToList",
-          `export default function AddTodoToList(bag) { return { ...bag.TodoList, tasks: { [bag.Todo.id]: bag.Todo } }; }`,
+          `export default function AddTodoToList(bag) { return { title: bag.TodoList.title, description: bag.TodoList.description, tasks: { [bag.Todo.id]: bag.Todo } }; }`,
         ],
       ] as const) {
         const hash = (await hashNode(raw.nodes[name]!)).short;
@@ -753,34 +761,85 @@ describe("runNetlist", () => {
 
       const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { CreateTodo: todo } }, { log });
 
-      // CreateTodo, startList, CompleteTodo, AddTodoToList — all four.
+      // CreateTodo, StartList, CompleteTodo, AddTodoToList — all four.
       expect(result.firings).toBe(4);
       expect(result.stopped).toBe("quiescence");
 
-      // The join fired, and folded the Todo it was actually paired with.
-      expect(log.latest("TodoList", "thread-1")).toEqual({
+      /**
+       * `Todo.id` and `TodoList.id` are host-minted since 2026-10-01, so neither value
+       * is knowable here and both are read back rather than pinned. What is asserted is
+       * the structure around them, which is what this test was always about.
+       */
+      const completed = log.latest("Todo", "thread-1") as Record<string, unknown>;
+      const list = log.latest("TodoList", "thread-1") as Record<string, unknown>;
+      expect(typeof completed.id).toBe("string");
+      expect(typeof list.id).toBe("string");
+
+      // `CompleteTodo: Todo -> Todo` carries the id, so the completed todo is the same
+      // todo — and the join folded that same instance, keyed by it.
+      expect(completed).toEqual({
+        id: completed.id,
         title: todo.title,
         description: todo.description,
-        tasks: { "todo-1": todo },
+        is_complete: true,
       });
-      expect(log.latest("Todo", "thread-1")).toEqual({ ...todo, is_complete: true });
+      expect(list).toEqual({
+        id: list.id,
+        title: todo.title,
+        description: todo.description,
+        tasks: {
+          [completed.id as string]: {
+            id: completed.id,
+            title: todo.title,
+            description: todo.description,
+            is_complete: false,
+          },
+        },
+      });
+
+      /**
+       * And the list is not the todo. `StartList: Todo -> TodoList` produces a different
+       * edge, so it mints rather than carries — guarding a bug that shipped for an hour,
+       * where matching a minted field by *name* gave the new list the todo's identity.
+       */
+      expect(list.id).not.toBe(completed.id);
       expect(result.residue).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  it("real: CreateTodo rejects a caller trying to set is_complete — NewTodo's literal pin is enforced at invocation", async () => {
+  /**
+   * REWRITTEN 2026-10-01. This asserted that `NewTodo` pinned `is_complete: false` with
+   * a `{ literal: false }` field, so a caller sending `true` was rejected as
+   * `Failed_NewTodo`. Jordan's redesign replaced `NewTodo` with `TodoInput`, which does
+   * not declare `is_complete` **at all** — so the guarantee changed in kind rather than
+   * going away.
+   *
+   * Stronger: there is no value a caller can send, rather than one value that must
+   * match. Quieter: an undeclared field is **stripped**, not refused, so a caller
+   * sending `is_complete: true` is not told it had no effect. That trade is the point of
+   * the test now.
+   */
+  it("real: a caller cannot set is_complete — TodoInput does not declare it, so it is stripped", async () => {
     const dir = await mkdtemp(join(tmpdir(), "weir-runtime-"));
     try {
       const raw = await elaborate(TODO_LIST_SRC);
 
       for (const [name, fn] of [
-        ["CreateTodo", `export default function CreateTodo(payload) { return payload; }`],
-        ["CompleteTodo", `export default function CompleteTodo(payload) { return { ...payload, is_complete: true }; }`],
+        // The three nodes Jordan added on 2026-10-01. Present because
+        // `elaborateWithImplementations` needs one per declared node, not because the
+        // diamond this test is about touches them — none is wired into the topology yet.
+        ["EditTodo", `export default function EditTodo(bag) { return { title: bag.TodoInput.title, description: bag.TodoInput.description, is_complete: bag.Todo.is_complete }; }`],
+        ["AnalyzeList", `export default function AnalyzeList(l) { const t = Object.values(l.tasks); const done = t.filter((x) => x.is_complete).length; return { title: l.title, description: l.description, tasks: l.tasks, completed: done, incomplete: t.length - done }; }`],
+        ["CreateTodoList", `export default function CreateTodoList(p) { return { title: p.title, description: p.description, tasks: {} }; }`],
+        // `Todo.id` is host-minted since 2026-10-01, so no implementation returns it:
+        // `CreateTodo` has the membrane mint one, and the others let it carry.
+        ["CreateTodo", `export default function CreateTodo(p) { return { title: p.title, description: p.description, is_complete: false }; }`],
+        ["CompleteTodo", `export default function CompleteTodo(p) { return { title: p.title, description: p.description, is_complete: true }; }`],
         [
-          "startList",
-          `export default function startList(todo) { return { title: todo.title, description: todo.description, tasks: {} }; }`,
+          "StartList",
+          `export default function StartList(todo) { return { title: todo.title, description: todo.description, tasks: {} }; }`,
         ],
         ["AddTodoToList", `export default function AddTodoToList(payload) { return payload.TodoList; }`],
       ] as const) {
@@ -796,11 +855,20 @@ describe("runNetlist", () => {
       const result = await runNetlist(program, { correlationId: "thread-1", originPayloads: { CreateTodo: attempt } }, { log });
 
       expect(result.residue).toEqual([]);
-      expect(log.latest("Failed_NewTodo", "thread-1")).toEqual({
-        input: attempt,
-        reason: expect.stringMatching(/is_complete is pinned to false, got boolean/),
-      });
-      expect(log.latest("Todo", "thread-1")).toBeUndefined();
+
+      // Not a failure: nothing was violated, because nothing was declared.
+      expect(log.latest("Failed_TodoInput", "thread-1")).toBeUndefined();
+      expect(log.latest("Failed_NewTodo", "thread-1")).toBeUndefined();
+
+      /**
+       * The **first** Todo, not the latest: `CompleteTodo` also fires in this topology
+       * and its output is a `Todo` with `is_complete: true`, so `log.latest` reads that
+       * one. A first draft of this assertion used `latest` and read `true`, which would
+       * have looked like the caller's value taking effect.
+       */
+      const created = log.instances("Todo", "thread-1")[0]!.payload as Record<string, unknown>;
+      expect(created.is_complete).toBe(false);
+      expect(created.title).toBe(attempt.title);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -812,11 +880,19 @@ describe("runNetlist", () => {
       const raw = await elaborate(TODO_LIST_SRC);
 
       for (const [name, fn] of [
-        ["CreateTodo", `export default function CreateTodo(payload) { return payload; }`],
-        ["CompleteTodo", `export default function CompleteTodo(payload) { return { ...payload, is_complete: true }; }`],
+        // The three nodes Jordan added on 2026-10-01. Present because
+        // `elaborateWithImplementations` needs one per declared node, not because the
+        // diamond this test is about touches them — none is wired into the topology yet.
+        ["EditTodo", `export default function EditTodo(bag) { return { title: bag.TodoInput.title, description: bag.TodoInput.description, is_complete: bag.Todo.is_complete }; }`],
+        ["AnalyzeList", `export default function AnalyzeList(l) { const t = Object.values(l.tasks); const done = t.filter((x) => x.is_complete).length; return { title: l.title, description: l.description, tasks: l.tasks, completed: done, incomplete: t.length - done }; }`],
+        ["CreateTodoList", `export default function CreateTodoList(p) { return { title: p.title, description: p.description, tasks: {} }; }`],
+        // `Todo.id` is host-minted since 2026-10-01, so no implementation returns it:
+        // `CreateTodo` has the membrane mint one, and the others let it carry.
+        ["CreateTodo", `export default function CreateTodo(p) { return { title: p.title, description: p.description, is_complete: false }; }`],
+        ["CompleteTodo", `export default function CompleteTodo(p) { return { title: p.title, description: p.description, is_complete: true }; }`],
         [
-          "startList",
-          `export default function startList(todo) { return { title: todo.title, description: todo.description, tasks: {} }; }`,
+          "StartList",
+          `export default function StartList(todo) { return { title: todo.title, description: todo.description, tasks: {} }; }`,
         ],
         ["AddTodoToList", `export default function AddTodoToList(payload) { return payload.TodoList; }`],
       ] as const) {

@@ -496,6 +496,76 @@ describe("minted fields — created once, carried thereafter", () => {
     expect(edited).toEqual({ name: "after", id: made.id });
   });
 
+  /**
+   * Carried from an input of the **same edge**, never merely a field of the same name.
+   *
+   * CORRECTED after matching on the field name alone, which `todo-list` broke
+   * immediately: `StartList: Todo -> TodoList` has a minted `id` on *both* edges, so
+   * starting a list gave the list **the todo's identity**. Two different entities, one
+   * id. An identity belongs to a kind of thing, so the edge is the right test.
+   *
+   * BREAK-PROOF: matching on the key alone instead of the edge reddens this, and
+   * nothing else in the file notices — which is why it needs its own case.
+   */
+  it("does not carry an id across different edges that share the field name", async () => {
+    const List = defineEdge({
+      name: "List",
+      label: "List",
+      description: "A different thing that also has a minted id",
+      fields: {
+        id: mintedId,
+        label: defineField({ type: "utf8", label: "Label", description: "d", nullable: false }),
+      },
+    });
+    const start = defineNode({
+      name: "start",
+      input: single(Done),
+      output: single(List),
+      fn: (p: any) => ({ label: p.name }),
+    } as any);
+
+    const thing = (await membrane(makeThing as any, { name: "a widget" } as any, ctx)).result as any;
+    const list = (await membrane(start as any, thing, ctx)).result as any;
+    expect(list.label).toBe("a widget");
+    expect(list.id).toMatch(UUID);
+    expect(list.id).not.toBe(thing.id);
+  });
+
+  /** And with an `allOf`, it carries the one whose edge matches the output. */
+  it("carries the output edge's own id from an allOf, not another input's", async () => {
+    const List = defineEdge({
+      name: "List",
+      label: "List",
+      description: "d",
+      fields: {
+        id: mintedId,
+        label: defineField({ type: "utf8", label: "Label", description: "d", nullable: false }),
+      },
+    });
+    const add = defineNode({
+      name: "add",
+      input: { kind: "allOf", edges: [Done, List] },
+      output: single(List),
+      fn: (bag: any) => ({ label: `${bag.List.label}+${bag.Thing.name}` }),
+    } as any);
+
+    const thing = (await membrane(makeThing as any, { name: "w" } as any, ctx)).result as any;
+    const list = (await membrane(start0(List) as any, thing, ctx)).result as any;
+    const merged = (await membrane(add as any, { Thing: thing, List: list } as any, ctx)).result as any;
+    expect(merged.id).toBe(list.id);
+    expect(merged.id).not.toBe(thing.id);
+  });
+
+  /** Helper: a node that creates a `List` from a `Thing`, so the test has one to pass in. */
+  function start0(List: any) {
+    return defineNode({
+      name: "start0",
+      input: single(Done),
+      output: single(List),
+      fn: (p: any) => ({ label: p.name }),
+    } as any);
+  }
+
   /** The `fn` still may not supply it, on a transform as much as a creation. */
   it("keeps 'never suppliable' on a transform", async () => {
     const liar = defineNode({

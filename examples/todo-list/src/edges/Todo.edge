@@ -2,27 +2,11 @@ label: Todo
 description: A task a person needs to do, or has done
 index: id
 fields:
+  "...TodoInput":
   id:
-    type: utf8
+    minted: uuid
     label: ID
     description: A stable identifier for this task, unique within its list
-    nullable: false
-  title:
-    type: utf8
-    label: Title
-    description: The title of the task
-    nullable: false
-    validations:
-      minLength: 10
-      maxLength: 200
-  description:
-    type: utf8
-    nullable: true
-    label: Description
-    description: A longer explanation of the task
-    validations:
-      minLength: 10
-      maxLength: 2000
   is_complete:
     type: bool # bool is the only type that can't be nullable — see types.ts's FieldDef doc
     label: Is Complete

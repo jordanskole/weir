@@ -2,7 +2,7 @@
 # produces one — so naming the *edge* alone would be satisfied by an
 # intermediate `TodoList` that `startList` emitted earlier. Naming the node is
 # what makes the end instance-level.
-input: NewTodo
+input: TodoInput
 output:
   allOf:
     - TodoList
@@ -13,7 +13,7 @@ terminals:
 wiring:
   CreateTodo:
     then:
-      startList:
+      StartList:
         then:
           AddTodoToList: {}
       AddTodoToList: {}

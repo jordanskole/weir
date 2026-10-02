@@ -1,0 +1,43 @@
+label: Count Completed Todos in a List
+description: Analyzes a given Todo List to count completed and incomplete tasks
+input: 
+  TodoList
+output:
+  AnalyzedList
+examples:
+  - given:
+      TodoList:
+        id: "list-1"
+        title: "Grocery List"
+        description: "A list of groceries to buy"
+        tasks: 
+          todo-1:
+            id: "todo-1"
+            title: "Buy milk and eggs"
+            description: "Get 2% milk from the store" 
+            is_complete: true 
+          todo-2:
+            id: "todo-2"
+            title: "Buy carrots"
+            description: "Buy a 1lb bag of carrots"
+            is_complete: false
+            
+    expect:
+      AnalyzedList:
+        title: "Grocery List"
+        description: "A list of groceries to buy"
+        tasks: 
+          todo-1:
+            id: "todo-1"
+            title: "Buy milk and eggs"
+            description: "Get 2% milk from the store" 
+            is_complete: true 
+          todo-2:
+            id: "todo-2"
+            title: "Buy carrots"
+            description: "Buy a 1lb bag of carrots"
+            is_complete: false
+        completed: 1
+        incomplete: 1
+
+      

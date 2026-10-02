@@ -1581,7 +1581,15 @@ examples:
   it("loads the real todo-list example — proving allOf: input resolves against real hand-authored files", async () => {
     const result = await elaborate(TODO_LIST_SRC);
 
-    expect(Object.keys(result.nodes).sort()).toEqual(["AddTodoToList", "CompleteTodo", "CreateTodo", "startList"]);
+    expect(Object.keys(result.nodes).sort()).toEqual([
+      "AddTodoToList",
+      "AnalyzeList",
+      "CompleteTodo",
+      "CreateTodo",
+      "CreateTodoList",
+      "EditTodo",
+      "StartList",
+    ]);
     expect(result.nodes.AddTodoToList!.input).toEqual({
       kind: "allOf",
       edges: [result.edges.TodoList, result.edges.Todo],
@@ -1589,11 +1597,46 @@ examples:
     expect(result.nodes.AddTodoToList!.output).toEqual({ kind: "single", edge: result.edges.TodoList });
     expect(result.edges.Failed_Todo_TodoList).toBeDefined();
 
-    expect(result.nodes.CreateTodo!.input).toEqual({ kind: "single", edge: result.edges.NewTodo });
-    expect(result.edges.NewTodo!.fields.id).toEqual(result.edges.Todo!.fields.id);
-    expect(result.edges.NewTodo!.fields.title).toEqual(result.edges.Todo!.fields.title);
-    expect(result.edges.NewTodo!.fields.description).toEqual(result.edges.Todo!.fields.description);
-    expect(result.edges.NewTodo!.fields.is_complete).toEqual({ literal: false });
+    // `CreateTodo` takes `TodoInput` directly now; `NewTodo` is no longer wired to
+    // anything (`weir sys` shows it `from — to —`) and is kept here only as the
+    // spread-with-override case the assertions below exercise.
+    expect(result.nodes.CreateTodo!.input).toEqual({ kind: "single", edge: result.edges.TodoInput });
+
+    /**
+     * `NewTodo` spreads `TodoInput` and overrides `title`, where it used to spread
+     * `Todo` and pin `is_complete: false`. The assertions moved with the design but
+     * guard the same two things.
+     *
+     * The spread copies a field it does not override:
+     */
+    expect(result.edges.NewTodo!.fields.description).toEqual(result.edges.TodoInput!.fields.description);
+
+    /**
+     * ...and a local key replaces the spread one **whole**, not property by property.
+     * `TodoInput.title` is nullable with length bounds; `NewTodo.title` is the local
+     * override, so it is non-nullable — and carries no bounds, because whole-field
+     * replacement does not inherit them
+     * (docs/superpowers/specs/2026-09-09-edge-spread.md, "whole-field replacement only").
+     * Asserted as "differs from the source" rather than field by field, so restoring the
+     * bounds does not redden this.
+     */
+    expect(result.edges.NewTodo!.fields.title).not.toEqual(result.edges.TodoInput!.fields.title);
+    expect((result.edges.NewTodo!.fields.title as { nullable: boolean }).nullable).toBe(false);
+
+    /**
+     * A caller still cannot set `is_complete`, and now by a stronger route than the
+     * `{ literal: false }` pin this used to assert: the field is **not on `NewTodo` at
+     * all**, so there is nothing to set rather than a value that must match.
+     */
+    expect(result.edges.NewTodo!.fields.is_complete).toBeUndefined();
+    expect(result.edges.Todo!.fields.is_complete).toBeDefined();
+
+    /** And `Todo.id` is host-minted rather than caller-supplied. */
+    expect(result.edges.Todo!.fields.id).toEqual({
+      minted: "uuid",
+      label: "ID",
+      description: expect.any(String),
+    });
   });
 
   it("loads a .topology file, validating references against declared .node files", async () => {
@@ -1671,12 +1714,12 @@ wiring:
     const result = await elaborate(TODO_LIST_SRC);
 
     expect(result.wiring.origins).toEqual(["CreateTodo"]);
-    expect(result.wiring.feeds.CreateTodo?.sort()).toEqual(["AddTodoToList", "CompleteTodo", "startList"]);
+    expect(result.wiring.feeds.CreateTodo?.sort()).toEqual(["AddTodoToList", "CompleteTodo", "StartList"]);
     // Both arms of the join descend from CreateTodo's one Todo instance:
-    // Todo reaches AddTodoToList in one hop, TodoList in two via startList.
+    // Todo reaches AddTodoToList in one hop, TodoList in two via StartList.
     // That shared ancestor is what gives the allOf a lineage group to form
     // on — see docs/design-history.md, "A join is a topology boundary".
-    expect(result.wiring.feeds.startList).toEqual(["AddTodoToList"]);
+    expect(result.wiring.feeds.StartList).toEqual(["AddTodoToList"]);
   });
 
   it("lets a .topology file reference an anyOf-desugared node's original name, expanding to all shadows", async () => {
