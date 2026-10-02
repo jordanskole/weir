@@ -18,10 +18,11 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-## Open (30)
+## Open (31)
 
 Live. Ordered alphabetically, not by priority.
 
+- [Should a minted identity be a field *kind*, like a literal?](open-questions/a-minted-field-kind.md)
 - [An origin node can never iterate](open-questions/an-origin-node-can-never-iterate.md)
 - [Can a closure carry a formula, or only a value?](open-questions/can-a-closure-carry-a-formula.md)
 - [Cardinality is invisible to a static crossing query](open-questions/cardinality-is-invisible.md)
