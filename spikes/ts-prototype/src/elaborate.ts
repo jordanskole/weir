@@ -18,6 +18,7 @@
 import { glob, readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { parse } from "yaml";
+import { assertPayload } from "./membrane.js";
 import { assertFalsifiable } from "./property.js";
 import { defineEdge, defineField } from "./define.js";
 import { assertDeclaration } from "./schema.js";
@@ -447,6 +448,91 @@ function resolveInputSpec(input: unknown, resolveEdge: EdgeResolver): InputSpec 
  * they differ — and a `oneOf` output *gains* structure (`{edge, payload}`)
  * rather than losing a wrapper, because the tag carries which branch fired.
  */
+/**
+ * Every example payload is validated against the edge its tag names.
+ *
+ * Reusing `assertPayload`, with its `undeclared` out-parameter, so this is the same
+ * rule the membrane applies rather than a second implementation of it.
+ *
+ * Why it is needed on top of the tag check: `assertPayload` **strips** undeclared
+ * fields instead of rejecting them, and `checkExamples` compares the raw result to
+ * the raw `expect`. So an author who writes an undeclared field into `expect`, and an
+ * implementation that returns it, agree — `deepStrictEqual` matches, the schema
+ * assertion passes, and `weir accept` accepts. Found by an agent returning
+ * `completed`/`incomplete` on a node whose output edge declared neither, and having
+ * both `npm test` and the gate pass.
+ *
+ * The undeclared value does not reach the durable log — `runtime.ts` strips it there
+ * and records the field name as drift — so this is not a leak. It is that nothing
+ * told the author or the gate, and an example is the one artifact where an undeclared
+ * field is a plain mistake rather than drift to be reported.
+ */
+function assertExamplePayloads(
+  examples: NodeDecl["examples"],
+  input: InputSpec,
+  output: OutputSpec,
+): void {
+  if (examples === undefined) return;
+
+  /**
+   * **Undeclared keys only.** A missing or wrong-typed field in an example is caught
+   * loudly the moment examples run — `weir test` and `weir accept` compare the
+   * example to a real result and say so. An *extra* key is the silent one: nothing
+   * ever rejects it, because `assertPayload` strips rather than refuses and
+   * `checkExamples` compares the raw result to the raw `expect`, so an author and an
+   * implementation that both carry the extra field agree.
+   *
+   * Narrow on purpose. Rejecting incomplete payloads here would also be defensible —
+   * an example with a missing required field describes an input the membrane would
+   * refuse — but it is not the gap that was found, and this file's own parse fixtures
+   * use `{}` as throwaway payloads, which is reasonable for testing parsing.
+   */
+  const check = (edge: AnyEdgeDef, payload: unknown, what: string, index: number): void => {
+    const undeclared: string[] = [];
+    try {
+      assertPayload(edge, payload, undeclared);
+    } catch {
+      // Missing or mistyped fields are the example run's business, not this check's.
+    }
+    if (undeclared.length > 0) {
+      throw new Error(
+        `example ${index}: "${what}" declares ${undeclared.map((f) => `"${f}"`).join(", ")}, which "${edge.name}" does not — an example cannot expect a field the edge has no place for.`,
+      );
+    }
+  };
+
+  for (const [index, example] of examples.entries()) {
+    if (input.kind === "single") check(input.edge, example.given, "given", index);
+    else if (input.kind === "allOf") {
+      for (const edge of input.edges) {
+        check(edge, (example.given as Record<string, unknown>)[edge.name], "given", index);
+      }
+    }
+    // `gather` given is a keyed collection; each entry is checked.
+    else if (input.kind === "gather") {
+      for (const entry of Object.values((example.given ?? {}) as Record<string, unknown>)) {
+        check(input.edge, entry, "given", index);
+      }
+    }
+
+    if (output.kind === "single") check(output.edge, example.expect, "expect", index);
+    else if (output.kind === "many") {
+      for (const entry of Object.values((example.expect ?? {}) as Record<string, unknown>)) {
+        check(output.edge, entry, "expect", index);
+      }
+    } else if (output.kind === "oneOf") {
+      const tagged = example.expect as { edge: string; payload: unknown };
+      const branch = output.edges.find((e) => e.name === tagged.edge);
+      if (branch !== undefined) check(branch, tagged.payload, "expect", index);
+    } else {
+      for (const tagged of example.expect as { edge: string; payload: unknown }[]) {
+        const branch = output.edges.find((e) => e.name === tagged.edge);
+        if (branch !== undefined) check(branch, tagged.payload, "expect", index);
+      }
+    }
+  }
+}
+
 function untagExamples(raw: unknown, input: InputSpec, output: OutputSpec): NodeDecl["examples"] {
   if (!Array.isArray(raw)) return raw as NodeDecl["examples"];
 
@@ -503,7 +589,7 @@ function untagExamples(raw: unknown, input: InputSpec, output: OutputSpec): Node
     }
   };
 
-  return raw.map((example, index) => {
+  const untagged = raw.map((example, index) => {
     const { given, expect } = example as { given?: unknown; expect?: unknown };
 
     // `allOf` is the one input kind whose authoring form is already the runtime
@@ -541,6 +627,11 @@ function untagExamples(raw: unknown, input: InputSpec, output: OutputSpec): Node
 
     return { ...(example as object), given: untaggedGiven, expect: untaggedExpect } as NonNullable<NodeDecl["examples"]>[number];
   });
+
+  // Tags check that the example names the right edge; this checks it matches its
+  // shape. Both here, so the two call sites cannot diverge.
+  assertExamplePayloads(untagged, input, output);
+  return untagged;
 }
 
 /**

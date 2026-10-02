@@ -619,6 +619,15 @@ Both observations are explained by the directory having been removed before
 regenerating, which resets the stubs and takes `notes.md` with it — and which the
 guard correctly does not fire on, because there is nothing left to overwrite.
 
+**Corrected later the same day.** A `--force` is the likelier cause, and the better
+answer to the agent's claim. The next pass's agent self-reported *"I ran `weir
+scaffold --force` from `spikes/ts-prototype` … Both reached outside this directory"*,
+and `--force` overwrites `<node>.ts` by design — verified. So "re-scaffolding destroys
+implementations" is true **with `--force`** and false without it; my "the directory
+must have been removed" was a guess that fit the evidence and was not the mechanism.
+The guard is intact either way, and what is actually missing is that `--force` does
+not say what it is about to destroy.
+
 ## The loop's best result so far: an agent that stopped
 
 On the clean pass, the agent implementing `revise` wrote everything it could decide,

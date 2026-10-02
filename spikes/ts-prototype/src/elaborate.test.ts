@@ -857,7 +857,78 @@ examples:
       );
     });
 
-    it("rejects an allOf `given` bag tagging an edge the node does not take", () => {
+    /**
+   * The other half of the same report. An agent returned `completed`/`incomplete` on
+   * a node whose output edge declared neither, and **both `npm test` and `weir accept`
+   * passed** — because `assertPayload` strips undeclared fields rather than refusing
+   * them, and `checkExamples` compares the raw result to the raw `expect`, so an
+   * author and an implementation that both carry the extra field agree.
+   *
+   * The value does not reach the durable log: `runtime.ts:329` strips it there and
+   * records the field name as drift. So this was never a leak — it was that nothing
+   * told the author or the gate.
+   *
+   * BREAK-PROOF: removing the `undeclared.length > 0` throw reddens both cases here
+   * and nothing else.
+   */
+  it("rejects an example whose `expect` carries a field the output edge does not declare", () => {
+    const yaml = `
+label: E
+description: d
+input: Person
+output: Person
+examples:
+  - given:
+      Person: {}
+    expect:
+      Person:
+        notDeclared: "rides along"
+`;
+    expect(() => parseNodeFile(yaml, "extra-expect", resolveEdge)).toThrow(
+      /"expect" declares "Person.notDeclared", which "Person" does not/,
+    );
+  });
+
+  it("rejects an example whose `given` carries a field the input edge does not declare", () => {
+    const yaml = `
+label: E
+description: d
+input: Person
+output: Person
+examples:
+  - given:
+      Person:
+        notDeclared: "rides along"
+    expect:
+      Person: {}
+`;
+    expect(() => parseNodeFile(yaml, "extra-given", resolveEdge)).toThrow(
+      /"given" declares "Person.notDeclared", which "Person" does not/,
+    );
+  });
+
+  /**
+   * Narrow on purpose: a *missing* or wrong-typed field stays elaboration's business
+   * to ignore, because the example run catches it loudly. This file's own parse
+   * fixtures use `{}` as throwaway payloads, and rejecting those would make testing
+   * the parser require full payloads everywhere.
+   */
+  it("still accepts an incomplete payload, which the example run catches instead", () => {
+    const yaml = `
+label: E
+description: d
+input: Person
+output: Person
+examples:
+  - given:
+      Person: {}
+    expect:
+      Person: {}
+`;
+    expect(() => parseNodeFile(yaml, "incomplete", resolveEdge)).not.toThrow();
+  });
+
+  it("rejects an allOf `given` bag tagging an edge the node does not take", () => {
       const yaml = `
   label: E
   description: d
