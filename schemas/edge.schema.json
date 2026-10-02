@@ -452,6 +452,31 @@
               }
             },
             "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "minted",
+              "label",
+              "description"
+            ],
+            "properties": {
+              "minted": {
+                "enum": [
+                  "uuid"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "classification": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
           }
         ]
       }

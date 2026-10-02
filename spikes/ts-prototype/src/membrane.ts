@@ -238,6 +238,18 @@ export function assertPayload<E extends AnyEdgeDef>(
       continue;
     }
 
+    if ("minted" in fieldDef) {
+      // Validated symmetrically, which is the point of minting *before* asserting:
+      // by the time anything asserts, the host has filled it, so this is an
+      // ordinary required field on both the input and the output side. The one
+      // asymmetric rule — an `fn` may not supply it — lives in `fillMinted`.
+      if (typeof value !== "string" || value.length === 0) {
+        errors.push(`${key} is host-minted and must be a non-empty string, got ${describeType(value)}`);
+      }
+      stripped[key] = value;
+      continue;
+    }
+
     if ("literal" in fieldDef) {
       const literalField = fieldDef as LiteralFieldDef;
       if (value !== literalField.literal) {
@@ -645,6 +657,16 @@ export interface InvocationContext {
    * that is not an inlined copy.
    */
   nodeName?: string;
+  /**
+   * Recorded values for host-minted fields, keyed `"<EdgeName>.<field>"`.
+   *
+   * Absent on a normal run, where `fillMinted` mints. **Supplied by replay**, which
+   * is what makes a minted field replay-deterministic: the declaration says which
+   * fields are nondeterministic, so replay knows exactly which to re-feed and
+   * `weir verify` has nothing to flag. `weir fork` deliberately passes nothing — a
+   * fork is a new run, and re-feeding the parent's ids would collide with them.
+   */
+  minted?: Record<string, string>;
 }
 
 /**
@@ -766,12 +788,153 @@ async function buildEnvelope(nodeDef: NodeDecl, context: InvocationContext): Pro
  * narrowing the parameter's *type* rather than gating its presence, so
  * declaring nothing yielded an empty object that was still passed.
  */
-function callFn<In extends InputSpec, O extends OutputSpec>(
+/** Every minted field on one edge, by key. */
+function mintedKeysOf(edge: AnyEdgeDef): string[] {
+  return Object.entries(edge.fields)
+    .filter(([, f]) => f !== null && typeof f === "object" && "minted" in f)
+    .map(([key]) => key);
+}
+
+/**
+ * Fills a result's host-minted fields, and refuses a result that supplied one.
+ *
+ * Called between `fn` and any assertion, which is what lets `assertPayload` treat a
+ * minted field symmetrically: the producer does not supply it, the host fills it, and
+ * from then on it is an ordinary required field on both sides.
+ *
+ * `supplied` carries recorded values, keyed `"<EdgeName>.<field>"`. A normal run
+ * passes nothing and mints; **replay passes the recorded map**, which is what makes a
+ * minted field replay-deterministic and `weir verify` quiet. That is the same contract
+ * an effect has — nondeterminism is fine once it is declared and recorded — and the
+ * declaration is what tells replay which fields to re-feed.
+ *
+ * Throws on a supplied field rather than overwriting it. The membrane turns the throw
+ * into `Failed<In>` carrying the reason, which is the right outcome: an implementation
+ * that invents an identity is wrong in the way "never caller-suppliable" means.
+ */
+function fillMinted(output: OutputSpec, result: unknown, supplied?: Record<string, string>): void {
+  const fill = (edge: AnyEdgeDef, payload: unknown): void => {
+    if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return;
+    const record = payload as Record<string, unknown>;
+    for (const key of mintedKeysOf(edge)) {
+      if (Object.hasOwn(record, key) && record[key] !== undefined) {
+        throw new Error(
+          `${edge.name}.${key} is host-minted and may not be returned by the implementation — ` +
+            `omit it and the membrane fills it.`,
+        );
+      }
+      record[key] = supplied?.[`${edge.name}.${key}`] ?? crypto.randomUUID();
+    }
+  };
+
+  if (output.kind === "single") {
+    fill(output.edge, result);
+    return;
+  }
+  if (output.kind === "many") {
+    if (result === null || typeof result !== "object") return;
+    for (const entry of Object.values(result as Record<string, unknown>)) fill(output.edge, entry);
+    return;
+  }
+  if (output.kind === "oneOf") {
+    const tagged = result as { edge?: unknown; payload?: unknown };
+    const branch = output.edges.find((e) => e.name === tagged?.edge);
+    if (branch !== undefined) fill(branch, tagged.payload);
+    return;
+  }
+  if (!Array.isArray(result)) return;
+  for (const tagged of result as { edge?: unknown; payload?: unknown }[]) {
+    const branch = output.edges.find((e) => e.name === tagged?.edge);
+    if (branch !== undefined) fill(branch, tagged.payload);
+  }
+}
+
+/**
+ * A copy of a result with its host-minted fields removed.
+ *
+ * For comparing against a declared example. An example cannot name a minted value —
+ * nobody knows the uuid at authoring time — so the comparison has to be made over
+ * what the author could actually write. Removing rather than masking, so a missing
+ * field and a minted one are not confusable.
+ */
+/**
+ * The minted values already present in a recorded result, keyed the way
+ * `fillMinted` reads them.
+ *
+ * The inverse of `fillMinted`, and the reason a minted field is replayable at all:
+ * replay reads the recorded result, hands the values back through
+ * `InvocationContext.minted`, and the re-run produces the same output. The
+ * declaration is what makes this mechanical — weir knows which fields are
+ * nondeterministic because the author said so, rather than having to guess.
+ */
+export function mintedFrom(output: OutputSpec, result: unknown): Record<string, string> {
+  const found: Record<string, string> = {};
+  const read = (edge: AnyEdgeDef, payload: unknown): void => {
+    if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return;
+    const record = payload as Record<string, unknown>;
+    for (const key of mintedKeysOf(edge)) {
+      const value = record[key];
+      if (typeof value === "string") found[`${edge.name}.${key}`] = value;
+    }
+  };
+
+  if (output.kind === "single") read(output.edge, result);
+  else if (output.kind === "many") {
+    if (result !== null && typeof result === "object") {
+      for (const entry of Object.values(result as Record<string, unknown>)) read(output.edge, entry);
+    }
+  } else if (output.kind === "oneOf") {
+    const tagged = result as { edge?: unknown; payload?: unknown };
+    const branch = output.edges.find((e) => e.name === tagged?.edge);
+    if (branch !== undefined) read(branch, tagged.payload);
+  } else if (Array.isArray(result)) {
+    for (const tagged of result as { edge?: unknown; payload?: unknown }[]) {
+      const branch = output.edges.find((e) => e.name === tagged?.edge);
+      if (branch !== undefined) read(branch, tagged.payload);
+    }
+  }
+  return found;
+}
+
+export function withoutMinted(output: OutputSpec, result: unknown): unknown {
+  const strip = (edge: AnyEdgeDef, payload: unknown): unknown => {
+    if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return payload;
+    const keys = mintedKeysOf(edge);
+    if (keys.length === 0) return payload;
+    const copy = { ...(payload as Record<string, unknown>) };
+    for (const key of keys) delete copy[key];
+    return copy;
+  };
+
+  if (output.kind === "single") return strip(output.edge, result);
+  if (output.kind === "many") {
+    if (result === null || typeof result !== "object") return result;
+    return Object.fromEntries(
+      Object.entries(result as Record<string, unknown>).map(([k, v]) => [k, strip(output.edge, v)]),
+    );
+  }
+  if (output.kind === "oneOf") {
+    const tagged = result as { edge?: unknown; payload?: unknown };
+    const branch = output.edges.find((e) => e.name === tagged?.edge);
+    if (branch === undefined) return result;
+    return { ...tagged, payload: strip(branch, tagged.payload) };
+  }
+  if (!Array.isArray(result)) return result;
+  return (result as { edge?: unknown; payload?: unknown }[]).map((tagged) => {
+    const branch = output.edges.find((e) => e.name === tagged?.edge);
+    return branch === undefined ? tagged : { ...tagged, payload: strip(branch, tagged.payload) };
+  });
+}
+
+async function callFn<In extends InputSpec, O extends OutputSpec>(
   nodeDef: NodeDef<In, O>,
   payload: InputPayload<In>,
   envelope: Envelope,
-): OutputResult<O> | Failed<In> | Promise<OutputResult<O> | Failed<In>> {
-  return nodeDef.fn.length >= 2 ? nodeDef.fn(payload, envelope) : nodeDef.fn(payload);
+  minted?: Record<string, string>,
+): Promise<OutputResult<O> | Failed<In>> {
+  const result = await (nodeDef.fn.length >= 2 ? nodeDef.fn(payload, envelope) : nodeDef.fn(payload));
+  fillMinted(nodeDef.output, result, minted);
+  return result;
 }
 
 /**
@@ -815,7 +978,7 @@ export async function membrane<In extends InputSpec, O extends OutputSpec>(
       } as MembraneResult<In, O>;
     }
     try {
-      return { result: await callFn(nodeDef, validated, envelope), envelope } as MembraneResult<In, O>;
+      return { result: await callFn(nodeDef, validated, envelope, context.minted), envelope } as MembraneResult<In, O>;
     } catch (cause) {
       return { result: { input: validated, reason: reasonOf(cause) }, envelope } as MembraneResult<In, O>;
     }
@@ -856,7 +1019,7 @@ export async function membrane<In extends InputSpec, O extends OutputSpec>(
     }
 
     try {
-      return { result: await callFn(nodeDef, bag as InputPayload<In>, envelope), envelope } as MembraneResult<In, O>;
+      return { result: await callFn(nodeDef, bag as InputPayload<In>, envelope, context.minted), envelope } as MembraneResult<In, O>;
     } catch (cause) {
       return { result: { input: bag as InputPayload<In>, reason: reasonOf(cause) }, envelope } as MembraneResult<In, O>;
     }
@@ -923,7 +1086,7 @@ export async function membrane<In extends InputSpec, O extends OutputSpec>(
 
     try {
       return {
-        result: await callFn(nodeDef, collection as InputPayload<In>, envelope),
+        result: await callFn(nodeDef, collection as InputPayload<In>, envelope, context.minted),
         envelope,
       } as MembraneResult<In, O>;
     } catch (cause) {

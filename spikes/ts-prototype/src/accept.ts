@@ -48,6 +48,7 @@ import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { fuzzNode } from "./fuzz.js";
 import type { FuzzReport } from "./fuzz.js";
+import { withoutMinted } from "./membrane.js";
 import { hashNode } from "./hash.js";
 import { invokeWithInput } from "./invoke.js";
 import { computeImplementationMetadata } from "./metadata.js";
@@ -98,7 +99,11 @@ async function checkExamples(nodeDef: NodeDef): Promise<ExampleFailure[]> {
     const { result: actual } = await invokeWithInput(nodeDef, example.given, {
       correlationId: `accept-example-${i}`,
     });
-    if (!isDeepStrictEqual(actual, example.expect)) {
+    // Compared with host-minted fields removed: an example cannot name a uuid
+    // nobody knows at authoring time, so the comparison is over what the author
+    // could actually write. `elaborate` refuses an example that supplies one.
+    const comparable = withoutMinted(nodeDef.output, actual);
+    if (!isDeepStrictEqual(comparable, example.expect)) {
       failures.push({ given: example.given, expected: example.expect, actual });
     }
   }

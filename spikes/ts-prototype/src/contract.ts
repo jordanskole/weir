@@ -14,7 +14,7 @@
 
 import { assertUniquePropertyNames } from "./hash.js";
 import { serializeField, type NetlistField } from "./netlist.js";
-import type { AnyEdgeDef, NodeDecl } from "./types.js";
+import type { AnyEdgeDef, NodeDecl, MintedFieldDef } from "./types.js";
 
 /**
  * A field as it appears inside a sealed contract. Unlike `NetlistField`, a

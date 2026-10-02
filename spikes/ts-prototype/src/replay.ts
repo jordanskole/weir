@@ -46,6 +46,7 @@
 
 import { hashNode } from "./hash.js";
 import { resolveImplementationAt } from "./implementation.js";
+import { mintedFrom } from "./membrane.js";
 import { invokeWithInput } from "./invoke.js";
 import type { TraceEntry } from "./trace.js";
 import type { NodeDecl } from "./types.js";
@@ -116,6 +117,11 @@ export async function replayInvocation(
     identity: entry.envelope.identity,
     step: entry.envelope.step,
     causationIds: entry.envelope.causationIds,
+    // Host-minted fields are re-fed from the recorded result rather than minted
+    // again, which is what makes declared nondeterminism replayable and keeps
+    // `weir verify` quiet. `weir fork` deliberately does NOT do this: a fork is a
+    // new run, and reusing the parent's ids would collide with them.
+    minted: mintedFrom(nodeDef.output, entry.result),
   });
   return result;
 }

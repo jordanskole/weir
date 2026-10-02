@@ -194,12 +194,31 @@ function literalFieldShape(): object {
   };
 }
 
+/**
+ * A host-minted field — `id: { minted: uuid }`. Standalone like
+ * `literalFieldShape`, and for the same reason: `nullable` and `validations` are
+ * meaningless on a value the author never supplies.
+ */
+function mintedFieldShape(): object {
+  return {
+    type: "object",
+    required: ["minted", "label", "description"],
+    properties: {
+      minted: { enum: ["uuid"] },
+      label: { type: "string" },
+      description: { type: "string" },
+      classification: { type: "string" },
+    },
+    additionalProperties: false,
+  };
+}
+
 /** Generates a JSON Schema for a standalone `.field` file. */
 export function fieldSchema(): object {
   return {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     title: "Weir field",
-    oneOf: [literalFieldShape(), fieldShape()],
+    oneOf: [literalFieldShape(), mintedFieldShape(), fieldShape()],
   };
 }
 
@@ -231,6 +250,7 @@ export function edgeSchema(): object {
             },
             { type: "boolean" },
             literalFieldShape(),
+            mintedFieldShape(),
           ],
         },
       },

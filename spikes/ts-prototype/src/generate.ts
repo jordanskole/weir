@@ -9,7 +9,7 @@
 import { INTEGER_RANGES } from "./define.js";
 import { isIntegerType } from "./types.js";
 import type { InputFieldRef } from "./property.js";
-import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ScalarType } from "./types.js";
+import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ScalarType, MintedFieldDef } from "./types.js";
 
 export type Rng = () => number;
 
@@ -93,6 +93,23 @@ function generateDatetimeValue(fieldKey: string, field: FieldDef, rng: Rng, case
   return new Date(millis).toISOString();
 }
 
+/**
+ * A uuid-shaped value from the **seeded** rng, never `crypto.randomUUID`.
+ *
+ * The generator's whole contract is that a seed determines the batch, so a minted
+ * field has to be generable deterministically. That it can be is one of the arguments
+ * for a minted field kind over a `pattern` on a `utf8`: `generateStringValue` throws on
+ * a `pattern` because satisfying an arbitrary regex is not supported, while this shape
+ * is known.
+ */
+function mintedValue(rng: Rng): string {
+  const hex = (n: number): string =>
+    Array.from({ length: n }, () => "0123456789abcdef"[randomInt(rng, 0, 15)]).join("");
+  // Version 4, variant 1, so a generated value passes a real uuid check.
+  const variant = "89ab"[randomInt(rng, 0, 3)];
+  return `${hex(8)}-${hex(4)}-4${hex(3)}-${variant}${hex(3)}-${hex(12)}`;
+}
+
 const PRINTABLE_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ";
 
 function generateStringValue(fieldKey: string, field: FieldDef, rng: Rng, caseIndex: number): string {
@@ -157,10 +174,11 @@ function generateStringValue(fieldKey: string, field: FieldDef, rng: Rng, caseIn
  */
 export function generateFieldValue(
   fieldKey: string,
-  field: FieldDef | LiteralFieldDef,
+  field: FieldDef | LiteralFieldDef | MintedFieldDef,
   rng: Rng,
   caseIndex: number,
 ): unknown {
+  if ("minted" in field) return mintedValue(rng);
   if ("literal" in field) return field.literal;
 
   if (field.enumValues !== undefined) {

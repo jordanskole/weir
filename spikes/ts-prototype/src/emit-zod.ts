@@ -87,7 +87,7 @@ function scalarExpr(field: FieldDef): string {
   return expr;
 }
 
-type AnyField = FieldDef | { literal: boolean } | AnyEdgeDef | ManyEdgeDef;
+type AnyField = FieldDef | { literal: boolean } | { minted: "uuid"; description?: string } | AnyEdgeDef | ManyEdgeDef;
 
 /** Emitted once, and only when a `many` field or output needs it. */
 const KEYED_BY_HELPER = `/**
@@ -117,6 +117,12 @@ function fieldExpr(field: AnyField, usesKeyedBy: { value: boolean }): string {
     }
     usesKeyedBy.value = true;
     return `keyedBy(${lit(entry.index)}, ${entry.name})`;
+  }
+  if ("minted" in field) {
+    // The host fills this, so on the way *in* it is an ordinary required string.
+    // `emitNodeSchemaModule` is what tells an implementer not to return it.
+    const described = field.description === undefined ? "" : `.describe(${lit(field.description)})`;
+    return `z.string().min(1)${described}`;
   }
   if ("literal" in field) return `z.literal(${String(field.literal)})`;
   if ("fields" in field) return field.name;
@@ -199,20 +205,37 @@ function inputExpr(node: NodeDecl, usesKeyedBy: { value: boolean }): string {
  * neither of which is guessable. The agent that drafted `routeCounty`
  * discovered the `oneOf` shape by probing.
  */
+/**
+ * An edge as the implementation must **return** it: the wire shape minus any
+ * host-minted field.
+ *
+ * The edge schema keeps those fields, because the wire shape genuinely has them —
+ * they are required on the way in, and a consumer sees them. But the `fn` does not
+ * supply them, so a node's *output* schema has to omit them or an implementer typing
+ * against it is told to produce a value the membrane refuses.
+ */
+function returnedShape(edge: AnyEdgeDef): string {
+  const minted = Object.entries(edge.fields)
+    .filter(([, f]) => f !== null && typeof f === "object" && "minted" in f)
+    .map(([key]) => key);
+  if (minted.length === 0) return edge.name;
+  return `${edge.name}.omit({ ${minted.map((k) => `${JSON.stringify(k)}: true`).join(", ")} })`;
+}
+
 function outputExpr(node: NodeDecl, usesKeyedBy: { value: boolean }): string {
   const output = node.output;
-  if (output.kind === "single") return output.edge.name;
+  if (output.kind === "single") return returnedShape(output.edge);
 
   if (output.kind === "many") {
     if (output.edge.index === undefined) {
       throw new Error(`emit-zod: many output "${output.edge.name}" needs an index.`);
     }
     usesKeyedBy.value = true;
-    return `keyedBy(${lit(output.edge.index)}, ${output.edge.name})`;
+    return `keyedBy(${lit(output.edge.index)}, ${returnedShape(output.edge)})`;
   }
 
   const branch = (e: AnyEdgeDef): string =>
-    `  z.object({ edge: z.literal(${lit(e.name)}), payload: ${e.name} }),`;
+    `  z.object({ edge: z.literal(${lit(e.name)}), payload: ${returnedShape(e)} }),`;
   const union = `z.discriminatedUnion("edge", [\n${output.edges.map(branch).join("\n")}\n])`;
 
   if (output.kind === "oneOf") return union;

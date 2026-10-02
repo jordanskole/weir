@@ -21,8 +21,7 @@ import type {
   OutputResult,
   OutputSpec,
   PayloadOf,
-  ScalarType,
-} from "./types.js";
+  ScalarType, MintedFieldDef } from "./types.js";
 
 /** uint8/16/32 are the unsigned integer types — min may not go negative. */
 export const UNSIGNED_TYPES: ScalarType[] = ["uint8", "uint16", "uint32"];
@@ -180,7 +179,7 @@ export function defineLiteral(field: LiteralFieldDef): LiteralFieldDef {
 }
 
 /** Define an edge with typed fields. Returns the input unchanged. */
-export function defineEdge<F extends Record<string, FieldDef | LiteralFieldDef | AnyEdgeDef | ManyEdgeDef>>(
+export function defineEdge<F extends Record<string, FieldDef | LiteralFieldDef | MintedFieldDef | AnyEdgeDef | ManyEdgeDef>>(
   edge: EdgeDef<F>,
 ): EdgeDef<F> {
   return edge;

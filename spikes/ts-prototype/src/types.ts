@@ -149,6 +149,37 @@ export type FieldDef<T extends ScalarType = ScalarType, N extends boolean = bool
  * a `bool` with a value attached: no `nullable`, no `validations`, both
  * meaningless on a fixed constant.
  */
+/**
+ * A field whose value the **host mints**, never the implementation — `id: { minted: uuid }`.
+ *
+ * A distinct field kind, not a `utf8` with a flag, for the same reasons
+ * `LiteralFieldDef` is not a `bool` with a value attached: `nullable` and
+ * `validations` are both meaningless on a value the author never supplies, and as a
+ * scalar type it would still be *suppliable* — an `fn` could return any string and the
+ * schema would accept it, which is the whole thing this prevents.
+ *
+ * **Why a declaration rather than a `scope` read** (the alternative, in
+ * docs/open-questions/index-names-one-field.md): declaring it marks which fields are
+ * nondeterministic, so replay knows *mechanically* which to re-feed. `replay.ts`
+ * re-feeds exactly the minted fields, `weir fork` mints fresh for exactly those because
+ * a fork is a new run, and `weir verify` has nothing to flag because the nondeterminism
+ * is declared. That is the trick effects already use: nondeterminism is fine once it is
+ * declared and recorded. A minted field is a tiny effect with no handler.
+ *
+ * The asymmetry is in who *fills* it, not in how it is validated. The `fn` returns its
+ * output without the field, the membrane mints it before asserting, and `assertPayload`
+ * then requires it present on both sides — so the one new rule is "an `fn` may not
+ * supply this", which `callFn`'s caller enforces rather than the schema.
+ */
+export interface MintedFieldDef {
+  /** The only strategy today. A union so `ulid`/`ksuid` can join without a reshape. */
+  minted: "uuid";
+  label: string;
+  description: string;
+  /** Carried for the same reason `FieldDefBase` carries it — a minted id can be linkable. */
+  classification?: string;
+}
+
 export interface LiteralFieldDef {
   literal: boolean;
   label?: string;
@@ -183,7 +214,7 @@ type Validation<T extends ScalarType> = T extends "uint8" | "uint16" | "uint32" 
  * expected to match its map key.
  */
 export interface EdgeDef<
-  F extends Record<string, FieldDef | LiteralFieldDef | AnyEdgeDef | ManyEdgeDef> = Record<string, FieldDef>,
+  F extends Record<string, FieldDef | LiteralFieldDef | MintedFieldDef | AnyEdgeDef | ManyEdgeDef> = Record<string, FieldDef>,
 > {
   name: string;
   label: string;
@@ -229,7 +260,7 @@ export interface ManyEdgeDef<E extends AnyEdgeDef = AnyEdgeDef> {
  * anywhere a generic bound needs to admit a compound or many field, it must
  * say so with this alias rather than writing `EdgeDef` bare.
  */
-export type AnyEdgeDef = EdgeDef<Record<string, FieldDef | LiteralFieldDef | AnyEdgeDef | ManyEdgeDef>>;
+export type AnyEdgeDef = EdgeDef<Record<string, FieldDef | LiteralFieldDef | MintedFieldDef | AnyEdgeDef | ManyEdgeDef>>;
 
 /**
  * The unit edge — the only special edge (docs/design.md §5). An origin
@@ -263,18 +294,20 @@ export type ScalarTsType<T extends ScalarType> = T extends "utf8" | "datetime"
  * an array"). One edge instance, one collection payload; never N separate
  * instances of the referenced edge.
  */
-export type Payload<F extends Record<string, FieldDef | LiteralFieldDef | AnyEdgeDef | ManyEdgeDef>> = {
+export type Payload<F extends Record<string, FieldDef | LiteralFieldDef | MintedFieldDef | AnyEdgeDef | ManyEdgeDef>> = {
   [K in keyof F]: F[K] extends FieldDef<infer T, infer N>
     ? N extends true
       ? ScalarTsType<T> | null
       : ScalarTsType<T>
-    : F[K] extends LiteralFieldDef
-      ? boolean
-      : F[K] extends ManyEdgeDef<infer E>
-        ? Record<string, PayloadOf<E>>
-        : F[K] extends AnyEdgeDef
-          ? PayloadOf<F[K]>
-          : never;
+    : F[K] extends MintedFieldDef
+      ? string
+      : F[K] extends LiteralFieldDef
+        ? boolean
+        : F[K] extends ManyEdgeDef<infer E>
+          ? Record<string, PayloadOf<E>>
+          : F[K] extends AnyEdgeDef
+            ? PayloadOf<F[K]>
+            : never;
 };
 
 /** The runtime payload shape of an edge definition. */

@@ -34,6 +34,7 @@ import type {
   NodeDecl,
   OutputSpec,
   PropertyDecl,
+  MintedFieldDef,
   PropertyExpr,
 } from "./types.js";
 
@@ -63,7 +64,8 @@ type FieldFingerprint =
   | ScalarFieldFingerprint
   | { edge: EdgeFingerprint }
   | { many: EdgeFingerprint }
-  | { literal: boolean };
+  | { literal: boolean }
+  | { minted: "uuid" };
 
 interface EdgeFingerprint {
   name: string;
@@ -84,6 +86,13 @@ function fingerprint(edge: AnyEdgeDef): EdgeFingerprint {
 
     if ("fields" in value) {
       fields[key] = { edge: fingerprint(value) };
+      continue;
+    }
+
+    if ("minted" in value) {
+      // The strategy is the contract; `label`/`description`/`classification` are not,
+      // on the same reasoning as every other field's prose.
+      fields[key] = { minted: (value as MintedFieldDef).minted };
       continue;
     }
 

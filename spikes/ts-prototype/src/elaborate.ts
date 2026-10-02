@@ -23,7 +23,7 @@ import { assertFalsifiable } from "./property.js";
 import { defineEdge, defineField } from "./define.js";
 import { assertDeclaration } from "./schema.js";
 import { failedEdgeName, failedAllOfEdgeName, failedGatherEdgeName, gatherKey, inputEdgeNames } from "./types.js";
-import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ManyEdgeDef, NodeDecl, OutputSpec } from "./types.js";
+import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ManyEdgeDef, NodeDecl, OutputSpec, MintedFieldDef } from "./types.js";
 
 /**
  * `many` is a collection keyed by the referenced edge's own declared
@@ -34,6 +34,25 @@ import type { AnyEdgeDef, FieldDef, InputSpec, LiteralFieldDef, ManyEdgeDef, Nod
 function requireIndex(edge: AnyEdgeDef, context: string): void {
   if (edge.index === undefined) {
     throw new Error(`${context} references "${edge.name}", which declares no index — a collection needs a real key.`);
+  }
+  /**
+   * A collection key cannot be host-minted, and the conflict is circular rather
+   * than stylistic: the key-agreement rule requires each entry to sit under its
+   * own `index` value, and the implementation builds the collection — so it would
+   * have to know a value only the membrane assigns, after it has returned.
+   *
+   * Only checked here, where `index` is actually load-bearing. A minted `index`
+   * on an edge nothing collects is fine, and is in fact the best use of one:
+   * unique by construction, with nothing to maintain by hand
+   * (`weir sys`'s `index, unchecked` line).
+   */
+  const keyField = edge.fields[edge.index];
+  if (keyField !== null && typeof keyField === "object" && "minted" in keyField) {
+    throw new Error(
+      `${context} references "${edge.name}", whose index "${edge.index}" is host-minted — ` +
+        `a collection is keyed by its entries' own index, which the implementation must know ` +
+        `when it builds the collection, and a minted value is assigned after it returns.`,
+    );
   }
 }
 
@@ -239,7 +258,7 @@ export function parseEdgeFile(yamlText: string, name: string, resolveField: Fiel
     );
   }
 
-  const resolvedFields: Record<string, FieldDef | LiteralFieldDef | AnyEdgeDef | ManyEdgeDef> = {};
+  const resolvedFields: Record<string, FieldDef | LiteralFieldDef | MintedFieldDef | AnyEdgeDef | ManyEdgeDef> = {};
   let spreadIndex: string | undefined;
   let spreadFrom: string | undefined;
   if (spreadEntries.length === 1) {
@@ -274,6 +293,8 @@ export function parseEdgeFile(yamlText: string, name: string, resolveField: Fiel
       }
       requireIndex(resolved, `"${key}.many"`);
       resolvedFields[key] = { many: resolved };
+    } else if (value !== null && typeof value === "object" && "minted" in value) {
+      resolvedFields[key] = value as MintedFieldDef;
     } else if (value !== null && typeof value === "object" && "literal" in value) {
       resolvedFields[key] = value as LiteralFieldDef;
     } else {
@@ -332,7 +353,7 @@ export function parseEnvelopeFile(
     // Nested and collection fields are edges, and an edge has no combine rule
     // of its own — merging one would need a rule per leaf, which is a question
     // nothing has asked yet.
-    if ("many" in fieldDef || "fields" in fieldDef || "literal" in fieldDef) {
+    if ("many" in fieldDef || "fields" in fieldDef || "literal" in fieldDef || "minted" in fieldDef) {
       throw new Error(
         `envelope field "${key}": an envelope carries scalar fields only — a nested or collection field has no combine rule of its own.`,
       );
@@ -498,6 +519,24 @@ function assertExamplePayloads(
       throw new Error(
         `example ${index}: "${what}" declares ${undeclared.map((f) => `"${f}"`).join(", ")}, which "${edge.name}" does not — an example cannot expect a field the edge has no place for.`,
       );
+    }
+
+    /**
+     * The same rule the implementation gets: a host-minted field may not be
+     * supplied. An example that named one would be asserting a uuid nobody can
+     * know, and `accept` compares with minted fields removed precisely because
+     * the author cannot write them.
+     */
+    if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
+      const record = payload as Record<string, unknown>;
+      const supplied = Object.entries(edge.fields)
+        .filter(([key, f]) => f !== null && typeof f === "object" && "minted" in f && key in record)
+        .map(([key]) => key);
+      if (supplied.length > 0) {
+        throw new Error(
+          `example ${index}: "${what}" supplies ${supplied.map((f) => `"${f}"`).join(", ")}, which "${edge.name}" declares as host-minted — omit it, the membrane fills it.`,
+        );
+      }
     }
   };
 

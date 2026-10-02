@@ -1,8 +1,7 @@
 # Should a minted identity be a field *kind*, like a literal?
 
-Status: open — a concrete proposal, not yet weighed against its costs.
-Last grounded: 2026-10-01 — raised by `todo-list`'s `CreateTodo` having nowhere to get
-an id from.
+Status: **resolved (2026-10-01 — built)**. `id: { minted: uuid }`.
+Last grounded: 2026-10-01.
 
 ## The proposal
 
@@ -53,15 +52,88 @@ declared and recorded; a minted field is a tiny effect with no handler.
 3. **It removes the `Revision.id` packing.** A minted id is unique per instance without
    encoding the round into a string, so the composite never has to be packed.
 
+## BUILT
+
+```yaml
+# Thing.edge
+fields:
+  id:
+    minted: uuid
+    label: ID
+    description: Minted by the host, never by the implementation
+```
+
+The `fn` returns its output **without** the field; the membrane fills it before anything
+asserts; `assertPayload` then treats it as an ordinary required string on both sides. So
+the predicted cost below — `assertPayload` needing to become side-aware — **did not
+materialise**, because minting happens between `fn` and the assertion rather than inside
+it. That was the one structural worry and it dissolved.
+
+Verified end to end on a real program:
+
+```
+weir accept   ✓ accepted makeThing            (fn returns { name }, no id)
+weir run      ✓ quiescence
+  recorded    {"name": "a widget", "id": "8c88a474-a51d-40e5-982c-b2d844c3d0c9"}
+weir verify   ✓ 1 invocation(s) replayed identically
+```
+
+and the break-proof that matters, with the re-feed removed from `replay.ts`:
+
+```
+weir verify   ✗ 1 of 1 invocation(s) did not replay identically
+  recorded  {"name":"a widget","id":"8c88a474-…"}
+  replayed  {"name":"a widget","id":"2d0b513c-…"}
+```
+
+### The rules, and where each lives
+
+| rule | where |
+|---|---|
+| the `fn` may not supply it — refused, not overwritten | `fillMinted`, membrane |
+| required and non-empty once filled, symmetric on both sides | `assertPayload` |
+| replay re-feeds the recorded value | `replay.ts`, from `mintedFrom` |
+| `fork` mints fresh — a new run must not reuse the parent's ids | by omission; it passes no map |
+| an example may not supply it, and `accept` compares without it | `elaborate`, `withoutMinted` |
+| a minted field may not be a **collection key** | `requireIndex` |
+| the strategy is fingerprinted; the prose is not | `hash.ts` |
+| generated from the **seed**, never `crypto.randomUUID` | `generate.ts` |
+| the fn's output schema omits it — `Thing.omit({ "id": true })` | `emit-zod.ts` |
+
+The collection-key rule is the one that is circular rather than stylistic: the
+key-agreement rule needs each entry under its own index value, the implementation builds
+the collection, and a minted value is assigned after it returns. A minted `index` on an
+edge nothing collects stays legal, and is the *best* use of one — unique by construction,
+nothing to maintain by hand, which is what `weir sys`'s `index, unchecked` line is about.
+
+### What the build found
+
+**A false green I nearly shipped on.** The first end-to-end check reported
+`weir verify  ✓ replayed identically` — and so did the break with the re-feed removed.
+The break not reddening is what exposed it: my `--payload` was the wrong shape, the run
+had failed, nothing was minted, and `verify` was comparing two identical `Failed`
+records. The uuids I had grepped out of the log were envelope instance ids, not the
+field. Fixed the payload, and then the break reddens properly.
+
+**A test of mine proved less than its name.** The first "replay re-feeds" test called
+`membrane` directly with the recorded map, so removing `minted:` from `replay.ts`
+reddened nothing. Rewritten to go through `replayInvocation` against a real run. Seventh
+test this day whose break-proof showed it measuring less than it claimed — and the second
+time today that a non-reddening break-proof caught something a passing test hid.
+
+**The generated JSON Schema artifacts are a carry-through site.** `schemas/*.json` are
+checked in and a test compares them to their generator's current output, so adding a
+field kind to `schema.ts` reddened it until `npm run generate:schemas` ran. That test
+earned its keep.
+
 ## What it costs, honestly
 
-**`assertPayload` is side-agnostic today, and this is the first rule that is not.** One
-function validates both a node's input and its output. A literal is symmetric — the
-producer must return it and the consumer sees it — but a minted field is not: the producer
-must **not** supply it and the consumer **must** have it. `Todo` is produced by
-`CreateTodo` and consumed by `CompleteTodo` and `AddTodoToList`, so the same edge needs
-different rules on each side. That is the real implementation cost, and it is structural
-rather than fiddly.
+~~**`assertPayload` is side-agnostic today, and this is the first rule that is not.**~~
+**Predicted and avoided.** The worry was that one function validates both input and
+output, and a minted field is asymmetric where a literal is not. Minting *between* `fn`
+and the assertion dissolves it: by the time anything asserts, the host has filled the
+field, so it is an ordinary required field on both sides, and the single asymmetric rule
+("an `fn` may not supply this") lives in `fillMinted` rather than in the validator.
 
 **The implementer's return type changes.** If the membrane mints on output, the `fn`
 returns the output *without* the minted field — `Omit<Todo, "id">` in effect. The emitted
