@@ -100,9 +100,43 @@ exactly this for `identity`, `step` and `causationIds`:
 > *"The replayed call is re-fed `entry.envelope.identity` … `entry.envelope.step` is
 > re-fed the same way … `entry.envelope.causationIds` is re-fed for the same reason"*
 
-So a node reading the invocation id would be **replay-deterministic by the mechanism
-already in use**: the value is host-minted, durable, and fed back on replay — the same
-contract that makes an effect replayable.
+**CORRECTED before anyone built on it.** That claim was wrong, and checking it is what
+found the real shape. `replay.ts:115-118` re-feeds exactly four fields:
+
+```ts
+    correlationId: entry.envelope.correlationId,
+    identity: entry.envelope.identity,
+    step: entry.envelope.step,
+    causationIds: entry.envelope.causationIds,
+```
+
+`id` is **not** among them — `membrane.ts:535` mints a fresh one per physical invocation.
+So a node reading `envelope.id` would see a different value on replay and `weir verify`
+would flag it as undeclared nondeterminism, which is the system working correctly and
+means `read:Invocation:id` is not free.
+
+### What is replay-safe today, exactly
+
+| field | re-fed on replay | distinguishes |
+|---|---|---|
+| `correlationId` | yes | the **run**. `originPayloads` is `Record<nodeName, payload>` — one payload per origin — so an origin fires once per run, and for an origin this is unique per invocation |
+| `step` | yes | the **pulse** (`runtime.ts:745` sets `step: pulse`), shared by every node firing in it |
+| `causationIds` | yes | the instances consumed — so invocations within one pulse. **Empty for an origin**, which is the node that needs an id |
+| `identity` | yes | the caller, not the invocation |
+| `id` | **no** | the physical invocation, including a replayed one |
+
+Two routes fall out, and they differ in cost rather than in kind:
+
+**`read:Invocation:correlationId` — works today, no replay change.** It is already re-fed,
+and for `CreateTodo`, which is `todo-list`'s origin, it is unique per invocation. The
+whole change is extending `scope` resolution. It would *not* give a unique value to a
+non-origin node, where many invocations share a run.
+
+**`read:Invocation:id` — the general answer, and it costs a decision.** `id` has to join
+the re-fed set, which makes a replayed invocation share the original's id. That is
+arguably right — it is the same logical invocation — but `weir fork` creates a *new* run
+from a parent's trace, and a fork re-feeding the parent's ids would collide with them. So
+replay re-feeds and fork mints fresh, and that asymmetry has to be deliberate.
 
 The mechanism to read it already exists and is an explicit extension point. `scope`
 resolves `read:Identity:<field>` and its own error says *"only … resolves to anything
@@ -122,7 +156,8 @@ principled answer to "who mints an id".**
 
 | source | when it fits | status |
 |---|---|---|
-| the host's invocation id, via `scope` | any program, no product decision | **unbuilt**; one field on a designed hook |
+| the host's `correlationId`, via `scope` | any program; unique per invocation **for an origin** | **unbuilt**, and free — already re-fed on replay |
+| the host's invocation `id`, via `scope` | any program, any node | **unbuilt**; also needs `id` re-fed on replay, and fork kept minting fresh |
 | the database, via an effect | the program persists | works today; gives the `UnsavedTodo`/`Todo` split |
 | the client (not the human) | offline-first, client-generated UUID | works today; a product decision |
 
