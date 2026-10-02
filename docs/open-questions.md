@@ -36,7 +36,7 @@ Live. Ordered alphabetically, not by priority.
 - [A gather composes with nothing](open-questions/gather-composes-with-nothing.md)
 - [Should the generator produce `null`, and explore cross-field combinations?](open-questions/generator-coverage.md)
 - [The version pin pins the contract, not the implementation](open-questions/implementation-identity.md)
-- [`index:` names one field, so a composite identity gets packed into a string](open-questions/index-names-one-field.md)
+- [Nothing warns about an `index` that no collection uses](open-questions/index-names-one-field.md)
 - [Classification says what may not go out; nothing says what may not be trusted coming in](open-questions/integrity-inbound.md)
 - [A collection is keyed, and streamed data is ordered](open-questions/keyed-versus-ordered-collections.md)
 - [The membrane bounds behaviour, not control — `fn` is still directly reachable](open-questions/membrane-bounds-behaviour-not-control.md)

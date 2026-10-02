@@ -1,8 +1,62 @@
-# `index:` names one field, so a composite identity gets packed into a string
+# Nothing warns about an `index` that no collection uses
 
-Status: open.
-Last grounded: 2026-10-01 — raised by an agent implementing `revise` from a scaffold
-and declining to guess what the packed form means.
+Status: open, and much narrower than first filed.
+Last grounded: 2026-10-01.
+
+########################################################################
+# CORRECTED 2026-10-01, hours after filing. THE CLAIM BELOW WAS WRONG. #
+########################################################################
+
+**What I claimed:** that `Revision` packing its round into `id` is *forced*, because
+`index:` admits one field and a revision is identified by (manuscript, round) — and
+that this made it the one instance today of string-packing that weir requires rather
+than the author choosing.
+
+**It is not forced, and the test is cheap.** `Revision` is never a collection
+element, so its `index: id` is not load-bearing for keying. Removing `index: id`,
+making `id` the manuscript (`"m-1"`) and leaving `round` as the round:
+
+```
+weir check  ✓
+weir accept revise   ✓ accepted      (with no nextId at all)
+weir test   ✓ 7 passed, 0 failed, 0 skipped
+```
+
+The last line includes the topology example that drives the three-round cycle, with
+**every `Revision` sharing `id: "m-1"`**. The runtime tells instances apart by the id
+it mints at the log (`LoggedInstance.id`), not by the edge's `index`. So the `-r<n>`
+suffix was never load-bearing, and `revise` without it needs no `nextId`, has nothing
+duplicated, and leaves nothing for an implementer to guess.
+
+Jordan's question was the right one: *"is this a fix, or something I could have known
+the answer to in one of my own examples?"* The latter. In a real project the author
+knows whether `id` means the manuscript or this revision of it. The ambiguity here
+came from a toy example giving `id` a composite meaning and not saying so.
+
+## What actually survives
+
+Two things, both smaller than the original claim.
+
+**1. Nothing warns about a decorative `index`.** `index:` is load-bearing only for
+collection keying — `many`, `gather`, and the key-agreement rule. `Revision` declares
+one and is never collected, and nothing says so. That declared-but-unused key is what
+invited packing a composite into it: once `id` is "the" identity, making it unique per
+round looks obligatory. A `weir check` or `weir sys` line reporting *"edge X declares
+`index: f` and no collection keys on X"* is cheap, decidable, and would have put the
+question to the author rather than to an implementer. **This is the real residue and
+is what this question is now about.**
+
+**2. A pure node cannot mint an identity.** If an author genuinely does need a natural
+key unique per instance produced inside a cycle, it has to be a deterministic function
+of the node's input, so it must encode whatever distinguishes the instances — there is
+no surrogate escape, because a UUID or counter is nondeterminism and Principle 0 keeps
+it out of a node. weir already mints `LoggedInstance.id` and does not expose it, and
+`Identity` is the caller's JWT (`{sub, iss}`), not that. Worth knowing; not a defect
+until somebody needs it, and the case that prompted this did not.
+
+########################################################################
+# THE ORIGINAL ARGUMENT, PRESERVED. THE "FORCED" CLAIM IS WRONG.       #
+########################################################################
 
 ## The question
 
@@ -92,15 +146,15 @@ comment) and the `{edge, payload}` shape of a tagged result.
 
 ## Related
 
-This is the third instance today of **structured data packed into a `utf8` because
-the type system had nowhere to put it**, and the only one weir's own model forces:
+Three instances today of **structured data packed into a `utf8`**. All three were the
+author's choice; the "forced" reading above is the part that was wrong:
 
 - geometry inside `RawParcelFeature.featureJson` (blue-ribbon) — friction #1, the
   author's choice.
 - the round inside `FactFinding.claim` (manuscript-review) — the author's choice,
   fixed 2026-10-01 by declaring `round` as a field.
-- the round inside `Revision.id` — **not** a free choice, because `index:` admits one
-  field and the identity needs two.
+- the round inside `Revision.id` — also a free choice, as the correction at the top
+  shows. Unpacking it costs nothing and removes `nextId` entirely.
 
 Also related: [positional identity](positional-identity.md), which is the same
 question about a node's identity rather than an edge instance's.

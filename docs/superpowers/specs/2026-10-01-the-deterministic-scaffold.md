@@ -658,7 +658,28 @@ drives this example end to end. Third time in one day that the answer was in the
 repository and absent from the sealed contract, after the property-path grammar and
 the `{edge, payload}` shape of a tagged result.
 
-Filed as [`index:` names one field](../../open-questions/index-names-one-field.md),
-because the duplication is **forced**: `Revision` declares `index: id`, a revision is
-identified by (manuscript, round), and `index:` admits one field — so the round is
-packed into the identity string and then exists twice, once typed and once not.
+I first filed that as a weir defect — the duplication being *forced* by `index:`
+admitting one field — and Jordan asked the right question: *"is this a fix, or
+something I could have known the answer to in one of my own examples?"*
+
+**The latter, and the test is cheap.** `Revision` is never a collection element, so
+its `index: id` is not load-bearing. Removing it, making `id` the manuscript and
+leaving `round` as the round:
+
+```
+weir accept revise   ✓ accepted      (with no nextId at all)
+weir test            ✓ 7 passed, 0 failed, 0 skipped
+```
+
+That includes the topology example driving the three-round cycle with **every
+`Revision` sharing `id: "m-1"`** — the runtime tells instances apart by the id it
+mints at the log, not by the edge's `index`. So the suffix was never load-bearing, and
+unpacking it deletes `nextId` outright.
+
+What survives is smaller and still worth having:
+[nothing warns about an `index` no collection uses](../../open-questions/index-names-one-field.md).
+`index:` matters only for collection keying, `Revision` declares one and is never
+collected, and that declared-but-unused key is what made packing a composite into it
+look obligatory. A `weir check` line saying *"edge X declares `index: f` and no
+collection keys on X"* would have put the question to the author instead of to an
+implementer.
