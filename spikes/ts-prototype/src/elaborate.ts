@@ -569,28 +569,24 @@ function assertExamplePayloads(
     /**
      * The same rule the implementation gets, and **only on the output side**.
      *
-     * CORRECTED 2026-10-01, within the hour, by `AddTodoToList` hitting it. The first
-     * version applied to `given` too, which is wrong for the same reason the
-     * collection-key rule was: on the way *in*, the instance has already been through
-     * a membrane and carries its minted id, so an example's `given` must supply it —
-     * that is what the node receives. Only `expect` is forbidden, because there the
-     * author would be asserting a uuid nobody can know, which is why `accept` compares
-     * with minted fields removed.
+     * CORRECTED TWICE on 2026-10-01, and the second correction simplified it.
+     *
+     * First it applied to `given` too, which is wrong: on the way *in* the instance has
+     * been through a membrane and carries its id, so an example's `given` **must**
+     * supply it — that is what the node receives.
+     *
+     * Then it allowed `expect` to supply a *carried* value on a transform, on the
+     * reasoning that the id survives. Measured, and wrong: `accept` compares
+     * `withoutMinted(actual)` to `expect` **unconditionally**, creation or transform, so
+     * an `expect` naming the id fails the comparison. Verified both ways on a transform
+     * — `expect` including the carried id is rejected, omitting it is accepted.
+     *
+     * So the rule is the simple one: `given` supplies, `expect` never does.
      */
-    const carriedFromInput = (key: string): boolean =>
-      (input.kind === "allOf" ? input.edges : [input.edge]).some(
-        (e) => {
-          const f = (e.fields as Record<string, unknown>)[key];
-          return f !== null && typeof f === "object" && "minted" in (f as object);
-        },
-      );
-
     if (what === "expect" && payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
       const record = payload as Record<string, unknown>;
       const supplied = Object.entries(edge.fields)
-        // A transform carries its input's minted value, so an `expect` naming one is
-        // correct there — only a *creation* must omit it.
-        .filter(([key, f]) => f !== null && typeof f === "object" && "minted" in f && key in record && !carriedFromInput(key))
+        .filter(([key, f]) => f !== null && typeof f === "object" && "minted" in f && key in record)
         .map(([key]) => key);
       if (supplied.length > 0) {
         throw new Error(

@@ -47,15 +47,13 @@ afterEach(async () => {
 /**
  * A payload with any **absent** host-minted field stood in for.
  *
- * `assertPayload` requires a minted field, which is right at runtime — `fillMinted`
- * has always run by then, so the requirement is a real invariant there. It is wrong
- * for an *authored* example: on a creation the author must omit it (elaboration refuses
- * an `expect` that supplies one), and on a transform they supply the carried value. So
- * "well-formed" for an example means "well-formed once the host has filled what it
- * fills", which is what this stands in for.
+ * `assertPayload` requires a minted field, which is right at runtime — `fillMinted` has
+ * always run by then. It is wrong for an example's **`expect`**, which must never name
+ * one: `accept` compares `withoutMinted(actual)` against it, so an `expect` carrying the
+ * id fails. Elaboration refuses it outright.
  *
- * Not weakening the check: every other field is still asserted exactly as before, and a
- * minted field the author *did* supply is left alone and validated.
+ * Applied to `expect` only. `given` is asserted strictly, because an instance arriving at
+ * a node does carry its minted value and an example omitting it is a real error.
  */
 function filled(edge: AnyEdgeDef, payload: unknown): unknown {
   if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return payload;
@@ -91,19 +89,26 @@ function filledOutput(output: OutputSpec, expect: unknown): unknown {
   });
 }
 
+/**
+ * `given` is asserted **strictly**, with no stand-in.
+ *
+ * An instance arriving at a node has been through a membrane and carries its minted
+ * value, so an example's `given` that omits one is a real authoring error and this is
+ * the check that should catch it. Only `expect` gets a stand-in — see `filled`.
+ */
 function assertInput(input: InputSpec, given: unknown): void {
   if (input.kind === "single") {
-    assertPayload(input.edge, filled(input.edge, given));
+    assertPayload(input.edge, given);
     return;
   }
   if (input.kind === "gather") {
     for (const entry of Object.values((given ?? {}) as Record<string, unknown>)) {
-      assertPayload(input.edge, filled(input.edge, entry));
+      assertPayload(input.edge, entry);
     }
     return;
   }
   const bag = (given ?? {}) as Record<string, unknown>;
-  for (const edge of input.edges) assertPayload(edge, filled(edge, bag[edge.name]));
+  for (const edge of input.edges) assertPayload(edge, bag[edge.name]);
 }
 
 describe("examples reach the gate", () => {
