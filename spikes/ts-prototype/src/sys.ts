@@ -19,7 +19,7 @@
 import { outputEdgeNames } from "./elaborate.js";
 import type { CompositeDecl, Wiring } from "./elaborate.js";
 import { inputEdgeNames } from "./types.js";
-import type { NodeDecl } from "./types.js";
+import type { AnyEdgeDef, ManyEdgeDef, NodeDecl } from "./types.js";
 
 export interface EdgeUse {
   edge: string;
@@ -41,6 +41,12 @@ export interface Orphan {
   /** `orphaned` — nothing produces or consumes it. `dropped` — produced, unconsumed, and not a declared terminal output. */
   kind: "orphaned" | "dropped";
   producedBy: string[];
+}
+
+/** An edge whose declared `index` is never used as a collection key. */
+export interface UncheckedIndex {
+  edge: string;
+  index: string;
 }
 
 export interface Mediation {
@@ -65,6 +71,27 @@ export interface SysReport {
   unwiredNodes: string[];
   /** Synthesized `Failed_*` edges nothing routes. A count, not a list: every node can emit one, so this is a fact about the program's size rather than a finding. */
   unroutedFailureEdges: number;
+  /**
+   * Edges that declare an `index` which nothing keys a collection on.
+   *
+   * `index` is load-bearing in exactly three places — a `many` field, a `gather`
+   * input, and a `many` output — where it is the collection key and the
+   * key-agreement rule checks it. Declared anywhere else it is documentation, and
+   * nothing said so.
+   *
+   * Reported because a declared-but-unused key reads as *the* identity, and that
+   * invites packing a composite into it. `manuscript-review`'s `Revision` declares
+   * `index: id` and is never collected, so its ids became `m-1-r1` to stay unique
+   * per round — putting the round in a `utf8` suffix beside the `uint8` field that
+   * already held it, and leaving an implementer to guess which one wins
+   * (docs/open-questions/index-names-one-field.md). Removing the index and
+   * unpacking the id costs nothing: the runtime tells instances apart by the id it
+   * mints at the log, not by this one.
+   *
+   * A finding rather than an error, and in `sys` rather than `check`, because
+   * declaring an index you do not key on is untidy and not wrong.
+   */
+  uncheckedIndexes: UncheckedIndex[];
 }
 
 /**
@@ -301,6 +328,71 @@ export function mediation(program: AnyProgram, node: string): Mediation {
   return { node, mediates, bypasses };
 }
 
+/**
+ * Every edge used as a collection element: a `many` field's target at any nesting
+ * depth, a `gather` input's edge, and a `many` output's edge. These are the only
+ * places `index` does work.
+ */
+function collectionKeyed(program: AnyProgram): Set<string> {
+  const keyed = new Set<string>();
+
+  const walk = (edge: AnyEdgeDef, seen: Set<string>): void => {
+    if (seen.has(edge.name)) return;
+    seen.add(edge.name);
+    for (const field of Object.values(edge.fields)) {
+      if (field !== null && typeof field === "object" && "many" in field) {
+        const target = (field as ManyEdgeDef).many;
+        keyed.add(target.name);
+        walk(target, seen);
+      } else if (field !== null && typeof field === "object" && "fields" in field) {
+        walk(field as AnyEdgeDef, seen);
+      }
+    }
+  };
+
+  for (const node of Object.values(program.nodes)) {
+    const input = node.input;
+    if (input.kind === "gather") keyed.add(input.edge.name);
+    const edges =
+      input.kind === "allOf" ? input.edges : [input.edge];
+    for (const edge of edges) walk(edge, new Set());
+
+    const output = node.output;
+    if (output.kind === "many") keyed.add(output.edge.name);
+    const outs = output.kind === "oneOf" || output.kind === "allOf" ? output.edges : [output.edge];
+    for (const edge of outs) walk(edge, new Set());
+  }
+  return keyed;
+}
+
+export function uncheckedIndexes(program: AnyProgram): UncheckedIndex[] {
+  const keyed = collectionKeyed(program);
+  const seen = new Set<string>();
+  const found: UncheckedIndex[] = [];
+
+  const consider = (edge: AnyEdgeDef): void => {
+    if (seen.has(edge.name)) return;
+    seen.add(edge.name);
+    if (edge.index !== undefined && !keyed.has(edge.name)) {
+      found.push({ edge: edge.name, index: edge.index });
+    }
+    for (const field of Object.values(edge.fields)) {
+      if (field !== null && typeof field === "object" && "many" in field) consider((field as ManyEdgeDef).many);
+      else if (field !== null && typeof field === "object" && "fields" in field) consider(field as AnyEdgeDef);
+    }
+  };
+
+  for (const node of Object.values(program.nodes)) {
+    const input = node.input;
+    for (const edge of input.kind === "allOf" ? input.edges : [input.edge]) consider(edge);
+    const output = node.output;
+    for (const edge of output.kind === "oneOf" || output.kind === "allOf" ? output.edges : [output.edge]) {
+      consider(edge);
+    }
+  }
+  return found.sort((a, b) => a.edge.localeCompare(b.edge));
+}
+
 export function analyze(program: AnyProgram): SysReport {
   const edges = edgeUses(program);
   return {
@@ -314,5 +406,6 @@ export function analyze(program: AnyProgram): SysReport {
     unroutedFailureEdges: edges.filter(
       (e) => e.edge.startsWith("Failed_") && e.producedBy.length === 0 && e.consumedBy.length === 0,
     ).length,
+    uncheckedIndexes: uncheckedIndexes(program),
   };
 }

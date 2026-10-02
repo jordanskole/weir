@@ -253,3 +253,75 @@ describe("sys — the whole corpus", () => {
     }
   });
 });
+
+/**
+ * `decorativeIndexes` — an `index` nothing keys a collection on.
+ *
+ * `index` does work in exactly three places: a `many` field, a `gather` input and a
+ * `many` output. Declared anywhere else it is documentation, and a
+ * declared-but-unused key reads as *the* identity — which is what invited packing a
+ * composite into `manuscript-review`'s `Revision.id`, putting the round in a `utf8`
+ * suffix beside the `uint8` field that already held it
+ * (docs/open-questions/index-names-one-field.md).
+ */
+describe("sys — an index that is never a collection key", () => {
+  /**
+   * BREAK-PROOF: dropping the `gather` branch from `collectionKeyed` reddens the
+   * soc-triage case; dropping the `many`-field walk reddens recipe and todo-list;
+   * dropping the `many`-output branch reddens blue-ribbon-soil.
+   */
+  it("reports an index on an edge no collection keys on, and nothing else", async () => {
+    const elaborated = await elaborate(join(EXAMPLES, "escalation"));
+    const report = analyze(elaborated);
+    expect(report.uncheckedIndexes).toEqual([{ edge: "Ticket", index: "id" }]);
+  });
+
+  /**
+   * The guard that makes the above mean something: an edge that IS a collection
+   * element must not be reported, however it is collected. Without this, a function
+   * that reported every `index` would pass the test above.
+   */
+  it("stays silent for every edge that is genuinely a collection key", async () => {
+    for (const app of [
+      join(EXAMPLES, "recipe"),
+      join(EXAMPLES, "soc-triage"),
+      join(EXAMPLES, "flaky-source"),
+      join(EXAMPLES, "person-birthday"),
+    ]) {
+      const elaborated = await elaborate(app);
+      const report = analyze(elaborated);
+      expect(report.uncheckedIndexes, app).toEqual([]);
+    }
+  });
+
+  /**
+   * blue-ribbon-soil is the case that corrected the framing. `SoilPolygonShape`
+   * declares `index: polygonId`, and `parseSoilPolygon` outputs it singly while
+   * `measureSoilPolygon` consumes it singly — so nothing keys on it, and it is
+   * reported. But its instances multiply (one per spread element), so the index is a
+   * real natural key and declaring it is right. That is why this is information
+   * rather than a finding of waste.
+   */
+  it("reports a natural key on a spread element too, which is why it is not called waste", async () => {
+    const elaborated = await elaborate(join(EXAMPLES, "..", "spikes", "blue-ribbon-soil"));
+    expect(analyze(elaborated).uncheckedIndexes).toEqual([
+      { edge: "SoilPolygonShape", index: "polygonId" },
+    ]);
+  });
+
+  it("finds the Revision.id case that prompted it", async () => {
+    const elaborated = await elaborate(join(EXAMPLES, "manuscript-review"));
+    expect(analyze(elaborated).uncheckedIndexes).toEqual([{ edge: "Revision", index: "id" }]);
+  });
+
+  /**
+   * A finding, not an error. `weir check` must stay green on both apps that have
+   * one — declaring an index you do not key on is untidy and not wrong, and failing
+   * elaboration over it would break working programs.
+   */
+  it("does not make the program fail to elaborate", async () => {
+    for (const app of [join(EXAMPLES, "escalation"), join(EXAMPLES, "manuscript-review")]) {
+      await expect(elaborate(app)).resolves.toBeDefined();
+    }
+  });
+});

@@ -506,6 +506,14 @@ async function sys(dir: string, flags: Map<string, string>, json: boolean): Prom
     lines.push("", `  unwired`);
     for (const n of report.unwiredNodes) lines.push(`    ${n} — declared, never wired into any topology`);
   }
+  if (report.uncheckedIndexes.length > 0) {
+    lines.push("", `  index, unchecked`);
+    for (const d of report.uncheckedIndexes) {
+      lines.push(
+        `    ${d.edge.padEnd(24)} index: ${d.index} — never a collection key, so its uniqueness is yours to keep`,
+      );
+    }
+  }
   if (report.orphans.length > 0) {
     lines.push("", `  findings`);
     for (const o of report.orphans) {
