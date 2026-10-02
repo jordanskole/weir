@@ -126,6 +126,42 @@ checked in and a test compares them to their generator's current output, so addi
 field kind to `schema.ts` reddened it until `npm run generate:schemas` ran. That test
 earned its keep.
 
+## Three corrections within the hour, all from real use
+
+Jordan put it into `todo-list` immediately, and it found three places where the rules I
+shipped were wrong. All three are the same mistake: **a rule derived from the creation
+case, applied to cases that are not creations.**
+
+**1. The collection-key rule was too broad.** It lived in `requireIndex`, which has three
+callers, and only one is a conflict. A `many` **field** (`TodoList.tasks: { many: Todo }`)
+is assembled from instances that **already carry** their minted ids — the membrane filled
+them upstream — so the node can key by them. A `gather` input likewise receives logged
+instances. Only a `many` **output** is circular: the node produces N entries in one return
+and must key each by its own index, but a minted value is assigned after it returns. Moved
+to `refuseMintedKey`, called from the `many`-output site alone.
+
+**2. The example rule was too broad, twice.** It forbade a minted field in `given` as well
+as `expect` — but on the way *in* the instance has been through a membrane and carries its
+id, so an example's `given` **must** supply it. And then it still forbade `expect` on a
+transform, where the output carries the input's value and the author should name it. Now:
+only an `expect` whose minted field is *not* carried from an input.
+
+**3. Minting on every output was simply wrong.** `CompleteTodo: Todo -> Todo` would have
+given the completed todo a **new** id, silently changing its identity. Worse than the bug
+the rule prevented.
+
+The fix needs no new declaration: **mint iff no input edge declares the same minted field;
+otherwise carry that input's value.** It covers all three shapes in `todo-list` —
+`CreateTodo: TodoInput -> Todo` mints, `CompleteTodo: Todo -> Todo` and
+`EditTodo: allOf[Todo, TodoInput] -> Todo` carry. Carrying rather than relaxing to "mint
+if absent" keeps the guarantee: the membrane copies, the `fn` still never supplies it.
+
+One consequence worth stating: `assertPayload` requires a minted field, which is right at
+runtime because `fillMinted` has always run by then. It is wrong for an *authored* example,
+where a creation omits it, so the examples gate stands in a placeholder for an absent one
+before asserting. That is the one place the authored and runtime views of an edge genuinely
+differ.
+
 ## What it costs, honestly
 
 ~~**`assertPayload` is side-agnostic today, and this is the first rule that is not.**~~

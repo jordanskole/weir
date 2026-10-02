@@ -812,7 +812,53 @@ function mintedKeysOf(edge: AnyEdgeDef): string[] {
  * into `Failed<In>` carrying the reason, which is the right outcome: an implementation
  * that invents an identity is wrong in the way "never caller-suppliable" means.
  */
-function fillMinted(output: OutputSpec, result: unknown, supplied?: Record<string, string>): void {
+function fillMinted(
+  output: OutputSpec,
+  result: unknown,
+  input: InputSpec,
+  inputPayload: unknown,
+  supplied?: Record<string, string>,
+): void {
+  /**
+   * A minted field is minted when an instance is **created**, and carried when one is
+   * **transformed** — and which of those a node does is already written down.
+   *
+   * CORRECTED 2026-10-01, within the hour, by `CompleteTodo` hitting it. The first
+   * version minted on every output, so `CompleteTodo: Todo -> Todo` would have given
+   * the completed todo a *new* id, silently changing its identity. That is worse than
+   * the bug it was preventing.
+   *
+   * The rule needs no new declaration: **mint iff no input edge declares the same
+   * minted field; otherwise carry that input's value.** It covers all three shapes in
+   * `todo-list` — `CreateTodo: TodoInput -> Todo` mints because `TodoInput` has no
+   * `id`; `CompleteTodo: Todo -> Todo` and `EditTodo: allOf[Todo, TodoInput] -> Todo`
+   * carry because an input does.
+   *
+   * Carrying rather than relaxing to "mint if absent" keeps the guarantee: the
+   * membrane copies and the `fn` still never supplies it, so "never suppliable" holds
+   * for a transform exactly as it does for a creation.
+   */
+  const carried = (key: string): string | undefined => {
+    if (input.kind === "single") {
+      const declares = mintedKeysOf(input.edge).includes(key);
+      if (!declares) return undefined;
+      const value = (inputPayload as Record<string, unknown> | null)?.[key];
+      return typeof value === "string" ? value : undefined;
+    }
+    if (input.kind === "allOf") {
+      const sources = input.edges.filter((e) => mintedKeysOf(e).includes(key));
+      // Ambiguity is refused at elaboration, so one source at most reaches here.
+      const source = sources[0];
+      if (source === undefined) return undefined;
+      const bag = inputPayload as Record<string, Record<string, unknown>> | null;
+      const value = bag?.[source.name]?.[key];
+      return typeof value === "string" ? value : undefined;
+    }
+    // A gather receives many instances, each with its own value, so there is nothing
+    // unambiguous to carry — a gather's output mints.
+    return undefined;
+  };
+
   const fill = (edge: AnyEdgeDef, payload: unknown): void => {
     if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return;
     const record = payload as Record<string, unknown>;
@@ -820,10 +866,10 @@ function fillMinted(output: OutputSpec, result: unknown, supplied?: Record<strin
       if (Object.hasOwn(record, key) && record[key] !== undefined) {
         throw new Error(
           `${edge.name}.${key} is host-minted and may not be returned by the implementation — ` +
-            `omit it and the membrane fills it.`,
+            `omit it; the membrane mints it, or carries it from the input that already has one.`,
         );
       }
-      record[key] = supplied?.[`${edge.name}.${key}`] ?? crypto.randomUUID();
+      record[key] = supplied?.[`${edge.name}.${key}`] ?? carried(key) ?? crypto.randomUUID();
     }
   };
 
@@ -933,7 +979,7 @@ async function callFn<In extends InputSpec, O extends OutputSpec>(
   minted?: Record<string, string>,
 ): Promise<OutputResult<O> | Failed<In>> {
   const result = await (nodeDef.fn.length >= 2 ? nodeDef.fn(payload, envelope) : nodeDef.fn(payload));
-  fillMinted(nodeDef.output, result, minted);
+  fillMinted(nodeDef.output, result, nodeDef.input, payload, minted);
   return result;
 }
 

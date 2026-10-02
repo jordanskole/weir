@@ -35,23 +35,36 @@ function requireIndex(edge: AnyEdgeDef, context: string): void {
   if (edge.index === undefined) {
     throw new Error(`${context} references "${edge.name}", which declares no index — a collection needs a real key.`);
   }
-  /**
-   * A collection key cannot be host-minted, and the conflict is circular rather
-   * than stylistic: the key-agreement rule requires each entry to sit under its
-   * own `index` value, and the implementation builds the collection — so it would
-   * have to know a value only the membrane assigns, after it has returned.
-   *
-   * Only checked here, where `index` is actually load-bearing. A minted `index`
-   * on an edge nothing collects is fine, and is in fact the best use of one:
-   * unique by construction, with nothing to maintain by hand
-   * (`weir sys`'s `index, unchecked` line).
-   */
+}
+
+/**
+ * A `many` **output** may not be keyed by a host-minted field, and this is the one
+ * place the conflict is real.
+ *
+ * CORRECTED 2026-10-01, within the hour, by Jordan's `todo-list` hitting it. The first
+ * version of this rule lived in `requireIndex` and so applied to all three of its
+ * callers, which was too broad by two:
+ *
+ * - a `many` **field** (`TodoList.tasks: { many: Todo }`) is assembled by a node from
+ *   instances that **already carry** their minted ids, because the membrane filled them
+ *   when those instances were produced upstream. `AddTodoToList` receives a `Todo` whose
+ *   `id` exists and keys `tasks` by it. No conflict, and refusing it blocked a design
+ *   that is not only legal but the natural one.
+ * - a `gather` **input** receives logged instances, which have each been through a
+ *   membrane. Also already filled.
+ * - a `many` **output** is the real case: the node produces N instances in one return,
+ *   and their minted fields are assigned *after* it returns — so it cannot key them by
+ *   a value it has no way to know, and `assertManyOutput`'s key-agreement check would
+ *   fail on whatever it chose instead.
+ */
+function refuseMintedKey(edge: AnyEdgeDef, context: string): void {
+  if (edge.index === undefined) return;
   const keyField = edge.fields[edge.index];
   if (keyField !== null && typeof keyField === "object" && "minted" in keyField) {
     throw new Error(
-      `${context} references "${edge.name}", whose index "${edge.index}" is host-minted — ` +
-        `a collection is keyed by its entries' own index, which the implementation must know ` +
-        `when it builds the collection, and a minted value is assigned after it returns.`,
+      `${context} is keyed by "${edge.name}.${edge.index}", which is host-minted — a many ` +
+        `output produces its entries in one return, and a minted value is assigned after that, ` +
+        `so the implementation cannot key them by it.`,
     );
   }
 }
@@ -242,6 +255,38 @@ export function parseEdgeFile(yamlText: string, name: string, resolveField: Fiel
   if ("name" in raw) {
     throw new Error(`.edge files don't declare "name" — the filename is the name.`);
   }
+  /**
+   * A partial override beside a spread, named before the schema sees it.
+   *
+   * `fields: { "...TodoInput":, title: { nullable: false } }` is a natural thing to
+   * reach for — reuse a shape and tighten one property — and it is deliberately not
+   * supported: the spread spec's own out-of-scope list says *"Sub-field-level override
+   * (patching one property of a source field rather than replacing it whole) —
+   * whole-field replacement only."*
+   *
+   * Checked here because `assertDeclaration` otherwise reports it as an ajv `oneOf`
+   * dump — *"must be string; must NOT be valid; must have required property 'many';
+   * must be boolean; must have required property 'literal'; must have required
+   * property 'minted'"* — which lists every alternative and mentions neither spread nor
+   * override. Jordan hit exactly this.
+   */
+  const rawFields = (raw as { fields?: Record<string, unknown> }).fields ?? {};
+  if (Object.keys(rawFields).some((key) => SPREAD_KEY.test(key))) {
+    for (const [key, value] of Object.entries(rawFields)) {
+      if (SPREAD_KEY.test(key)) continue;
+      if (value === null || typeof value !== "object" || Array.isArray(value)) continue;
+      const shape = value as Record<string, unknown>;
+      if ("type" in shape || "many" in shape || "literal" in shape || "minted" in shape) continue;
+      throw new Error(
+        `"${key}" is a partial override. A field written beside a spread replaces the spread ` +
+          `field whole, so it needs its own "type" (or "many"/"literal"/"minted") along with ` +
+          `"label" and "description" — patching one property of a spread field is not supported ` +
+          `(docs/superpowers/specs/2026-09-09-edge-spread.md, "whole-field replacement only"). ` +
+          `Write "${key}" out in full, or drop the override.`,
+      );
+    }
+  }
+
   assertDeclaration("edge", raw);
   const { label, description, index, fields } = raw as {
     label?: unknown;
@@ -522,15 +567,30 @@ function assertExamplePayloads(
     }
 
     /**
-     * The same rule the implementation gets: a host-minted field may not be
-     * supplied. An example that named one would be asserting a uuid nobody can
-     * know, and `accept` compares with minted fields removed precisely because
-     * the author cannot write them.
+     * The same rule the implementation gets, and **only on the output side**.
+     *
+     * CORRECTED 2026-10-01, within the hour, by `AddTodoToList` hitting it. The first
+     * version applied to `given` too, which is wrong for the same reason the
+     * collection-key rule was: on the way *in*, the instance has already been through
+     * a membrane and carries its minted id, so an example's `given` must supply it —
+     * that is what the node receives. Only `expect` is forbidden, because there the
+     * author would be asserting a uuid nobody can know, which is why `accept` compares
+     * with minted fields removed.
      */
-    if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
+    const carriedFromInput = (key: string): boolean =>
+      (input.kind === "allOf" ? input.edges : [input.edge]).some(
+        (e) => {
+          const f = (e.fields as Record<string, unknown>)[key];
+          return f !== null && typeof f === "object" && "minted" in (f as object);
+        },
+      );
+
+    if (what === "expect" && payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
       const record = payload as Record<string, unknown>;
       const supplied = Object.entries(edge.fields)
-        .filter(([key, f]) => f !== null && typeof f === "object" && "minted" in f && key in record)
+        // A transform carries its input's minted value, so an `expect` naming one is
+        // correct there — only a *creation* must omit it.
+        .filter(([key, f]) => f !== null && typeof f === "object" && "minted" in f && key in record && !carriedFromInput(key))
         .map(([key]) => key);
       if (supplied.length > 0) {
         throw new Error(
@@ -697,6 +757,7 @@ function resolveOutputSpec(output: unknown, resolveEdge: EdgeResolver): OutputSp
       }
       const edge = resolveEdge(ref);
       requireIndex(edge, `"output.many"`);
+      refuseMintedKey(edge, `"output.many"`);
       return { kind: "many", edge };
     }
   }

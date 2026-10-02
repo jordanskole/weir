@@ -28,7 +28,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { acceptImplementation } from "./accept.js";
 import { elaborate } from "./elaborate.js";
 import { assertOutput, assertPayload } from "./membrane.js";
-import type { InputSpec, NodeDecl } from "./types.js";
+import type { InputSpec, NodeDecl, AnyEdgeDef, OutputSpec } from "./types.js";
 
 const EXAMPLES = fileURLToPath(new URL("../../../examples", import.meta.url));
 
@@ -44,19 +44,66 @@ afterEach(async () => {
  * takes exactly the post-translation runtime form, which is a useful
  * confirmation that the translation targets the right shapes.
  */
+/**
+ * A payload with any **absent** host-minted field stood in for.
+ *
+ * `assertPayload` requires a minted field, which is right at runtime — `fillMinted`
+ * has always run by then, so the requirement is a real invariant there. It is wrong
+ * for an *authored* example: on a creation the author must omit it (elaboration refuses
+ * an `expect` that supplies one), and on a transform they supply the carried value. So
+ * "well-formed" for an example means "well-formed once the host has filled what it
+ * fills", which is what this stands in for.
+ *
+ * Not weakening the check: every other field is still asserted exactly as before, and a
+ * minted field the author *did* supply is left alone and validated.
+ */
+function filled(edge: AnyEdgeDef, payload: unknown): unknown {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const minted = Object.entries(edge.fields)
+    .filter(([, f]) => f !== null && typeof f === "object" && "minted" in (f as object))
+    .map(([key]) => key);
+  if (minted.length === 0) return payload;
+  const copy = { ...(payload as Record<string, unknown>) };
+  for (const key of minted) {
+    if (copy[key] === undefined) copy[key] = "00000000-0000-4000-8000-000000000000";
+  }
+  return copy;
+}
+
+/** `filled`, applied through an output spec's shape. */
+function filledOutput(output: OutputSpec, expect: unknown): unknown {
+  if (output.kind === "single") return filled(output.edge, expect);
+  if (output.kind === "many") {
+    if (expect === null || typeof expect !== "object") return expect;
+    return Object.fromEntries(
+      Object.entries(expect as Record<string, unknown>).map(([k, v]) => [k, filled(output.edge, v)]),
+    );
+  }
+  if (output.kind === "oneOf") {
+    const tagged = expect as { edge?: unknown; payload?: unknown };
+    const branch = output.edges.find((e) => e.name === tagged?.edge);
+    return branch === undefined ? expect : { ...tagged, payload: filled(branch, tagged.payload) };
+  }
+  if (!Array.isArray(expect)) return expect;
+  return (expect as { edge?: unknown; payload?: unknown }[]).map((tagged) => {
+    const branch = output.edges.find((e) => e.name === tagged?.edge);
+    return branch === undefined ? tagged : { ...tagged, payload: filled(branch, tagged.payload) };
+  });
+}
+
 function assertInput(input: InputSpec, given: unknown): void {
   if (input.kind === "single") {
-    assertPayload(input.edge, given);
+    assertPayload(input.edge, filled(input.edge, given));
     return;
   }
   if (input.kind === "gather") {
     for (const entry of Object.values((given ?? {}) as Record<string, unknown>)) {
-      assertPayload(input.edge, entry);
+      assertPayload(input.edge, filled(input.edge, entry));
     }
     return;
   }
   const bag = (given ?? {}) as Record<string, unknown>;
-  for (const edge of input.edges) assertPayload(edge, bag[edge.name]);
+  for (const edge of input.edges) assertPayload(edge, filled(edge, bag[edge.name]));
 }
 
 describe("examples reach the gate", () => {
@@ -144,7 +191,10 @@ describe("examples reach the gate", () => {
             failures.push(`${example}/${name} example ${i} given: ${(cause as Error).message}`);
           }
           try {
-            assertOutput(node.output, declared.expect);
+            // Same reasoning as `filled` on the input side: an example's `expect`
+            // omits a minted field on a creation and carries it on a transform, and
+            // either is well-formed once the host has filled what it fills.
+            assertOutput(node.output, filledOutput(node.output, declared.expect));
           } catch (cause) {
             failures.push(`${example}/${name} example ${i} expect: ${(cause as Error).message}`);
           }

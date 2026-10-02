@@ -248,23 +248,26 @@ examples:
   });
 
   /**
-   * Circular rather than stylistic: the key-agreement rule needs each entry under its
-   * own index value, the implementation builds the collection, and a minted value is
-   * assigned after it returns.
+   * A `many` **field** keyed by a minted index is fine, and refusing it was wrong.
    *
-   * BREAK-PROOF: removing the check from `requireIndex` reddens this.
+   * CORRECTED within the hour of shipping, by `todo-list`'s `TodoList.tasks:
+   * { many: Todo }`. A node assembling that collection receives `Todo` instances that
+   * **already carry** their ids — the membrane filled them upstream — so it can key by
+   * them. The first version of the rule lived in `requireIndex` and so blocked this,
+   * which is the natural design.
    */
-  it("refuses a minted field as a collection key", async () => {
-    const message = await app({
-      "src/edges/Thing.edge": THING,
-      "src/edges/NewThing.edge": NEW,
-      "src/edges/Bag.edge": `label: Bag
+  it("allows a minted index on a `many` field, whose entries arrive already filled", async () => {
+    expect(
+      await app({
+        "src/edges/Thing.edge": THING,
+        "src/edges/NewThing.edge": NEW,
+        "src/edges/Bag.edge": `label: Bag
 description: d
 fields:
   things:
     many: Thing
 `,
-      "src/nodes/collect.node": `label: Collect
+        "src/nodes/collect.node": `label: Collect
 description: d
 input: NewThing
 output: Bag
@@ -276,8 +279,37 @@ examples:
       Bag:
         things: {}
 `,
+      }),
+    ).toBe("");
+  });
+
+  /**
+   * A `many` **output** is the real conflict, and the only one: the node produces N
+   * entries in one return and must key each by its own index, but a minted value is
+   * assigned after it returns — so `assertManyOutput`'s key-agreement check would fail
+   * on whatever it chose instead.
+   *
+   * BREAK-PROOF: removing the `refuseMintedKey` call reddens this, and reddens the
+   * `many`-field case above only if the check is put back in `requireIndex`.
+   */
+  it("refuses a minted index on a `many` output", async () => {
+    const message = await app({
+      "src/edges/Thing.edge": THING,
+      "src/edges/NewThing.edge": NEW,
+      "src/nodes/spread.node": `label: Spread
+description: d
+input: NewThing
+output:
+  many: Thing
+examples:
+  - given:
+      NewThing:
+        name: "a widget"
+    expect:
+      Thing: {}
+`,
     });
-    expect(message).toMatch(/index "id" is host-minted/);
+    expect(message).toMatch(/is keyed by "Thing\.id", which is host-minted/);
   });
 
   /**
@@ -398,5 +430,82 @@ wiring:
     // `weir verify` has nothing to flag. Verified end to end too — without the
     // re-feed, verify prints the two differing uuids side by side.
     expect(replayed).toEqual(entry.result);
+  });
+});
+
+/**
+ * Minted on **creation**, carried on a **transform** — and which a node does is
+ * already written down, so no new declaration is needed.
+ *
+ * CORRECTED within the hour of shipping, by `todo-list`'s `CompleteTodo` hitting it.
+ * The first version minted on every output, so `CompleteTodo: Todo -> Todo` would have
+ * given the completed todo a *new* id, silently changing its identity. That is worse
+ * than the bug the rule was preventing.
+ */
+describe("minted fields — created once, carried thereafter", () => {
+  const Done = defineEdge({
+    name: "Thing",
+    label: "Thing",
+    description: "d",
+    fields: {
+      id: mintedId,
+      name: defineField({ type: "utf8", label: "Name", description: "d", nullable: false }),
+    },
+  });
+
+  /** `CompleteTodo: Todo -> Todo`. The input already carries the id. */
+  const transform = defineNode({
+    name: "transform",
+    input: single(Done),
+    output: single(Done),
+    fn: (p: any) => ({ name: `${p.name}!` }),
+  } as any);
+
+  /**
+   * BREAK-PROOF: deleting the `carried(key) ??` term from `fillMinted` reddens this
+   * and nothing else — which is the point, since minting a fresh id here is exactly
+   * the silent identity change.
+   */
+  it("carries the input's value through a transform", async () => {
+    const made = (await membrane(makeThing as any, { name: "a widget" } as any, ctx)).result as any;
+    const changed = (await membrane(transform as any, made, ctx)).result as any;
+    expect(changed.name).toBe("a widget!");
+    expect(changed.id).toBe(made.id);
+  });
+
+  it("still mints for a creation, whose input declares no such field", async () => {
+    const a = (await membrane(makeThing as any, { name: "x" } as any, ctx)).result as any;
+    const b = (await membrane(makeThing as any, { name: "x" } as any, ctx)).result as any;
+    expect(a.id).not.toBe(b.id);
+  });
+
+  /** An `allOf` transform — `EditTodo: allOf[Todo, TodoInput] -> Todo`. */
+  it("carries from the one allOf input that declares the field", async () => {
+    const edit = defineNode({
+      name: "edit",
+      input: { kind: "allOf", edges: [Done, NewThing] },
+      output: single(Done),
+      fn: (bag: any) => ({ name: bag.NewThing.name }),
+    } as any);
+    const made = (await membrane(makeThing as any, { name: "before" } as any, ctx)).result as any;
+    const edited = (await membrane(
+      edit as any,
+      { Thing: made, NewThing: { name: "after" } } as any,
+      ctx,
+    )).result as any;
+    expect(edited).toEqual({ name: "after", id: made.id });
+  });
+
+  /** The `fn` still may not supply it, on a transform as much as a creation. */
+  it("keeps 'never suppliable' on a transform", async () => {
+    const liar = defineNode({
+      name: "liar",
+      input: single(Done),
+      output: single(Done),
+      fn: (p: any) => ({ name: p.name, id: "i-made-this-up" }),
+    } as any);
+    const made = (await membrane(makeThing as any, { name: "x" } as any, ctx)).result as any;
+    const { result } = await membrane(liar as any, made, ctx);
+    expect(result).toMatchObject({ reason: expect.stringContaining("may not be returned") });
   });
 });
