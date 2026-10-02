@@ -18,7 +18,7 @@ the code on that date*, not that it was edited. It is also now possible to read
 one question's whole history with `git log docs/open-questions/<file>`, which the
 single document made impossible.
 
-## Open (30)
+## Open (31)
 
 Live. Ordered alphabetically, not by priority.
 
@@ -47,6 +47,7 @@ Live. Ordered alphabetically, not by priority.
 - [Prose blocks on node declarations](open-questions/prose-on-node-declarations.md)
 - [`weir replay` exits zero even when every invocation refused](open-questions/replay-exit-code.md)
 - [Run granularity: a batch job's output has nowhere to live](open-questions/run-granularity.md)
+- [Should weir emit scenarios to answer, rather than ask for examples?](open-questions/scenarios-instead-of-examples.md)
 - [Is the sealed contract's length a cost nobody is accounting for?](open-questions/sealed-contract-length.md)
 - [Serialization erases classification at exactly the crossing it describes](open-questions/serialization-erases-classification.md)
 - [Serialization format for the netlist and log](open-questions/serialization-format.md)
