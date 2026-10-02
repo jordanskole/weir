@@ -83,8 +83,52 @@ meaning "not yet persisted" and "persisted", and the id's presence is the type-l
 record that persistence happened — weir's own "a decision becomes a type" claim,
 applied to identity.
 
+### Nobody mints it — and the host already did
+
+Jordan's objection to "the caller supplies it": *"we wouldn't expect a **user** to mint a
+todo's own id."* Right, and it splits "caller" into two things. A human types a title and
+a description. A *client* — an offline-first app generating a client-side UUID — is a
+perfectly ordinary source, and is outside the program either way. weir's boundary is the
+program's boundary, not the human's. But neither is the best answer, because there is a
+third source that costs no product decision at all.
+
+**weir already mints one, per invocation, and already records it.** `Envelope` carries
+`id: string` (types.ts:326), minted at `membrane.ts:535` and written into the trace. And
+replay re-feeds recorded envelope fields rather than re-minting them — `replay.ts` does
+exactly this for `identity`, `step` and `causationIds`:
+
+> *"The replayed call is re-fed `entry.envelope.identity` … `entry.envelope.step` is
+> re-fed the same way … `entry.envelope.causationIds` is re-fed for the same reason"*
+
+So a node reading the invocation id would be **replay-deterministic by the mechanism
+already in use**: the value is host-minted, durable, and fed back on replay — the same
+contract that makes an effect replayable.
+
+The mechanism to read it already exists and is an explicit extension point. `scope`
+resolves `read:Identity:<field>` and its own error says *"only … resolves to anything
+**today**"*; the declared-envelope spec lists *"`read:` on anything but `Identity` and
+declared envelopes"* as deliberately out of scope rather than impossible. So:
+
+```yaml
+# CreateTodo.node
+scope:
+  - read:Invocation:id
+```
+
+would hand a pure node an identity it did not invent. **Unbuilt, and the smallest
+principled answer to "who mints an id".**
+
+### The three sources, and none is the user
+
+| source | when it fits | status |
+|---|---|---|
+| the host's invocation id, via `scope` | any program, no product decision | **unbuilt**; one field on a designed hook |
+| the database, via an effect | the program persists | works today; gives the `UnsavedTodo`/`Todo` split |
+| the client (not the human) | offline-first, client-generated UUID | works today; a product decision |
+
 Third time today a finding resolved to *you were holding it wrong* rather than to new
-machinery, after the invented provenance and the packed `Revision.id`.
+machinery, after the invented provenance and the packed `Revision.id` — though this one
+leaves a real and small thing behind, which the other two did not.
 
 ########################################################################
 # THE ORIGINAL ARGUMENT, PRESERVED. THE "FORCED" CLAIM IS WRONG.       #
