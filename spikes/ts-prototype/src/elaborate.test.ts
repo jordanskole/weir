@@ -633,6 +633,7 @@ examples:
       Person: {}
     expect:
       Pass: {}
+      Fail: {}
 `;
     const node = parseNodeFile(yaml, "weird", resolveEdge);
     expect(node.output).toEqual({ kind: "allOf", edges: [Pass, Fail] });
@@ -740,6 +741,142 @@ examples:
 `;
     const node = parseNodeFile(yaml, "birthday", resolveEdge);
     expect(node).not.toHaveProperty("properties");
+  });
+
+  /**
+   * An example's edge-name tag is checked against what the node declares.
+   *
+   * It used not to be: `sole()` took the one key without looking at it, so the tag
+   * only had to exist and be unique. Jordan wrote a node with `output: TodoList` and
+   * `expect: { AnalyzedList: … }` and `weir check` passed — and the error message had
+   * always claimed otherwise, *"must be tagged by edge name"*. Prose asserting a check
+   * that was not performed, again.
+   *
+   * `weir check` is also the only place this can be caught early: it elaborates and
+   * never compares an example to anything, so an untagged-wrongly example reaches
+   * `weir test` or `weir accept` and surfaces there as a payload mismatch rather than
+   * as the tag error it is.
+   */
+  describe("untagExamples — the tag must name the declared edge", () => {
+    /** BREAK-PROOF: removing the `keys[0] !== expected` check reddens every case here. */
+    it("rejects an `expect` tagged with an edge the node does not output", () => {
+      const yaml = `
+  label: E
+  description: d
+  input: Person
+  output: Person
+  examples:
+    - given:
+        Person: {}
+      expect:
+        Todo: {}
+  `;
+      expect(() => parseNodeFile(yaml, "mistagged", resolveEdge)).toThrow(
+        /"expect" is tagged "Todo", but this node declares output "Person"/,
+      );
+    });
+
+    it("rejects a `given` tagged with an edge the node does not take", () => {
+      const yaml = `
+  label: E
+  description: d
+  input: Person
+  output: Person
+  examples:
+    - given:
+        Todo: {}
+      expect:
+        Person: {}
+  `;
+      expect(() => parseNodeFile(yaml, "mistagged-given", resolveEdge)).toThrow(
+        /"given" is tagged "Todo", but this node declares input "Person"/,
+      );
+    });
+
+    it("accepts the correctly tagged form it always should have", () => {
+      const yaml = `
+  label: E
+  description: d
+  input: Person
+  output: Person
+  examples:
+    - given:
+        Person: {}
+      expect:
+        Person: {}
+  `;
+      expect(() => parseNodeFile(yaml, "tagged", resolveEdge)).not.toThrow();
+    });
+
+    /**
+     * A `oneOf` branch name was taken unchecked too, becoming `{edge: "<typo>"}` and
+     * failing much later inside `assertOutput` with a different message.
+     */
+    it("rejects a oneOf `expect` naming a branch that is not declared", () => {
+      const yaml = `
+  label: E
+  description: d
+  input: Person
+  output:
+    oneOf:
+      - Pass
+      - Fail
+  examples:
+    - given:
+        Person: {}
+      expect:
+        Todo: {}
+  `;
+      expect(() => parseNodeFile(yaml, "mistagged-branch", resolveEdge)).toThrow(
+        /names branch "Todo", which is not one of "Pass", "Fail"/,
+      );
+    });
+
+    /**
+     * An `allOf` must name every branch, which is the runtime rule `assertOutput`
+     * already enforces — an example naming a subset describes a result the membrane
+     * would reject. This caught a sloppy fixture in this very file.
+     */
+    it("rejects an allOf `expect` that names only some branches", () => {
+      const yaml = `
+  label: E
+  description: d
+  input: Person
+  output:
+    allOf:
+      - Pass
+      - Fail
+  examples:
+    - given:
+        Person: {}
+      expect:
+        Pass: {}
+  `;
+      expect(() => parseNodeFile(yaml, "partial-allof", resolveEdge)).toThrow(
+        /"expect" is missing "Fail" — an allOf names every branch/,
+      );
+    });
+
+    it("rejects an allOf `given` bag tagging an edge the node does not take", () => {
+      const yaml = `
+  label: E
+  description: d
+  input:
+    allOf:
+      - Person
+      - Todo
+  output: Person
+  examples:
+    - given:
+        Person: {}
+        Pass: {}
+      expect:
+        Person: {}
+  `;
+      expect(() => parseNodeFile(yaml, "mistagged-bag", resolveEdge)).toThrow(
+        /"given" tags "Pass", which this node does not declare/,
+      );
+    });
   });
 });
 

@@ -450,10 +450,24 @@ function resolveInputSpec(input: unknown, resolveEdge: EdgeResolver): InputSpec 
 function untagExamples(raw: unknown, input: InputSpec, output: OutputSpec): NodeDecl["examples"] {
   if (!Array.isArray(raw)) return raw as NodeDecl["examples"];
 
-  /** The sole value under a one-key tag. Used where the tag only says which edge, which the spec already knows. */
-  const sole = (value: unknown, what: string, index: number): unknown => {
+  /**
+   * The sole value under a one-key tag, **checking the tag is the edge the spec
+   * declares**.
+   *
+   * It used to take `keys[0]` without looking at it, so the tag only had to exist
+   * and be unique — any name worked. A node declaring `output: TodoList` with
+   * `expect: { AnalyzedList: … }` elaborated cleanly, untagged to the payload, and
+   * then validated it against `TodoList`; `weir check` passed on a node whose
+   * example named a different edge than its output. Reported by Jordan writing
+   * exactly that typo.
+   *
+   * The error message always claimed otherwise — *"must be tagged by edge name"* —
+   * which is the recurring shape here: prose asserting a check that was not
+   * performed.
+   */
+  const sole = (value: unknown, what: string, index: number, expected: string): unknown => {
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
-      throw new Error(`example ${index}: "${what}" must be tagged by edge name, e.g. "${what}: { EdgeName: … }".`);
+      throw new Error(`example ${index}: "${what}" must be tagged by edge name, e.g. "${what}: { ${expected}: … }".`);
     }
     const keys = Object.keys(value as Record<string, unknown>);
     if (keys.length !== 1) {
@@ -461,19 +475,50 @@ function untagExamples(raw: unknown, input: InputSpec, output: OutputSpec): Node
         `example ${index}: "${what}" must carry exactly one edge-name tag, got ${keys.length === 0 ? "none" : keys.map((k) => `"${k}"`).join(", ")}.`,
       );
     }
+    if (keys[0] !== expected) {
+      throw new Error(
+        `example ${index}: "${what}" is tagged "${keys[0]}", but this node declares ${what === "given" ? "input" : "output"} "${expected}".`,
+      );
+    }
     return (value as Record<string, unknown>)[keys[0]!];
+  };
+
+  /** The declared edge names a tagged bag may use, for `allOf` on either side. */
+  const assertBagTags = (value: unknown, what: string, index: number, declared: string[]): void => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`example ${index}: "${what}" must tag each branch by edge name.`);
+    }
+    const keys = Object.keys(value as Record<string, unknown>);
+    const unknownTags = keys.filter((k) => !declared.includes(k));
+    if (unknownTags.length > 0) {
+      throw new Error(
+        `example ${index}: "${what}" tags ${unknownTags.map((k) => `"${k}"`).join(", ")}, which this node does not declare — expected ${declared.map((d) => `"${d}"`).join(", ")}.`,
+      );
+    }
+    const missing = declared.filter((d) => !keys.includes(d));
+    if (missing.length > 0) {
+      throw new Error(
+        `example ${index}: "${what}" is missing ${missing.map((d) => `"${d}"`).join(", ")} — an allOf names every branch.`,
+      );
+    }
   };
 
   return raw.map((example, index) => {
     const { given, expect } = example as { given?: unknown; expect?: unknown };
 
     // `allOf` is the one input kind whose authoring form is already the runtime
-    // form — the bag is keyed by edge name either way.
-    const untaggedGiven = input.kind === "allOf" ? given : sole(given, "given", index);
+    // form — the bag is keyed by edge name either way. Its tags are still checked.
+    let untaggedGiven: unknown;
+    if (input.kind === "allOf") {
+      assertBagTags(given, "given", index, input.edges.map((e) => e.name));
+      untaggedGiven = given;
+    } else {
+      untaggedGiven = sole(given, "given", index, input.edge.name);
+    }
 
     let untaggedExpect: unknown;
     if (output.kind === "single" || output.kind === "many") {
-      untaggedExpect = sole(expect, "expect", index);
+      untaggedExpect = sole(expect, "expect", index, output.edge.name);
     } else if (output.kind === "oneOf") {
       if (expect === null || typeof expect !== "object" || Array.isArray(expect)) {
         throw new Error(`example ${index}: "expect" must name the branch that fired, e.g. "expect: { Branch: … }".`);
@@ -482,11 +527,15 @@ function untagExamples(raw: unknown, input: InputSpec, output: OutputSpec): Node
       if (keys.length !== 1) {
         throw new Error(`example ${index}: a oneOf output's "expect" names exactly one branch, got ${keys.length}.`);
       }
-      untaggedExpect = { edge: keys[0]!, payload: (expect as Record<string, unknown>)[keys[0]!] };
-    } else {
-      if (expect === null || typeof expect !== "object" || Array.isArray(expect)) {
-        throw new Error(`example ${index}: an allOf output's "expect" tags each branch by edge name.`);
+      const branch = keys[0]!;
+      if (!output.edges.some((e) => e.name === branch)) {
+        throw new Error(
+          `example ${index}: "expect" names branch "${branch}", which is not one of ${output.edges.map((e) => `"${e.name}"`).join(", ")}.`,
+        );
       }
+      untaggedExpect = { edge: branch, payload: (expect as Record<string, unknown>)[branch] };
+    } else {
+      assertBagTags(expect, "expect", index, output.edges.map((e) => e.name));
       untaggedExpect = Object.entries(expect as Record<string, unknown>).map(([edge, payload]) => ({ edge, payload }));
     }
 
