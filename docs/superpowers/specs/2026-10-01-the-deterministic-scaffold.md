@@ -618,3 +618,47 @@ which is the right instinct and is how it should have marked the first.
 Both observations are explained by the directory having been removed before
 regenerating, which resets the stubs and takes `notes.md` with it — and which the
 guard correctly does not fire on, because there is nothing left to overwrite.
+
+## The loop's best result so far: an agent that stopped
+
+On the clean pass, the agent implementing `revise` wrote everything it could decide,
+and then did not guess:
+
+```ts
+function nextId(p: reviseInput): string {
+  // TODO(jordan): decide what an id without a matching "-r<round>" suffix means.
+  throw new Error("revise: nextId not implemented");
+}
+```
+
+It addressed the TODO to a person by name, and `weir accept` rejected it cleanly on
+the stage that was actually at fault:
+
+```
+✗ revise was not accepted
+  example   given {"id":"m-1-r1","text":"The manuscript","round":1}
+            expected {"edge":"Revision","payload":{"id":"m-1-r2",…}}
+            actual   {…,"reason":"revise: nextId not implemented"}
+```
+
+This is the behaviour the scaffold's README asks for — *"say so rather than returning
+a value you made up"* — and the first time an agent has taken it on something other
+than an opaque field.
+
+**Its reasoning was right and its target was slightly off.** There is a total
+function, and it needs no decision about suffix-less ids:
+`p.id.replace(/-r\d+$/, "") + "-r" + (p.round + 1)`, which turns `"L"` at round 1
+into `"L-r2"`, satisfies the example, and is accepted. What the contract genuinely
+fails to say is subtler: on `"m-1-r9"` at round 1 that expression yields `"m-1-r2"`,
+rebuilding the suffix from `round` rather than carrying it — a commitment that
+**`round` is authoritative and the suffix derived**, which nothing declares.
+
+And the convention already exists in `runtime.test.ts:2845`, in the fixture that
+drives this example end to end. Third time in one day that the answer was in the
+repository and absent from the sealed contract, after the property-path grammar and
+the `{edge, payload}` shape of a tagged result.
+
+Filed as [`index:` names one field](../../open-questions/index-names-one-field.md),
+because the duplication is **forced**: `Revision` declares `index: id`, a revision is
+identified by (manuscript, round), and `index:` admits one field — so the round is
+packed into the identity string and then exists twice, once typed and once not.
