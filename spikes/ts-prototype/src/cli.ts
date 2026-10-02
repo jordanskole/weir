@@ -506,6 +506,14 @@ async function sys(dir: string, flags: Map<string, string>, json: boolean): Prom
     lines.push("", `  unwired`);
     for (const n of report.unwiredNodes) lines.push(`    ${n} — declared, never wired into any topology`);
   }
+  if (report.unpinned.length > 0) {
+    lines.push("", `  unpinned by any example`);
+    const byNode = new Map<string, string[]>();
+    for (const u of report.unpinned) byNode.set(u.node, [...(byNode.get(u.node) ?? []), u.description]);
+    for (const [node, cases] of byNode) {
+      lines.push(`    ${node.padEnd(20)} ${cases.join(", ")}`);
+    }
+  }
   if (report.uncheckedIndexes.length > 0) {
     lines.push("", `  index, unchecked`);
     for (const d of report.uncheckedIndexes) {

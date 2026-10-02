@@ -20,3 +20,17 @@ examples:
         title: "Buy milk and eggs"
         description: "Get 2% milk from the store"
         is_complete: false
+  - given:
+      Todo:
+        id: "todo-1"
+        title: "Buy milk and eggs"
+        description: "Get 2% milk from the store"
+        is_complete: false
+      TodoInput:
+        title: null
+        description: null
+    expect:
+      Todo:
+        title: "Buy milk and eggs"
+        description: "Get 2% milk from the store"
+        is_complete: false

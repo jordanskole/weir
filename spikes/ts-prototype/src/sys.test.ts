@@ -325,3 +325,61 @@ describe("sys — an index that is never a collection key", () => {
     }
   });
 });
+
+/**
+ * `unpinnedCases` — behaviour the declared examples do not determine.
+ *
+ * Asked for after an agent got stuck on `todo-list`'s `EditTodo`, and handled it exactly
+ * right: both readings of a `null` in `TodoInput` (patch: "leave this field alone";
+ * replace: "clear it") satisfy its one example, which has no nulls, so it left a `throw`
+ * and wrote the fork down rather than guessing. The generator produces plenty of nulls, so
+ * whichever it picked would have become the node's real behaviour on a coin flip.
+ */
+describe("sys — cases no example pins", () => {
+  /**
+   * BREAK-PROOF: dropping the `sawNull` check reddens this with every nullable field in
+   * the corpus; dropping the `oneOf` branch loop reddens the branch case below.
+   */
+  it("reports a nullable input field no example supplies as null", async () => {
+    const report = analyze(await elaborate(join(EXAMPLES, "todo-list")));
+    const editTodo = report.unpinned.filter((u) => u.node === "EditTodo").map((u) => u.description);
+    // Jordan added a second example with nulls in `TodoInput`, which pinned those two and
+    // left the ones about the *existing* todo — a different question.
+    expect(editTodo).toEqual(["Todo.title = null", "Todo.description = null"]);
+  });
+
+  /**
+   * The guard that makes the above mean something: a field an example *does* exercise
+   * must not be reported. Without it, a function returning every nullable field would
+   * pass.
+   */
+  it("does not report a nullable field an example supplies as null", async () => {
+    const report = analyze(await elaborate(join(EXAMPLES, "todo-list")));
+    const all = report.unpinned.map((u) => `${u.node}:${u.description}`);
+    expect(all).not.toContain("EditTodo:TodoInput.title = null");
+    expect(all).not.toContain("EditTodo:TodoInput.description = null");
+  });
+
+  it("reports a oneOf output branch no example produces", async () => {
+    // `afterEach` removes whatever `dir` holds, so assign it rather than pushing.
+    dir = await mkdtemp(join(tmpdir(), "weir-unpinned-"));
+    const root = dir;
+    for (const [rel, body] of Object.entries({
+      "edges/In.edge": `label: In\ndescription: d\nfields:\n  v:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "edges/Yes.edge": `label: Yes\ndescription: d\nfields:\n  v:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "edges/No.edge": `label: No\ndescription: d\nfields:\n  v:\n    type: utf8\n    label: V\n    description: d\n    nullable: false\n`,
+      "nodes/decide.node": `label: Decide\ndescription: d\ninput: In\noutput:\n  oneOf:\n    - Yes\n    - No\nexamples:\n  - given:\n      In:\n        v: "a"\n    expect:\n      Yes:\n        v: "a"\n`,
+    })) {
+      await mkdir(join(root, rel, ".."), { recursive: true });
+      await writeFile(join(root, rel), body, "utf8");
+    }
+    const report = analyze(await elaborate(root));
+    expect(report.unpinned).toEqual([{ node: "decide", description: "output branch No" }]);
+  });
+
+  /** A node with no examples at all is skipped — that is a different, louder problem. */
+  it("says nothing about a node with no examples", async () => {
+    const report = analyze(await elaborate(join(EXAMPLES, "recipe")));
+    expect(report.unpinned).toEqual([]);
+  });
+});

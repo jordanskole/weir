@@ -43,6 +43,16 @@ export interface Orphan {
   producedBy: string[];
 }
 
+/**
+ * A case a node's declared examples leave unpinned — behaviour the contract does not
+ * determine, so an implementer must either guess or ask.
+ */
+export interface UnpinnedCase {
+  node: string;
+  /** `"TodoInput.title = null"`, or `"output branch Accepted"`. */
+  description: string;
+}
+
 /** An edge whose declared `index` is never used as a collection key. */
 export interface UncheckedIndex {
   edge: string;
@@ -92,6 +102,8 @@ export interface SysReport {
    * declaring an index you do not key on is untidy and not wrong.
    */
   uncheckedIndexes: UncheckedIndex[];
+  /** Cases the declared examples leave unpinned — see `unpinnedCases`. */
+  unpinned: UnpinnedCase[];
 }
 
 /**
@@ -393,6 +405,66 @@ export function uncheckedIndexes(program: AnyProgram): UncheckedIndex[] {
   return found.sort((a, b) => a.edge.localeCompare(b.edge));
 }
 
+/**
+ * Cases a node's examples do not reach, so nothing pins what it should do there.
+ *
+ * Asked for by Jordan after an agent got stuck on `EditTodo` — correctly, and in the
+ * way worth encouraging. Both readings of a `null` in `TodoInput` (patch: "leave this
+ * field alone"; replace: "clear it") satisfy its single example, which has no nulls at
+ * all. The agent left a `throw` and wrote down the fork rather than choosing, and its
+ * note names the real reason neither is derivable: supporting *both* needs a third
+ * state, which `nullable` cannot express.
+ *
+ * So this reports the shape of that problem mechanically, rather than waiting for an
+ * implementer to notice it. Two kinds, both decidable:
+ *
+ * - **a nullable input field no example ever supplies as `null`.** The node's behaviour
+ *   on null is unstated, and the generator produces plenty of them.
+ * - **a `oneOf` output branch no example produces.** Nothing says when that branch is
+ *   the right answer.
+ *
+ * Deliberately not an error, and not in `weir check`. An unpinned case is a gap in the
+ * examples, which is often fine — `StartList` has two and its implementer decided
+ * sensibly — and reporting it is worth more than refusing it. It is 16 cases across the
+ * seven examples, concentrated in the nullable-heavy one, so it is informative rather
+ * than noise.
+ */
+export function unpinnedCases(program: AnyProgram): UnpinnedCase[] {
+  const found: UnpinnedCase[] = [];
+
+  for (const [name, node] of Object.entries(program.nodes)) {
+    const examples = node.examples ?? [];
+    if (examples.length === 0) continue;
+
+    const input = node.input;
+    const edges = input.kind === "allOf" ? input.edges : [input.edge];
+    for (const edge of edges) {
+      for (const [key, field] of Object.entries(edge.fields)) {
+        if (field === null || typeof field !== "object") continue;
+        if (!("nullable" in field) || (field as { nullable?: boolean }).nullable !== true) continue;
+        const sawNull = examples.some((ex) => {
+          const payload = (input.kind === "allOf"
+            ? (ex.given as Record<string, unknown> | undefined)?.[edge.name]
+            : ex.given) as Record<string, unknown> | undefined;
+          return payload !== undefined && payload !== null && payload[key] === null;
+        });
+        if (!sawNull) found.push({ node: name, description: `${edge.name}.${key} = null` });
+      }
+    }
+
+    if (node.output.kind === "oneOf") {
+      for (const branch of node.output.edges) {
+        const produced = examples.some(
+          (ex) => (ex.expect as { edge?: unknown } | undefined)?.edge === branch.name,
+        );
+        if (!produced) found.push({ node: name, description: `output branch ${branch.name}` });
+      }
+    }
+  }
+
+  return found;
+}
+
 export function analyze(program: AnyProgram): SysReport {
   const edges = edgeUses(program);
   return {
@@ -407,5 +479,6 @@ export function analyze(program: AnyProgram): SysReport {
       (e) => e.edge.startsWith("Failed_") && e.producedBy.length === 0 && e.consumedBy.length === 0,
     ).length,
     uncheckedIndexes: uncheckedIndexes(program),
+    unpinned: unpinnedCases(program),
   };
 }

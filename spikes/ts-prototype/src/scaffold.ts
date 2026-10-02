@@ -29,6 +29,7 @@
 
 import { emitEdgeModules, emitNodeSchemaModule, emitZodModule } from "./emit-zod.js";
 import { generateInputCases } from "./generate.js";
+import { unpinnedCases } from "./sys.js";
 import type { AnyEdgeDef, FieldDef, NodeDecl, PropertyDecl, PropertyExpr } from "./types.js";
 
 /** A JS literal for emitted source. */
@@ -589,6 +590,38 @@ function generatedInputReport(node: NodeDecl): string {
       `That verdict is about the declaration, not about your code. Declining input you`,
       `cannot parse is correct. **Do not invent a plausible value to get past it** — say so`,
       `instead. See docs/open-questions/the-gate-rewards-fabrication.md.`,
+      ``,
+    );
+  }
+
+  /**
+   * Cases the declared examples do not pin — so the implementer asks rather than
+   * chooses.
+   *
+   * Added after an agent got stuck on `EditTodo` and handled it exactly right: both
+   * readings of a `null` in `TodoInput` (patch: "leave this field alone"; replace:
+   * "clear it") satisfy its one example, which contains no nulls, so it left a `throw`
+   * and wrote the fork down instead of guessing. The generator produces plenty of
+   * nulls, so whichever it had picked would have become the node's real behaviour on
+   * the strength of a coin flip.
+   *
+   * Saying so up front turns "I got stuck" into "please pin these", which is the
+   * cheaper conversation.
+   */
+  const unpinned = unpinnedCases({ nodes: { [node.name]: node } } as never);
+  if (unpinned.length > 0) {
+    lines.push(
+      `## Cases no example pins`,
+      ``,
+      `The declared examples never reach ${unpinned.length === 1 ? "this case" : "these cases"}, so nothing says what`,
+      `this node should do there — and the generator will reach ${unpinned.length === 1 ? "it" : "them"}:`,
+      ``,
+      ...unpinned.map((u) => `- \`${u.description}\``),
+      ``,
+      `**Ask for an example rather than choosing.** Whichever behaviour you pick becomes`,
+      `the node's real one, and the gate cannot tell a considered decision from a guess —`,
+      `it only sees that the generated cases passed. If the choice is genuinely yours to`,
+      `make, say so and say why, the way the stub's header asks.`,
       ``,
     );
   }
