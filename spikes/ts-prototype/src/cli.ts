@@ -20,14 +20,14 @@
  */
 
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { elaborate } from "./elaborate.js";
 import { serializeNetlist } from "./netlist.js";
 import { exportContract } from "./contract.js";
 import { emitZodModule } from "./emit-zod.js";
-import { scaffoldFiles, scaffoldProgramFiles } from "./scaffold.js";
+import { scaffoldFiles, scaffoldNodeIntoProgram, scaffoldProgramFiles } from "./scaffold.js";
 import { acceptImplementation } from "./accept.js";
 import { runExamples } from "./test-run.js";
 import { analyze, mediation } from "./sys.js";
@@ -60,7 +60,9 @@ usage
                                 declared examples and properties as runnable tests,
                                 and what the gate will generate
   weir scaffold <node> [dir] --out <dir> [--force]
-                                the same for one node, self-contained
+                                one node. Into a fresh directory, a self-contained
+                                bundle; into a directory that is already a program
+                                scaffold, a refresh of its nodes/<node>/ in place
   weir run [dir] --impl <dir> --payload <file.json> [--effects <file.ts>]
                  [--log <file>] [--run <id>]
                                 elaborate, resolve implementations, and execute
@@ -996,9 +998,53 @@ async function scaffold(nodeName: string | undefined, dir: string, flags: Map<st
   }
 
   const root = resolve(out);
+  const force = flags.has("force");
+
+  /**
+   * If `--out` is already a program scaffold, refresh that node's directory inside it
+   * rather than writing a standalone bundle flat at the root.
+   *
+   * `weir scaffold <node> --out ./scaffold` and `weir scaffold --out ./scaffold` named
+   * the same directory and wrote incompatible layouts into it — the single-node form
+   * dropping nine files beside `nodes/` and `schemas/`, including a second
+   * `package.json`. Detected by `schemas/`, which only the program form creates.
+   */
+  if (existsSync(join(root, "schemas"))) {
+    const fnPath = join(root, "nodes", nodeName, `${nodeName}.ts`);
+    if (!force && existsSync(fnPath)) {
+      return {
+        code: 1,
+        out:
+          `✗ ${fnPath} already exists.\n\n` +
+          `  That is the one file you edit, so this refuses rather than overwrite it.\n` +
+          `  Re-run with --force to replace it.`,
+      };
+    }
+    const have = existsSync(join(root, "schemas")) ? await readdir(join(root, "schemas")) : [];
+    const slice = scaffoldNodeIntoProgram(node, have);
+    for (const [name, contents] of Object.entries(slice)) {
+      await mkdir(dirname(join(root, name)), { recursive: true });
+      await writeFile(join(root, name), contents, "utf8");
+    }
+    const added = Object.keys(slice).filter((f) => f.startsWith("schemas/"));
+    return {
+      code: 0,
+      out: [
+        `refreshed ${nodeName} inside the program scaffold at ${root}`,
+        "",
+        ...Object.keys(slice)
+          .filter((f) => !f.startsWith("schemas/"))
+          .sort()
+          .map((f) => `  · ${f}`),
+        ...(added.length > 0 ? ["", ...added.map((f) => `  + ${f} (new shared schema)`)] : []),
+        "",
+        `  edit nodes/${nodeName}/${nodeName}.ts`,
+      ].join("\n"),
+    };
+  }
+
   const files = scaffoldFiles(node);
   const fnFile = `${nodeName}.ts`;
-  const force = flags.has("force");
 
   if (!force && existsSync(join(root, fnFile))) {
     return {

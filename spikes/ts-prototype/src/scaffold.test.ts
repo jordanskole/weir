@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { elaborate } from "./elaborate.js";
-import { scaffoldFiles, scaffoldProgramFiles } from "./scaffold.js";
+import { scaffoldFiles, scaffoldNodeIntoProgram, scaffoldProgramFiles } from "./scaffold.js";
 import type { NodeDecl } from "./types.js";
 
 const REPO = join(import.meta.dirname, "..", "..", "..");
@@ -597,5 +597,85 @@ describe("scaffold — it ignores itself", () => {
     expect(text).toContain("weir scaffold");
     expect(text).toContain("from the stub");
     expect(text).toContain("Delete this file");
+  });
+});
+
+/**
+ * `weir scaffold <node> --out <dir>` has two behaviours, chosen by what `<dir>` already
+ * is, because one layout is right for a fresh directory and the other for a directory that
+ * is already a program scaffold.
+ *
+ * Jordan hit the old behaviour regenerating a single node: both commands named
+ * `./scaffold`, and the single-node form wrote nine files flat at the root — beside
+ * `nodes/` and `schemas/`, with a second `package.json` and a `schema.ts` inlining every
+ * edge next to the shared ones.
+ */
+describe("scaffoldNodeIntoProgram — one node's slice of a program scaffold", () => {
+  async function node(name: string): Promise<NodeDecl> {
+    return nodeOf(SLICE, name);
+  }
+
+  /** BREAK-PROOF: pointing `emitNodeSchemaModule` at "." instead of "../../schemas" reddens this. */
+  it("writes nodes/<node>/ with a schema importing the shared edges", async () => {
+    const files = scaffoldNodeIntoProgram(await node("parcelCentroid"), [
+      "NormalizedParcel.ts",
+      "ParcelCentroid.ts",
+    ]);
+    expect(Object.keys(files).sort()).toEqual([
+      "nodes/parcelCentroid/check.ts",
+      "nodes/parcelCentroid/generated-inputs.md",
+      "nodes/parcelCentroid/parcelCentroid.test.ts",
+      "nodes/parcelCentroid/parcelCentroid.ts",
+      "nodes/parcelCentroid/schema.ts",
+    ]);
+    expect(files["nodes/parcelCentroid/schema.ts"]).toContain(
+      'import { NormalizedParcel } from "../../schemas/NormalizedParcel.js";',
+    );
+  });
+
+  /**
+   * No workspace files. The program already has its own `package.json`, `tsconfig.json`,
+   * `vitest.config.ts`, `README.md` and `.gitignore`, and writing a second set beside
+   * them is the bug this fixes.
+   */
+  it("emits no workspace files, because the program already has them", async () => {
+    const files = scaffoldNodeIntoProgram(await node("parcelCentroid"), [
+      "NormalizedParcel.ts",
+      "ParcelCentroid.ts",
+    ]);
+    for (const f of ["package.json", "tsconfig.json", "vitest.config.ts", "README.md", ".gitignore"]) {
+      expect(Object.keys(files)).not.toContain(f);
+      expect(Object.keys(files)).not.toContain(`nodes/parcelCentroid/${f}`);
+    }
+  });
+
+  /**
+   * A node that introduces a new edge gets that edge's shared schema written, so adding
+   * one node does not require re-scaffolding the whole program — but an edge already
+   * there is left alone.
+   *
+   * BREAK-PROOF: dropping the `haveSchemas.includes` guard reddens the second assertion.
+   */
+  it("adds only the shared schemas the program is missing", async () => {
+    const withNone = scaffoldNodeIntoProgram(await node("parcelCentroid"), []);
+    expect(Object.keys(withNone).filter((f) => f.startsWith("schemas/")).sort()).toEqual([
+      "schemas/NormalizedParcel.ts",
+      "schemas/ParcelCentroid.ts",
+    ]);
+
+    const withBoth = scaffoldNodeIntoProgram(await node("parcelCentroid"), [
+      "NormalizedParcel.ts",
+      "ParcelCentroid.ts",
+    ]);
+    expect(Object.keys(withBoth).filter((f) => f.startsWith("schemas/"))).toEqual([]);
+  });
+
+  /** The standalone form is unchanged, and is still right for a fresh directory. */
+  it("leaves the standalone form flat and self-contained", async () => {
+    const files = scaffoldFiles(await node("parcelCentroid"));
+    expect(Object.keys(files)).toContain("package.json");
+    expect(Object.keys(files)).toContain("schema.ts");
+    expect(files["schema.ts"]).toContain("z.object");
+    expect(files["schema.ts"]).not.toContain("../../schemas");
   });
 });

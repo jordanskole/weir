@@ -766,6 +766,45 @@ as \`vacuous\`. Say so rather than returning a value you made up.
 }
 
 /**
+ * One node's slice of a **program** scaffold — `nodes/<node>/…` plus any shared edge
+ * schemas it needs, in the program layout.
+ *
+ * `weir scaffold <node> --out <dir>` used to write a standalone bundle flat at `<dir>`,
+ * which is right when `<dir>` is a fresh directory for one isolated node and wrong when
+ * `<dir>` is already a program scaffold: it dropped nine files beside `nodes/` and
+ * `schemas/`, including a second `package.json` and a `schema.ts` inlining every edge
+ * next to the shared ones. Jordan hit exactly that regenerating a single node.
+ *
+ * So the single-node form now has two behaviours chosen by what `--out` already is, and
+ * the CLI says which it took. This is the in-a-program one: the node's `schema.ts`
+ * imports `../../schemas/`, and no workspace files are emitted because the program's
+ * own already exist.
+ */
+export function scaffoldNodeIntoProgram(node: NodeDecl, haveSchemas: readonly string[]): Record<string, string> {
+  const files: Record<string, string> = {};
+  const dir = `nodes/${node.name}`;
+  const single = scaffoldFiles(node);
+
+  files[`${dir}/schema.ts`] = emitNodeSchemaModule(node, "../../schemas");
+  files[`${dir}/${node.name}.ts`] = single[`${node.name}.ts`]!;
+  files[`${dir}/check.ts`] = single["check.ts"]!;
+  files[`${dir}/${node.name}.test.ts`] = single[`${node.name}.test.ts`]!;
+  files[`${dir}/generated-inputs.md`] = generatedInputReport(node);
+
+  // Any edge module this node needs that the program does not already have — so adding a
+  // node that introduces a new edge works without re-scaffolding everything.
+  const edges: AnyEdgeDef[] = [...inputEdgesOf(node)];
+  const output = node.output;
+  if (output.kind === "oneOf" || output.kind === "allOf") edges.push(...output.edges);
+  else edges.push(output.edge);
+
+  for (const [name, source] of Object.entries(emitEdgeModules(edges))) {
+    if (!haveSchemas.includes(name)) files[`schemas/${name}`] = source;
+  }
+  return files;
+}
+
+/**
  * The whole program as one workspace: shared `schemas/`, one directory per node.
  *
  * Replaces scaffolding node-by-node for the multi-node case, because that emitted
